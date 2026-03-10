@@ -34,7 +34,7 @@ RUN touch src/main.rs && \
     cargo build --release --locked
 
 # Verify the binary was built
-RUN ls -lh /build/target/release/wap-mirrormaker-rust
+RUN ls -lh /build/target/release/streamforge
 
 # Stage 2: Runtime - Minimal Chainguard runtime image
 FROM cgr.dev/chainguard/glibc-dynamic:latest
@@ -59,25 +59,25 @@ RUN mkdir -p /app/config && \
 
 # Copy the compiled binary from builder stage
 COPY --from=builder --chown=nonroot:nonroot \
-    /build/target/release/wap-mirrormaker-rust \
-    /app/wap-mirrormaker-rust
+    /build/target/release/streamforge \
+    /app/streamforge
 
 # Copy example configurations (optional)
-COPY --chown=nonroot:nonroot config*.example.json /app/config/
+COPY --chown=nonroot:nonroot examples/*.yaml /app/config/
 
 # Switch to non-root user
 USER nonroot
 WORKDIR /app
 
 # Set environment variables
-ENV CONFIG_FILE=/app/config/config.json
+ENV CONFIG_FILE=/app/config/config.yaml
 ENV RUST_LOG=info
 
 # Expose no ports (Kafka client only)
 
 # Health check (optional - checks if process is running)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep -f wap-mirrormaker-rust || exit 1
+    CMD pgrep -f streamforge || exit 1
 
 # Run the application
-ENTRYPOINT ["/app/wap-mirrormaker-rust"]
+ENTRYPOINT ["/app/streamforge"]

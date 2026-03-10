@@ -1,6 +1,11 @@
-# WAP MirrorMaker - Rust Implementation
+# Streamforge Documentation
 
-High-performance Kafka message mirroring service with advanced filtering and transformation capabilities.
+**High-performance Kafka streaming toolkit built in Rust**
+
+[![Crates.io](https://img.shields.io/crates/v/streamforge.svg)](https://crates.io/crates/streamforge)
+[![Documentation](https://docs.rs/streamforge/badge.svg)](https://docs.rs/streamforge)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../LICENSE)
+[![CI](https://github.com/rahulbsw/streamforge/workflows/CI/badge.svg)](https://github.com/rahulbsw/streamforge/actions)
 
 ## Quick Links
 

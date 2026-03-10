@@ -41,28 +41,28 @@ RUN touch src/main.rs && \
     cargo build --release --target x86_64-unknown-linux-musl --locked
 
 # Verify it's static
-RUN file /build/target/x86_64-unknown-linux-musl/release/wap-mirrormaker-rust && \
-    ldd /build/target/x86_64-unknown-linux-musl/release/wap-mirrormaker-rust 2>&1 | grep "not a dynamic" || true
+RUN file /build/target/x86_64-unknown-linux-musl/release/streamforge && \
+    ldd /build/target/x86_64-unknown-linux-musl/release/streamforge 2>&1 | grep "not a dynamic" || true
 
 # Stage 2: Ultra-minimal static runtime
 FROM cgr.dev/chainguard/static:latest
 
 # Copy only the static binary
 COPY --from=builder \
-    /build/target/x86_64-unknown-linux-musl/release/wap-mirrormaker-rust \
-    /app/wap-mirrormaker-rust
+    /build/target/x86_64-unknown-linux-musl/release/streamforge \
+    /app/streamforge
 
 # Copy example configs
-COPY config*.example.json /app/config/
+COPY examples/*.yaml /app/config/
 
 # Set working directory
 WORKDIR /app
 
 # Environment variables
-ENV CONFIG_FILE=/app/config/config.json
+ENV CONFIG_FILE=/app/config/config.yaml
 ENV RUST_LOG=info
 
 # Run as non-root (static image already uses nonroot)
 USER nonroot
 
-ENTRYPOINT ["/app/wap-mirrormaker-rust"]
+ENTRYPOINT ["/app/streamforge"]
