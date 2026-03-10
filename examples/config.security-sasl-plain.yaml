@@ -1,0 +1,31 @@
+# SASL/PLAIN Authentication Example
+# Use this for username/password authentication over SSL
+
+appid: streamforge-sasl-plain
+bootstrap: kafka.example.com:9093
+target_broker: kafka-target.example.com:9093
+input: source-topic
+output: destination-topic
+offset: latest
+threads: 4
+
+# Security Configuration - SASL/PLAIN over SSL
+security:
+  protocol: SASL_SSL
+  ssl:
+    # CA certificate for SSL connection
+    ca_location: /path/to/ca-cert.pem
+  sasl:
+    mechanism: PLAIN
+    username: your-username
+    password: your-password
+
+# Note: For production, use environment variables or secret management:
+# security:
+#   protocol: SASL_SSL
+#   ssl:
+#     ca_location: /path/to/ca-cert.pem
+#   sasl:
+#     mechanism: PLAIN
+#     username: ${KAFKA_USERNAME}
+#     password: ${KAFKA_PASSWORD}

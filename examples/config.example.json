@@ -1,0 +1,21 @@
+{
+  "appid": "streamforge-rust",
+  "bootstrap": "localhost:9092",
+  "input": "source-topic",
+  "output": "destination-topic",
+  "target_broker": "localhost:9092",
+  "offset": "latest",
+  "threads": 4,
+  "compression": {
+    "compression_type": "raw",
+    "compression_algo": "gzip"
+  },
+  "consumer_properties": {
+    "fetch.min.bytes": "1048576",
+    "fetch.wait.max.ms": "500"
+  },
+  "producer_properties": {
+    "batch.size": "65536",
+    "linger.ms": "10"
+  }
+}

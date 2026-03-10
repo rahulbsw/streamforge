@@ -1,0 +1,68 @@
+# Multi-stage Dockerfile using Chainguard - STATIC BUILD
+# This version creates a fully static binary for maximum security and minimal size
+# Stage 1: Builder - Compile static Rust binary
+FROM cgr.dev/chainguard/rust:latest AS builder
+
+# Install build dependencies for static linking
+USER root
+RUN apk add --no-cache \
+    cmake \
+    musl-dev \
+    openssl-dev-static \
+    cyrus-sasl-static \
+    zstd-static \
+    lz4-static \
+    build-base \
+    pkgconfig
+
+# Add musl target for static linking
+USER nonroot
+WORKDIR /build
+
+# Add the musl target
+RUN rustup target add x86_64-unknown-linux-musl
+
+# Copy dependency manifests
+COPY --chown=nonroot Cargo.toml Cargo.lock ./
+
+# Create dummy for dependency caching
+RUN mkdir -p src && \
+    echo "fn main() {}" > src/main.rs && \
+    cargo build --release --target x86_64-unknown-linux-musl && \
+    rm -rf src
+
+# Copy source
+COPY --chown=nonroot src ./src
+
+# Build static binary
+# Force static linking with RUSTFLAGS
+ENV RUSTFLAGS='-C target-feature=+crt-static'
+RUN touch src/main.rs && \
+    cargo build --release --target x86_64-unknown-linux-musl --locked
+
+# Verify it's static
+RUN file /build/target/x86_64-unknown-linux-musl/release/wap-mirrormaker-rust && \
+    ldd /build/target/x86_64-unknown-linux-musl/release/wap-mirrormaker-rust 2>&1 | grep "not a dynamic" || true
+
+# Stage 2: Ultra-minimal static runtime
+FROM cgr.dev/chainguard/static:latest
+
+# Copy only the static binary
+COPY --from=builder \
+    /build/target/x86_64-unknown-linux-musl/release/wap-mirrormaker-rust \
+    /app/wap-mirrormaker-rust
+
+# Copy example configs
+COPY config*.example.json /app/config/
+
+# Set working directory
+WORKDIR /app
+
+# Environment variables
+ENV CONFIG_FILE=/app/config/config.json
+ENV RUST_LOG=info
+
+# Run as non-root (static image already uses nonroot)
+USER nonroot
+
+ENTRYPOINT ["/app/wap-mirrormaker-rust"]

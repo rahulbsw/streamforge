@@ -1,0 +1,82 @@
+# WAP MirrorMaker Configuration - Multi-Destination Routing
+# YAML format makes complex filters and transforms much more readable!
+
+appid: streamforge-multidest
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: events
+offset: latest
+threads: 4
+
+compression:
+  compression_type: raw
+  compression_algo: snappy
+
+routing:
+  routing_type: content
+  path: /eventType
+
+  destinations:
+    # Validated email addresses only
+    - output: validated-users
+      description: Users with valid email format
+      filter: "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$"
+      transform: "CONSTRUCT:id=/user/id:email=/user/email:name=/user/name"
+      partition: /user/id
+
+    # Corporate email addresses
+    - output: corporate-users
+      description: Users from corporate domains
+      filter: "AND:REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$:REGEX:/user/email,@(company|enterprise)\\.com$"
+      transform: /user
+      partition: /id
+
+    # High-value orders
+    - output: premium-orders
+      description: Orders over $500 that are confirmed
+      filter: "AND:/order/total,>,500:/order/status,==,confirmed"
+      transform: "CONSTRUCT:orderId=/order/id:total=/order/total:customer=/customer/email"
+      partition: /order/id
+
+    # Bulk discount calculation
+    - output: discounted-prices
+      description: Apply 10% discount for bulk orders
+      filter: "AND:/order/items,>=,10:/order/total,>,100"
+      transform: "ARITHMETIC:MUL,/order/total,0.9"
+      partition: /order/id
+
+    # Active user sessions
+    - output: active-sessions
+      description: Extract IDs from active user sessions
+      filter: "ARRAY_ALL:/sessions,/active,==,true"
+      transform: "ARRAY_MAP:/sessions,/id"
+      partition: /user/id
+
+    # Problem sessions needing attention
+    - output: session-errors
+      description: Sessions with errors
+      filter: "ARRAY_ANY:/sessions,/error,==,true"
+      transform: "CONSTRUCT:userId=/user/id:errorSessions=/sessions"
+      partition: /user/id
+
+    # Production traffic only (exclude test users)
+    - output: production-users
+      description: Real users, no test accounts
+      filter: "NOT:REGEX:/user/email,@(test|temp|fake|disposable)\\."
+      transform: /user
+      partition: /user/id
+
+    # Archive everything for audit
+    - output: audit-log
+      description: Complete audit trail
+      transform: /
+
+consumer_properties:
+  fetch.min.bytes: "1048576"
+  fetch.wait.max.ms: "500"
+  max.poll.records: "500"
+
+producer_properties:
+  batch.size: "65536"
+  linger.ms: "10"
+  compression.type: "snappy"

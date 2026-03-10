@@ -1,0 +1,35 @@
+{
+  "appid": "streamforge-advanced",
+  "bootstrap": "localhost:9092",
+  "input": "events",
+  "target_broker": "localhost:9092",
+  "offset": "latest",
+  "threads": 4,
+  "routing": {
+    "routing_type": "filter",
+    "destinations": [
+      {
+        "output": "high-value-active-events",
+        "description": "Events from high-value sites that are active (AND logic via config helper)",
+        "filter": "AND:/message/siteId,>,10000:/message/status,==,active",
+        "transform": "CONSTRUCT:id=/message/confId:site=/message/siteId:timestamp=/message/ts",
+        "partition": "/confId"
+      },
+      {
+        "output": "priority-events",
+        "description": "Either high siteId OR high priority (OR logic)",
+        "filter": "OR:/message/siteId,>,10000:/message/priority,==,high"
+      },
+      {
+        "output": "non-test-events",
+        "description": "All events except test events (NOT logic)",
+        "filter": "NOT:/message/test,==,true"
+      },
+      {
+        "output": "complex-condition",
+        "description": "High value AND (active OR priority) - nested logic",
+        "filter": "AND:/message/siteId,>,10000:OR:/message/status,==,active:/message/priority,==,high"
+      }
+    ]
+  }
+}

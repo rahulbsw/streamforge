@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # Kafka MirrorMaker (Dynamic linking version)
+  mirrormaker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wap-mirrormaker-rust:latest
+    container_name: wap-mirrormaker
+    environment:
+      - CONFIG_FILE=/app/config/config.json
+      - RUST_LOG=info
+    volumes:
+      # Mount your actual config file here
+      # See examples/ folder for sample configurations
+      # Example: - ./examples/config.example.yaml:/app/config/config.yaml:ro
+      - ./config.json:/app/config/config.json:ro
+      # Optional: Mount logs directory
+      - ./logs:/app/logs
+    restart: unless-stopped
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '1'
+          memory: 256M
+    # Network mode (use host for local Kafka or bridge for containerized)
+    network_mode: bridge
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "wap-mirrormaker-rust"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Alternative: Static version (smaller, more secure)
+  mirrormaker-static:
+    build:
+      context: .
+      dockerfile: Dockerfile.static
+    image: wap-mirrormaker-rust:static
+    container_name: wap-mirrormaker-static
+    environment:
+      - CONFIG_FILE=/app/config/config.json
+      - RUST_LOG=info
+    volumes:
+      # See examples/ folder for sample configurations
+      - ./config.json:/app/config/config.json:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 256M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    network_mode: bridge
+    profiles:
+      - static
+
+  # Optional: Local Kafka for testing
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    profiles:
+      - kafka
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    profiles:
+      - kafka

@@ -1,0 +1,41 @@
+# Kerberos/GSSAPI Authentication Example
+# Use this for Kerberos-based authentication
+# Commonly used in enterprise Hadoop/Kafka clusters
+
+appid: streamforge-kerberos
+bootstrap: kafka.example.com:9093
+target_broker: kafka-target.example.com:9093
+input: source-topic
+output: destination-topic
+offset: latest
+threads: 4
+
+# Security Configuration - SASL/GSSAPI (Kerberos) over SSL
+security:
+  protocol: SASL_SSL
+  ssl:
+    # CA certificate for SSL connection
+    ca_location: /path/to/ca-cert.pem
+  sasl:
+    mechanism: GSSAPI
+    # Kerberos service name (default: kafka)
+    kerberos_service_name: kafka
+    # Kerberos principal
+    kerberos_principal: client@EXAMPLE.COM
+    # Path to keytab file
+    kerberos_keytab: /path/to/client.keytab
+
+# Prerequisites for Kerberos:
+# 1. Install krb5 libraries: apt-get install libkrb5-dev (Ubuntu) or yum install krb5-devel (RHEL)
+# 2. Configure /etc/krb5.conf with your realm settings
+# 3. Obtain a valid keytab file from your Kerberos admin
+# 4. Test kinit with: kinit -kt /path/to/client.keytab client@EXAMPLE.COM
+
+# Without keytab (using ticket cache):
+# security:
+#   protocol: SASL_SSL
+#   ssl:
+#     ca_location: /path/to/ca-cert.pem
+#   sasl:
+#     mechanism: GSSAPI
+#     kerberos_service_name: kafka

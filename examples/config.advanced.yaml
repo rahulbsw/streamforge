@@ -1,0 +1,183 @@
+# WAP MirrorMaker - Advanced Configuration Examples
+# YAML format for maximum readability of complex filters and transforms
+
+appid: streamforge-advanced
+bootstrap: source-kafka:9092
+target_broker: target-kafka:9092
+input: events
+offset: latest
+threads: 4
+
+compression:
+  compression_type: raw
+  compression_algo: gzip
+
+routing:
+  routing_type: content
+  path: /eventType
+
+  destinations:
+    # ============================================================
+    # EMAIL VALIDATION AND ROUTING
+    # ============================================================
+
+    - output: validated-users
+      description: Users with valid email format
+      filter: "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$"
+      transform: "CONSTRUCT:email=/user/email:name=/user/name:id=/user/id"
+      partition: /user/id
+
+    - output: corporate-users
+      description: Corporate email addresses only
+      filter: |
+        AND:REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$:REGEX:/user/email,@(company|enterprise)\\.com$
+      transform: /user
+      partition: /id
+
+    # ============================================================
+    # ORDER PROCESSING
+    # ============================================================
+
+    - output: premium-orders
+      description: High-value confirmed orders
+      filter: "AND:/order/total,>,500:/order/status,==,confirmed"
+      transform: |
+        CONSTRUCT:orderId=/order/id:total=/order/total:customer=/customer/email
+      partition: /order/id
+
+    - output: bulk-discount
+      description: Calculate 10% discount for bulk orders
+      filter: "AND:/order/items,>=,10:/order/total,>,100"
+      transform: "ARITHMETIC:MUL,/order/total,0.9"
+      partition: /order/id
+
+    - output: sales-tax
+      description: Calculate 8% sales tax
+      filter: "/order/total,>,0"
+      transform: "ARITHMETIC:MUL,/order/total,0.08"
+      partition: /order/id
+
+    - output: profit-margin
+      description: Calculate profit (revenue - cost)
+      filter: "AND:/order/revenue,>,0:/order/cost,>,0"
+      transform: "ARITHMETIC:SUB,/order/revenue,/order/cost"
+      partition: /order/id
+
+    # ============================================================
+    # USER SESSION ANALYSIS
+    # ============================================================
+
+    - output: active-sessions
+      description: All sessions must be active
+      filter: "ARRAY_ALL:/sessions,/active,==,true"
+      transform: "ARRAY_MAP:/sessions,/id"
+      partition: /user/id
+
+    - output: session-errors
+      description: Any session has errors
+      filter: "ARRAY_ANY:/sessions,/error,==,true"
+      transform: |
+        CONSTRUCT:userId=/user/id:errorCount=/sessions
+      partition: /user/id
+
+    - output: high-priority-tasks
+      description: Tasks with high or urgent priority
+      filter: |
+        OR:ARRAY_ANY:/tasks,/priority,==,high:ARRAY_ANY:/tasks,/priority,==,urgent
+      transform: /tasks
+      partition: /user/id
+
+    # ============================================================
+    # COMPLEX BOOLEAN LOGIC
+    # ============================================================
+
+    - output: premium-or-bulk
+      description: Premium users OR bulk orders
+      filter: |
+        OR:AND:/user/tier,==,premium:/user/status,==,active:AND:/order/items,>=,10:/order/total,>,500
+      transform: |
+        CONSTRUCT:userId=/user/id:tier=/user/tier:orderTotal=/order/total:itemCount=/order/items
+      partition: /user/id
+
+    - output: production-users
+      description: Exclude test and fake accounts
+      filter: "NOT:REGEX:/user/email,@(test|temp|fake|disposable)\\."
+      transform: /user
+      partition: /user/id
+
+    - output: complex-routing
+      description: Complex multi-condition routing
+      filter: |
+        AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true
+      transform: |
+        CONSTRUCT:type=/event/type:source=/event/source:timestamp=/event/timestamp
+      partition: /event/id
+
+    # ============================================================
+    # ANALYTICS AND CALCULATIONS
+    # ============================================================
+
+    - output: conversion-rate
+      description: Calculate conversion rate (conversions / visits)
+      filter: "AND:/stats/visits,>,0:/stats/conversions,>,0"
+      transform: "ARITHMETIC:DIV,/stats/conversions,/stats/visits"
+      partition: /stats/campaignId
+
+    - output: average-order-value
+      description: Calculate average (total / count)
+      filter: "AND:/stats/total,>,0:/stats/count,>,0"
+      transform: "ARITHMETIC:DIV,/stats/total,/stats/count"
+      partition: /stats/id
+
+    - output: price-with-markup
+      description: Apply 20% markup to price
+      filter: "/product/cost,>,0"
+      transform: "ARITHMETIC:MUL,/product/cost,1.2"
+      partition: /product/id
+
+    # ============================================================
+    # PATTERN MATCHING
+    # ============================================================
+
+    - output: v2-events
+      description: Version 2.x events only
+      filter: "REGEX:/app/version,^2\\."
+      transform: /event
+      partition: /app/instanceId
+
+    - output: local-network
+      description: Private IP addresses only
+      filter: "REGEX:/request/ip,^(192\\.168\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01]))\\.)"
+      transform: |
+        CONSTRUCT:ip=/request/ip:path=/request/path:method=/request/method
+      partition: /request/ip
+
+    - output: error-events
+      description: Error, failure, or exception events
+      filter: "REGEX:/message/type,^(error|failure|exception)"
+      transform: /message
+      partition: /message/id
+
+    # ============================================================
+    # AUDIT AND ARCHIVE
+    # ============================================================
+
+    - output: audit-trail
+      description: Complete audit trail (everything)
+      transform: /
+
+# Kafka consumer settings
+consumer_properties:
+  fetch.min.bytes: "1048576"
+  fetch.wait.max.ms: "500"
+  max.poll.records: "500"
+  session.timeout.ms: "30000"
+  heartbeat.interval.ms: "3000"
+
+# Kafka producer settings
+producer_properties:
+  batch.size: "65536"
+  linger.ms: "10"
+  compression.type: "gzip"
+  acks: "1"
+  max.in.flight.requests.per.connection: "5"

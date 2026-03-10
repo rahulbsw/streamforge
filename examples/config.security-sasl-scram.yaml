@@ -1,0 +1,38 @@
+# SASL/SCRAM Authentication Example
+# Use this for secure username/password authentication with SCRAM-SHA-256 or SCRAM-SHA-512
+# Commonly used with Confluent Cloud, AWS MSK, and modern Kafka clusters
+
+appid: streamforge-sasl-scram
+bootstrap: kafka.example.com:9093
+target_broker: kafka-target.example.com:9093
+input: source-topic
+output: destination-topic
+offset: latest
+threads: 4
+
+# Security Configuration - SASL/SCRAM-SHA-256 over SSL
+security:
+  protocol: SASL_SSL
+  ssl:
+    # CA certificate for SSL connection
+    ca_location: /path/to/ca-cert.pem
+  sasl:
+    # Use SCRAM-SHA-256 or SCRAM-SHA-512
+    mechanism: SCRAM-SHA-256
+    username: your-username
+    password: your-password
+
+# For SCRAM-SHA-512, change mechanism to:
+# sasl:
+#   mechanism: SCRAM-SHA-512
+#   username: your-username
+#   password: your-password
+
+# Example for Confluent Cloud:
+# bootstrap: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
+# security:
+#   protocol: SASL_SSL
+#   sasl:
+#     mechanism: PLAIN  # Confluent Cloud uses PLAIN
+#     username: <API_KEY>
+#     password: <API_SECRET>

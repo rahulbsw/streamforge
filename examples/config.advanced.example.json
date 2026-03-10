@@ -1,0 +1,137 @@
+{
+  "appid": "streamforge-advanced",
+  "bootstrap": "source-kafka:9092",
+  "target_broker": "target-kafka:9092",
+  "input": "events",
+  "offset": "latest",
+  "threads": 4,
+  "compression": {
+    "compression_type": "raw",
+    "compression_algo": "gzip"
+  },
+  "routing": {
+    "routing_type": "content",
+    "path": "/eventType",
+    "destinations": [
+      {
+        "name": "valid-emails",
+        "output": "validated-users",
+        "filter": "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$",
+        "transform": "CONSTRUCT:email=/user/email:name=/user/name:id=/user/id",
+        "partition": "/user/id"
+      },
+      {
+        "name": "corporate-emails",
+        "output": "corporate-users",
+        "filter": "AND:REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$:REGEX:/user/email,@(company|enterprise)\\.com$",
+        "transform": "/user",
+        "partition": "/id"
+      },
+      {
+        "name": "high-value-orders",
+        "output": "premium-orders",
+        "filter": "AND:/order/total,>,500:/order/status,==,confirmed",
+        "transform": "CONSTRUCT:orderId=/order/id:total=/order/total:customer=/customer/email",
+        "partition": "/order/id"
+      },
+      {
+        "name": "bulk-discount",
+        "output": "discounted-prices",
+        "filter": "AND:/order/items,>=,10:/order/total,>,100",
+        "transform": "ARITHMETIC:MUL,/order/total,0.9",
+        "partition": "/order/id"
+      },
+      {
+        "name": "sales-tax",
+        "output": "tax-calculations",
+        "filter": "/order/total,>,0",
+        "transform": "ARITHMETIC:MUL,/order/total,0.08",
+        "partition": "/order/id"
+      },
+      {
+        "name": "order-profit",
+        "output": "profit-margins",
+        "filter": "AND:/order/revenue,>,0:/order/cost,>,0",
+        "transform": "ARITHMETIC:SUB,/order/revenue,/order/cost",
+        "partition": "/order/id"
+      },
+      {
+        "name": "active-users-only",
+        "output": "active-users",
+        "filter": "ARRAY_ALL:/sessions,/active,==,true",
+        "transform": "ARRAY_MAP:/sessions,/id",
+        "partition": "/user/id"
+      },
+      {
+        "name": "problem-sessions",
+        "output": "session-errors",
+        "filter": "ARRAY_ANY:/sessions,/error,==,true",
+        "transform": "CONSTRUCT:userId=/user/id:errorSessions=ARRAY_MAP:/sessions,/id",
+        "partition": "/user/id"
+      },
+      {
+        "name": "high-priority-tasks",
+        "output": "urgent-tasks",
+        "filter": "OR:ARRAY_ANY:/tasks,/priority,==,high:ARRAY_ANY:/tasks,/priority,==,urgent",
+        "transform": "/tasks",
+        "partition": "/user/id"
+      },
+      {
+        "name": "premium-or-bulk",
+        "output": "special-orders",
+        "filter": "OR:AND:/user/tier,==,premium:/user/status,==,active:AND:/order/items,>=,10:/order/total,>,500",
+        "transform": "CONSTRUCT:userId=/user/id:tier=/user/tier:orderTotal=/order/total:itemCount=/order/items",
+        "partition": "/user/id"
+      },
+      {
+        "name": "not-test-users",
+        "output": "production-users",
+        "filter": "NOT:REGEX:/user/email,@(test|temp|fake|disposable)\\.",
+        "transform": "/user",
+        "partition": "/user/id"
+      },
+      {
+        "name": "complex-logic",
+        "output": "complex-routing",
+        "filter": "AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true",
+        "transform": "CONSTRUCT:type=/event/type:source=/event/source:timestamp=/event/timestamp",
+        "partition": "/event/id"
+      },
+      {
+        "name": "version-check",
+        "output": "v2-events",
+        "filter": "REGEX:/app/version,^2\\.",
+        "transform": "/event",
+        "partition": "/app/instanceId"
+      },
+      {
+        "name": "local-network",
+        "output": "internal-traffic",
+        "filter": "REGEX:/request/ip,^(192\\.168\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.)",
+        "transform": "CONSTRUCT:ip=/request/ip:path=/request/path:method=/request/method",
+        "partition": "/request/ip"
+      },
+      {
+        "name": "extract-user-ids",
+        "output": "user-id-list",
+        "filter": "/users,>,0",
+        "transform": "ARRAY_MAP:/users,/id",
+        "partition": "/requestId"
+      },
+      {
+        "name": "average-calculation",
+        "output": "averages",
+        "filter": "AND:/stats/total,>,0:/stats/count,>,0",
+        "transform": "ARITHMETIC:DIV,/stats/total,/stats/count",
+        "partition": "/stats/id"
+      },
+      {
+        "name": "percentage-conversion",
+        "output": "percentages",
+        "filter": "/metrics/value,>,0",
+        "transform": "ARITHMETIC:DIV,/metrics/value,100",
+        "partition": "/metrics/id"
+      }
+    ]
+  }
+}

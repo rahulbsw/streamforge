@@ -1,0 +1,31 @@
+{
+  "appid": "streamforge-with-filters",
+  "bootstrap": "localhost:9092",
+  "input": "events",
+  "target_broker": "localhost:9092",
+  "offset": "latest",
+  "threads": 4,
+  "routing": {
+    "routing_type": "filter",
+    "destinations": [
+      {
+        "output": "high-value-events",
+        "description": "Events with siteId > 10000",
+        "filter": "/message/siteId,>,10000",
+        "partition": "/message/confId"
+      },
+      {
+        "output": "active-meetings",
+        "description": "Active meeting events",
+        "filter": "/message/status,==,active",
+        "transform": "/message",
+        "partition": "/confId"
+      },
+      {
+        "output": "transformed-events",
+        "description": "Extract only confId from messages",
+        "transform": "/message/confId"
+      }
+    ]
+  }
+}

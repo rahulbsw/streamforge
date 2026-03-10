@@ -1,0 +1,23 @@
+# WAP MirrorMaker Configuration - YAML Format
+# Simple single-destination mirroring example
+
+appid: streamforge
+bootstrap: source-kafka:9092
+target_broker: target-kafka:9092
+input: source-topic
+output: destination-topic
+offset: latest
+threads: 4
+
+compression:
+  compression_type: raw
+  compression_algo: gzip
+
+consumer_properties:
+  fetch.min.bytes: "1048576"
+  fetch.wait.max.ms: "500"
+
+producer_properties:
+  batch.size: "65536"
+  linger.ms: "10"
+  compression.type: "gzip"

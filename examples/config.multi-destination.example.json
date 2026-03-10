@@ -1,0 +1,41 @@
+{
+  "appid": "streamforge-multi",
+  "bootstrap": "localhost:9092",
+  "input": "events",
+  "target_broker": "localhost:9092",
+  "offset": "latest",
+  "threads": 4,
+  "compression": {
+    "compression_type": "none",
+    "compression_algo": "gzip"
+  },
+  "routing": {
+    "routing_type": "content",
+    "path": "/eventType",
+    "destinations": [
+      {
+        "output": "meeting-events",
+        "match_value": "meeting.started",
+        "partition": "/message/confId",
+        "description": "Meeting lifecycle events"
+      },
+      {
+        "output": "quality-events",
+        "match_value": "quality.report",
+        "partition": "/message/siteId",
+        "description": "Media quality events"
+      },
+      {
+        "output": "default-events",
+        "match_value": "*",
+        "description": "Catch-all for unmatched events"
+      }
+    ]
+  },
+  "consumer_properties": {
+    "fetch.min.bytes": "1048576"
+  },
+  "producer_properties": {
+    "batch.size": "65536"
+  }
+}

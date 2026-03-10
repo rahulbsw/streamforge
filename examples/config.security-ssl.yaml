@@ -1,0 +1,35 @@
+# SSL/TLS Configuration Example
+# Use this for encrypted connections with SSL/TLS
+
+appid: streamforge-ssl
+bootstrap: kafka.example.com:9093
+target_broker: kafka-target.example.com:9093
+input: source-topic
+output: destination-topic
+offset: latest
+threads: 4
+
+# Security Configuration - SSL/TLS
+security:
+  protocol: SSL
+  ssl:
+    # Path to CA certificate for verifying broker's certificate
+    ca_location: /path/to/ca-cert.pem
+
+    # For mutual TLS (mTLS), uncomment these:
+    # certificate_location: /path/to/client-cert.pem
+    # key_location: /path/to/client-key.pem
+    # key_password: your-key-password
+
+    # Endpoint identification (default: https)
+    # Set to "none" to disable hostname verification (not recommended for production)
+    endpoint_identification_algorithm: https
+
+# Optional: Additional producer/consumer properties
+producer_properties:
+  batch.size: "65536"
+  linger.ms: "10"
+
+consumer_properties:
+  fetch.min.bytes: "1048576"
+  fetch.wait.max.ms: "500"
