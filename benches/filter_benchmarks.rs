@@ -148,7 +148,8 @@ fn bench_filter_throughput(c: &mut Criterion) {
         });
 
         group.bench_with_input(BenchmarkId::new("complex", msg_count), msg_count, |b, &count| {
-            let filter = parse_filter("AND:REGEX:/message/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$:/message/siteId,>,10000:/message/status,==,active").unwrap();
+            // Complex filter: AND with 3 conditions
+            let filter = parse_filter("AND:/message/siteId,>,10000:/message/status,==,active:/message/userId,>,500").unwrap();
             let msg = create_test_message();
             b.iter(|| {
                 for _ in 0..count {
