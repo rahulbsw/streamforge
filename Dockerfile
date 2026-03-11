@@ -1,28 +1,29 @@
-# Multi-stage Dockerfile using Chainguard base images
+# Multi-stage Dockerfile with Debian bookworm
 # Stage 1: Builder - Compile the Rust application
-FROM cgr.dev/chainguard/rust:latest AS builder
+FROM rust:1.85-bookworm AS builder
 
 # Install build dependencies
-USER root
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
+    libsasl2-dev \
+    libssl-dev \
+    libzstd-dev \
+    pkg-config \
     cmake \
-    openssl-dev \
-    cyrus-sasl-dev \
-    zstd-dev \
-    lz4-dev \
-    build-base \
-    pkgconfig
+    clang \
+    libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /build
 
 # Copy dependency manifests first (for layer caching)
 COPY Cargo.toml Cargo.lock ./
+COPY benches ./benches
 
 # Create a dummy main.rs to cache dependencies
 RUN mkdir -p src && \
     echo "fn main() {}" > src/main.rs && \
-    cargo build --release && \
+    cargo build --release --bin streamforge && \
     rm -rf src
 
 # Copy actual source code
@@ -31,53 +32,29 @@ COPY src ./src
 # Build the real application
 # Touch main.rs to force rebuild after dummy
 RUN touch src/main.rs && \
-    cargo build --release --locked
+    cargo build --release --locked --bin streamforge
 
-# Verify the binary was built
-RUN ls -lh /build/target/release/streamforge
+# Stage 2: Runtime - Minimal Debian runtime image
+FROM debian:bookworm-slim
 
-# Stage 2: Runtime - Minimal Chainguard runtime image
-FROM cgr.dev/chainguard/glibc-dynamic:latest
-
-# Install only runtime dependencies (no build tools)
-USER root
-RUN apk add --no-cache \
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libsasl2-2 \
     libssl3 \
-    cyrus-sasl \
-    zstd-libs \
-    lz4-libs \
-    libgcc \
-    libstdc++
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for running the application
-RUN addgroup -g 65532 nonroot && \
-    adduser -D -u 65532 -G nonroot nonroot
-
-# Create directory for configuration
-RUN mkdir -p /app/config && \
-    chown -R nonroot:nonroot /app
+# Create non-root user
+RUN useradd -m -u 65532 nonroot
 
 # Copy the compiled binary from builder stage
-COPY --from=builder --chown=nonroot:nonroot \
-    /build/target/release/streamforge \
-    /app/streamforge
+COPY --from=builder /build/target/release/streamforge /usr/local/bin/streamforge
 
-# Copy example configurations (optional)
-COPY --chown=nonroot:nonroot examples/*.yaml /app/config/
-
-# Switch to non-root user
 USER nonroot
-WORKDIR /app
+WORKDIR /home/nonroot
 
 # Set environment variables
-ENV CONFIG_FILE=/app/config/config.yaml
 ENV RUST_LOG=info
 
-# Expose no ports (Kafka client only)
-
-# Health check (optional - checks if process is running)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep -f streamforge || exit 1
-
 # Run the application
-ENTRYPOINT ["/app/streamforge"]
+ENTRYPOINT ["/usr/local/bin/streamforge"]

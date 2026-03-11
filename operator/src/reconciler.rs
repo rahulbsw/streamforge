@@ -246,40 +246,38 @@ impl PipelineReconciler {
     fn generate_config_yaml(&self, pipeline: &StreamforgePipeline) -> Result<String, Error> {
         let spec = &pipeline.spec;
 
+        // For now, support single destination only (future: multi-destination)
+        if spec.destinations.is_empty() {
+            return Err(Error::InvalidSpec("No destinations specified".to_string()));
+        }
+        let dest = &spec.destinations[0];
+
         // Build config structure matching streamforge's config format
-        let config = serde_json::json!({
+        let mut config = serde_json::json!({
             "appid": spec.appid.clone().unwrap_or_else(|| pipeline.name_any()),
-            "source": {
-                "brokers": spec.source.brokers,
-                "topic": spec.source.topic,
-                "group_id": spec.source.group_id.clone().unwrap_or_else(|| {
-                    format!("streamforge-{}", pipeline.name_any())
-                }),
-                "offset": spec.source.offset,
-                "security": spec.source.security.as_ref().map(|s| serde_json::json!({
-                    "protocol": s.protocol,
-                    "ssl": s.ssl,
-                    "sasl": s.sasl,
-                })),
-            },
-            "destinations": spec.destinations.iter().map(|d| {
-                serde_json::json!({
-                    "brokers": d.brokers,
-                    "topic": d.topic,
-                    "filter": d.filter,
-                    "transform": d.transform,
-                    "partitioner": d.partitioner,
-                    "partitioner_field": d.partitioner_field,
-                    "compression": d.compression,
-                    "security": d.security.as_ref().map(|s| serde_json::json!({
-                        "protocol": s.protocol,
-                        "ssl": s.ssl,
-                        "sasl": s.sasl,
-                    })),
-                })
-            }).collect::<Vec<_>>(),
+            "bootstrap": spec.source.brokers.clone(),
+            "target_broker": dest.brokers.clone(),
+            "input": spec.source.topic.clone(),
+            "output": dest.topic.clone(),
+            "offset": spec.source.offset.clone(),
             "threads": spec.threads,
         });
+
+        // Add optional fields
+        if let Some(group_id) = &spec.source.group_id {
+            config["group_id"] = serde_json::json!(group_id);
+        }
+        if let Some(filter) = &dest.filter {
+            config["filter"] = serde_json::json!(filter);
+        }
+        if let Some(transform) = &dest.transform {
+            config["transform"] = serde_json::json!(transform);
+        }
+        if !dest.compression.is_empty() && dest.compression != "none" {
+            config["compression"] = serde_json::json!({
+                "compression_type": dest.compression,
+            });
+        }
 
         serde_yaml::to_string(&config).map_err(|e| {
             Error::InvalidSpec(format!("Failed to serialize config: {}", e))
