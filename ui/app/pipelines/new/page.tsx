@@ -87,7 +87,30 @@ export default function NewPipeline() {
       if (mode === 'yaml') {
         pipelineObj = yaml.load(yamlContent);
       } else {
+        // Trim all string fields before generating YAML
+        const trimmedData = {
+          ...formData,
+          name: formData.name.trim(),
+          appid: formData.appid.trim(),
+          sourceBootstrap: formData.sourceBootstrap.trim(),
+          sourceTopic: formData.sourceTopic.trim(),
+          sourceGroupId: formData.sourceGroupId.trim(),
+          destBrokers: formData.destBrokers.trim(),
+          destTopic: formData.destTopic.trim(),
+          filter: formData.filter.trim(),
+          transform: formData.transform.trim(),
+        };
+
+        // Validate name
+        if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(trimmedData.name)) {
+          throw new Error('Pipeline name must consist of lowercase alphanumeric characters or \'-\', and must start and end with an alphanumeric character');
+        }
+
+        // Temporarily update formData for YAML generation
+        const originalData = formData;
+        setFormData(trimmedData);
         pipelineObj = yaml.load(generateYaml());
+        setFormData(originalData);
       }
 
       const response = await fetch('/api/pipelines', {
@@ -166,7 +189,7 @@ export default function NewPipeline() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-            {error}
+            <strong>Error:</strong> {error}
           </div>
         )}
 
@@ -185,10 +208,14 @@ export default function NewPipeline() {
                       type="text"
                       required
                       value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value.toLowerCase() })}
+                      pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="my-pipeline"
                     />
+                    <p className="mt-1 text-sm text-gray-500">
+                      Lowercase letters, numbers, and hyphens only. Must start/end with alphanumeric.
+                    </p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
