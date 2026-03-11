@@ -15,7 +15,7 @@ export default function NewPipeline() {
   // Form state
   const [formData, setFormData] = useState({
     name: '',
-    namespace: 'default',
+    namespace: 'streamforge-system',
     appid: '',
     sourceBootstrap: '',
     sourceTopic: '',

@@ -273,11 +273,8 @@ impl PipelineReconciler {
         if let Some(transform) = &dest.transform {
             config["transform"] = serde_json::json!(transform);
         }
-        if !dest.compression.is_empty() && dest.compression != "none" {
-            config["compression"] = serde_json::json!({
-                "compression_type": dest.compression,
-            });
-        }
+        // Note: Compression is configured via producer_properties in streamforge config
+        // The simple compression field in CRD is not used for now
 
         serde_yaml::to_string(&config).map_err(|e| {
             Error::InvalidSpec(format!("Failed to serialize config: {}", e))
