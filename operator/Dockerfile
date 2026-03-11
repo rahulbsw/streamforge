@@ -1,5 +1,5 @@
 # Multi-stage build for Streamforge Operator
-FROM rust:1.75 AS builder
+FROM rust:latest AS builder
 
 WORKDIR /build
 
@@ -19,8 +19,8 @@ COPY operator/src ./src
 RUN touch src/main.rs && \
     cargo build --release
 
-# Runtime stage
-FROM gcr.io/distroless/cc-debian12:nonroot
+# Runtime stage - Chainguard minimal image for zero CVEs
+FROM cgr.dev/chainguard/glibc-dynamic:latest
 
 COPY --from=builder /build/target/release/streamforge-operator /usr/local/bin/streamforge-operator
 
