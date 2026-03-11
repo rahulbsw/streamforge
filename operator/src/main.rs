@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use futures::StreamExt;
 use kube::{
     runtime::{controller::Action, watcher, Controller},
     Api, Client, ResourceExt,

@@ -2,13 +2,13 @@ use anyhow::Result;
 use k8s_openapi::api::{
     apps::v1::{Deployment, DeploymentSpec},
     core::v1::{
-        ConfigMap, Container, ContainerPort, EnvVar, PodSpec, PodTemplateSpec,
+        ConfigMap, Container, EnvVar, PodSpec, PodTemplateSpec,
         ResourceRequirements as K8sResourceRequirements, Volume, VolumeMount,
     },
 };
 use k8s_openapi::apimachinery::pkg::{api::resource::Quantity, apis::meta::v1::LabelSelector};
 use kube::{
-    api::{Api, ObjectMeta, Patch, PatchParams, PostParams},
+    api::{Api, ObjectMeta, Patch, PatchParams},
     runtime::controller::Action,
     Client, ResourceExt,
 };
@@ -156,8 +156,10 @@ impl PipelineReconciler {
         let volumes = vec![Volume {
             name: "config".to_string(),
             config_map: Some(k8s_openapi::api::core::v1::ConfigMapVolumeSource {
-                name: Some(config_name),
-                ..Default::default()
+                default_mode: None,
+                items: None,
+                name: config_name.to_string(),
+                optional: None,
             }),
             ..Default::default()
         }];
