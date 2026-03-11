@@ -19,40 +19,28 @@ export async function GET(
     const tailLines = parseInt(request.nextUrl.searchParams.get('tailLines') || '100');
 
     // Get pods for this pipeline
-    const podsResponse = await coreApi.listNamespacedPod(
+    const podsResponse = await coreApi.listNamespacedPod({
       namespace,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      `streamforge.io/pipeline=${name}`
-    );
+      labelSelector: `streamforge.io/pipeline=${name}`,
+    });
 
-    if (!podsResponse.body.items || podsResponse.body.items.length === 0) {
+    if (!podsResponse.items || podsResponse.items.length === 0) {
       return NextResponse.json({ logs: [] });
     }
 
     // Get logs from all pods
     const logs = await Promise.all(
-      podsResponse.body.items.map(async (pod) => {
+      podsResponse.items.map(async (pod) => {
         try {
-          const logResponse = await coreApi.readNamespacedPodLog(
-            pod.metadata!.name!,
+          const logResponse = await coreApi.readNamespacedPodLog({
+            name: pod.metadata!.name!,
             namespace,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
             tailLines,
-            undefined
-          );
+          });
 
           return {
             podName: pod.metadata!.name!,
-            logs: logResponse.body,
+            logs: logResponse,
           };
         } catch (error) {
           return {

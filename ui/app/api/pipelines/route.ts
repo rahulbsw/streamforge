@@ -17,14 +17,14 @@ export async function GET(request: NextRequest) {
 
     const namespace = request.nextUrl.searchParams.get('namespace') || 'default';
 
-    const response = await customObjectsApi.listNamespacedCustomObject(
-      GROUP,
-      VERSION,
+    const response = await customObjectsApi.listNamespacedCustomObject({
       namespace,
-      PLURAL
-    );
+      group: GROUP,
+      version: VERSION,
+      plural: PLURAL,
+    });
 
-    return NextResponse.json(response.body);
+    return NextResponse.json(response);
   } catch (error: any) {
     if (error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -44,22 +44,22 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const namespace = body.metadata?.namespace || 'default';
 
-    const response = await customObjectsApi.createNamespacedCustomObject(
-      GROUP,
-      VERSION,
+    const response = await customObjectsApi.createNamespacedCustomObject({
       namespace,
-      PLURAL,
-      body
-    );
+      group: GROUP,
+      version: VERSION,
+      plural: PLURAL,
+      body,
+    });
 
-    return NextResponse.json(response.body, { status: 201 });
+    return NextResponse.json(response, { status: 201 });
   } catch (error: any) {
     if (error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     console.error('Error creating pipeline:', error);
     return NextResponse.json(
-      { error: error.body?.message || error.message || 'Failed to create pipeline' },
+      { error: error.message || 'Failed to create pipeline' },
       { status: 500 }
     );
   }
@@ -76,13 +76,13 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Pipeline name is required' }, { status: 400 });
     }
 
-    await customObjectsApi.deleteNamespacedCustomObject(
-      GROUP,
-      VERSION,
+    await customObjectsApi.deleteNamespacedCustomObject({
       namespace,
-      PLURAL,
-      name
-    );
+      group: GROUP,
+      version: VERSION,
+      plural: PLURAL,
+      name,
+    });
 
     return NextResponse.json({ message: 'Pipeline deleted successfully' });
   } catch (error: any) {
@@ -109,20 +109,16 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Pipeline name is required' }, { status: 400 });
     }
 
-    const response = await customObjectsApi.patchNamespacedCustomObject(
-      GROUP,
-      VERSION,
+    const response = await customObjectsApi.patchNamespacedCustomObject({
       namespace,
-      PLURAL,
+      group: GROUP,
+      version: VERSION,
+      plural: PLURAL,
       name,
       body,
-      undefined,
-      undefined,
-      undefined,
-      { headers: { 'Content-Type': 'application/merge-patch+json' } }
-    );
+    });
 
-    return NextResponse.json(response.body);
+    return NextResponse.json(response);
   } catch (error: any) {
     if (error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
