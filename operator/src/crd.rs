@@ -102,11 +102,28 @@ pub struct SecurityConfig {
 
 #[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct SecretReference {
+    /// Name of the secret
+    pub name: String,
+    /// Key within the secret
+    pub key: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SslConfig {
     pub ca_location: Option<String>,
     pub certificate_location: Option<String>,
     pub key_location: Option<String>,
     pub key_password: Option<String>,
+    /// Secret containing CA certificate
+    pub ca_secret: Option<SecretReference>,
+    /// Secret containing client certificate
+    pub certificate_secret: Option<SecretReference>,
+    /// Secret containing client key
+    pub key_secret: Option<SecretReference>,
+    /// Secret containing key password
+    pub key_password_secret: Option<SecretReference>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
@@ -116,6 +133,12 @@ pub struct SaslConfig {
     pub username: Option<String>,
     pub password: Option<String>,
     pub kerberos_service_name: Option<String>,
+    /// Secret containing SASL username
+    pub username_secret: Option<SecretReference>,
+    /// Secret containing SASL password
+    pub password_secret: Option<SecretReference>,
+    /// Secret containing Kerberos keytab
+    pub keytab_secret: Option<SecretReference>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, JsonSchema)]

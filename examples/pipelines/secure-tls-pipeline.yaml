@@ -1,0 +1,70 @@
+# Secure Pipeline with Mutual TLS Authentication
+# This example shows how to use Kubernetes secrets for TLS certificates
+apiVersion: streamforge.io/v1alpha1
+kind: StreamforgePipeline
+metadata:
+  name: secure-tls-pipeline
+  namespace: streamforge-system
+spec:
+  # Source Kafka with mTLS authentication
+  source:
+    brokers: "kafka-mtls.kafka.svc.cluster.local:9093"
+    topic: "secure-input-topic"
+    offset: "latest"
+    groupId: "secure-tls-group"
+    security:
+      protocol: "SSL"
+      ssl:
+        # All certificates from secrets
+        caSecret:
+          name: kafka-tls-certs
+          key: ca.crt
+        certificateSecret:
+          name: kafka-tls-certs
+          key: client.crt
+        keySecret:
+          name: kafka-tls-certs
+          key: client.key
+        keyPasswordSecret:
+          name: kafka-tls-certs
+          key: key.password
+
+  # Destination Kafka with mTLS
+  destinations:
+    - brokers: "kafka-mtls.kafka.svc.cluster.local:9093"
+      topic: "secure-output-topic"
+      security:
+        protocol: "SSL"
+        ssl:
+          caSecret:
+            name: kafka-tls-certs
+            key: ca.crt
+          certificateSecret:
+            name: kafka-tls-certs
+            key: client.crt
+          keySecret:
+            name: kafka-tls-certs
+            key: client.key
+          keyPasswordSecret:
+            name: kafka-tls-certs
+            key: key.password
+
+  replicas: 2
+  threads: 4
+  appid: "secure-tls-pipeline"
+
+---
+# Example: Create TLS certificate secret
+#
+# kubectl create secret generic kafka-tls-certs \
+#   --from-file=ca.crt=/path/to/ca-cert.pem \
+#   --from-file=client.crt=/path/to/client-cert.pem \
+#   --from-file=client.key=/path/to/client-key.pem \
+#   --from-literal=key.password=myKeyPassword \
+#   -n streamforge-system
+#
+# Or create from TLS type:
+# kubectl create secret tls kafka-client-tls \
+#   --cert=/path/to/client-cert.pem \
+#   --key=/path/to/client-key.pem \
+#   -n streamforge-system

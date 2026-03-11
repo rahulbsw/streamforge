@@ -1,0 +1,65 @@
+# Secure Pipeline with SASL Authentication
+# This example shows how to use Kubernetes secrets for SASL credentials
+apiVersion: streamforge.io/v1alpha1
+kind: StreamforgePipeline
+metadata:
+  name: secure-sasl-pipeline
+  namespace: streamforge-system
+spec:
+  # Source Kafka with SASL/SCRAM authentication
+  source:
+    brokers: "kafka-secure.kafka.svc.cluster.local:9093"
+    topic: "secure-input-topic"
+    offset: "latest"
+    groupId: "secure-pipeline-group"
+    security:
+      protocol: "SASL_SSL"
+      ssl:
+        # CA certificate from secret
+        caSecret:
+          name: kafka-ca-cert
+          key: ca.crt
+      sasl:
+        mechanism: "SCRAM-SHA-512"
+        # Username and password from secrets (more secure than inline)
+        usernameSecret:
+          name: kafka-sasl-credentials
+          key: username
+        passwordSecret:
+          name: kafka-sasl-credentials
+          key: password
+
+  # Destination Kafka with SASL authentication
+  destinations:
+    - brokers: "kafka-secure.kafka.svc.cluster.local:9093"
+      topic: "secure-output-topic"
+      security:
+        protocol: "SASL_SSL"
+        ssl:
+          caSecret:
+            name: kafka-ca-cert
+            key: ca.crt
+        sasl:
+          mechanism: "SCRAM-SHA-512"
+          usernameSecret:
+            name: kafka-sasl-credentials
+            key: username
+          passwordSecret:
+            name: kafka-sasl-credentials
+            key: password
+
+  replicas: 2
+  threads: 4
+  appid: "secure-sasl-pipeline"
+
+---
+# Example: Create the required secrets
+#
+# kubectl create secret generic kafka-ca-cert \
+#   --from-file=ca.crt=/path/to/ca-cert.pem \
+#   -n streamforge-system
+#
+# kubectl create secret generic kafka-sasl-credentials \
+#   --from-literal=username=myuser \
+#   --from-literal=password=mypassword \
+#   -n streamforge-system

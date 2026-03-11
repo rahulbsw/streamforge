@@ -20,6 +20,56 @@ kubectl get streamforgepipeline -n streamforge-system
 kubectl get pods -n streamforge-system -l streamforge.io/pipeline=simple-mirror
 ```
 
+### secure-sasl-pipeline.yaml
+Pipeline with SASL authentication using Kubernetes secrets.
+
+**Features:**
+- SASL/SCRAM authentication
+- Credentials stored in Kubernetes secrets (not inline)
+- TLS encryption with CA certificate
+- Production-ready security
+
+**Usage:**
+```bash
+# Create secrets first
+kubectl create secret generic kafka-sasl-credentials \
+  --from-literal=username=myuser \
+  --from-literal=password=mypassword \
+  -n streamforge-system
+
+kubectl create secret generic kafka-ca-cert \
+  --from-file=ca.crt=/path/to/ca-cert.pem \
+  -n streamforge-system
+
+# Deploy pipeline
+kubectl apply -f secure-sasl-pipeline.yaml
+```
+
+### secure-tls-pipeline.yaml
+Pipeline with mutual TLS (mTLS) authentication.
+
+**Features:**
+- Client certificate authentication
+- All certificates stored in secrets
+- Encrypted communication
+- Highest security level
+
+**Usage:**
+```bash
+# Create TLS secret
+kubectl create secret generic kafka-tls-certs \
+  --from-file=ca.crt=/path/to/ca-cert.pem \
+  --from-file=client.crt=/path/to/client-cert.pem \
+  --from-file=client.key=/path/to/client-key.pem \
+  --from-literal=key.password=myKeyPassword \
+  -n streamforge-system
+
+# Deploy pipeline
+kubectl apply -f secure-tls-pipeline.yaml
+```
+
+**📖 For detailed secret management documentation, see [SECRETS.md](./SECRETS.md)**
+
 ## Pipeline Specification
 
 A StreamforgePipeline has the following main components:
