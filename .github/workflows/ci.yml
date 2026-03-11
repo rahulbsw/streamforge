@@ -10,36 +10,34 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test
+  # ==================== RUST APP ====================
+  rust-test:
+    name: Rust - Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsasl2-dev \
+            libssl-dev \
+            libzstd-dev \
+            cmake \
+            pkg-config \
+            clang \
+            libclang-dev
+
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
           components: rustfmt, clippy
 
-      - name: Cache cargo registry
-        uses: actions/cache@v3
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache target directory
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          workspaces: ". -> target"
 
       - name: Run tests
         run: cargo test --all --verbose
@@ -50,55 +48,194 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
 
-  build:
-    name: Build
+  rust-build:
+    name: Rust - Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsasl2-dev \
+            libssl-dev \
+            libzstd-dev \
+            cmake \
+            pkg-config
+
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
 
       - name: Build
         run: cargo build --release --verbose
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: streamforge-${{ matrix.os }}
           path: |
             target/release/streamforge
             target/release/streamforge.exe
+          if-no-files-found: ignore
 
-  security-audit:
-    name: Security Audit
+  rust-security:
+    name: Rust - Security Audit
     runs-on: ubuntu-latest
+    continue-on-error: true  # Don't fail CI on advisories
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsasl2-dev \
+            libssl-dev \
+            libzstd-dev \
+            cmake \
+            pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --locked
 
       - name: Run security audit
         run: cargo audit
 
-  benchmarks:
-    name: Benchmarks
+  rust-benchmarks:
+    name: Rust - Benchmarks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsasl2-dev \
+            libssl-dev \
+            libzstd-dev \
+            cmake \
+            pkg-config \
+            clang \
+            libclang-dev
+
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
 
       - name: Build benchmarks
         run: cargo bench --no-run
+
+  # ==================== OPERATOR ====================
+  operator-test:
+    name: Operator - Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: operator
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "operator -> target"
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+  operator-build:
+    name: Operator - Build Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build operator Docker image
+        run: docker build -f operator/Dockerfile -t streamforge-operator:test .
+
+  # ==================== UI ====================
+  ui-test:
+    name: UI - Test & Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+  ui-build:
+    name: UI - Build Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build UI Docker image
+        run: docker build -f ui/Dockerfile -t streamforge-ui:test ui
+
+  # ==================== HELM ====================
+  helm-validate:
+    name: Helm - Validate Chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Lint Helm chart
+        run: helm lint helm/streamforge-operator
+
+      - name: Template Helm chart
+        run: |
+          helm template streamforge helm/streamforge-operator \
+            --set operator.image.repository=test \
+            --set operator.image.tag=test \
+            > /dev/null

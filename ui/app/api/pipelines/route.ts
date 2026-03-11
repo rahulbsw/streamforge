@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as k8s from '@kubernetes/client-node';
+import { requireAuth } from '@/lib/auth';
 
 const kc = new k8s.KubeConfig();
 kc.loadFromDefault();
@@ -12,6 +13,8 @@ const PLURAL = 'streamforgepipelines';
 
 export async function GET(request: NextRequest) {
   try {
+    await requireAuth();
+
     const namespace = request.nextUrl.searchParams.get('namespace') || 'default';
 
     const response = await customObjectsApi.listNamespacedCustomObject(
@@ -23,6 +26,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(response.body);
   } catch (error: any) {
+    if (error.message === 'Unauthorized') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     console.error('Error listing pipelines:', error);
     return NextResponse.json(
       { error: error.message || 'Failed to list pipelines' },
@@ -33,6 +39,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    await requireAuth();
+
     const body = await request.json();
     const namespace = body.metadata?.namespace || 'default';
 
@@ -46,6 +54,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(response.body, { status: 201 });
   } catch (error: any) {
+    if (error.message === 'Unauthorized') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     console.error('Error creating pipeline:', error);
     return NextResponse.json(
       { error: error.body?.message || error.message || 'Failed to create pipeline' },
@@ -56,6 +67,8 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    await requireAuth();
+
     const name = request.nextUrl.searchParams.get('name');
     const namespace = request.nextUrl.searchParams.get('namespace') || 'default';
 
@@ -73,6 +86,9 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ message: 'Pipeline deleted successfully' });
   } catch (error: any) {
+    if (error.message === 'Unauthorized') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     console.error('Error deleting pipeline:', error);
     return NextResponse.json(
       { error: error.message || 'Failed to delete pipeline' },
@@ -83,6 +99,8 @@ export async function DELETE(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    await requireAuth();
+
     const body = await request.json();
     const namespace = body.metadata?.namespace || 'default';
     const name = body.metadata?.name;
@@ -106,6 +124,9 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json(response.body);
   } catch (error: any) {
+    if (error.message === 'Unauthorized') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     console.error('Error updating pipeline:', error);
     return NextResponse.json(
       { error: error.message || 'Failed to update pipeline' },

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Plus, RefreshCw, Trash2, Play, Pause, Activity } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Plus, RefreshCw, Trash2, Activity, LogOut, User, FileText } from 'lucide-react';
+import PipelineLogs from '@/components/PipelineLogs';
 
 interface Pipeline {
   metadata: {
@@ -27,11 +29,31 @@ interface Pipeline {
   };
 }
 
+interface User {
+  username: string;
+  role: string;
+}
+
 export default function Home() {
+  const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [loading, setLoading] = useState(true);
-  const [namespace, setNamespace] = useState('default');
+  const [namespace, setNamespace] = useState('streamforge-system');
   const [error, setError] = useState<string | null>(null);
+  const [selectedPipeline, setSelectedPipeline] = useState<Pipeline | null>(null);
+
+  const fetchUser = async () => {
+    try {
+      const response = await fetch('/api/auth/me');
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data.user);
+      }
+    } catch (err) {
+      console.error('Failed to fetch user:', err);
+    }
+  };
 
   const fetchPipelines = async () => {
     setLoading(true);
@@ -39,6 +61,10 @@ export default function Home() {
     try {
       const response = await fetch(`/api/pipelines?namespace=${namespace}`);
       if (!response.ok) {
+        if (response.status === 401) {
+          router.push('/login');
+          return;
+        }
         throw new Error('Failed to fetch pipelines');
       }
       const data = await response.json();
@@ -51,10 +77,24 @@ export default function Home() {
   };
 
   useEffect(() => {
+    fetchUser();
+  }, []);
+
+  useEffect(() => {
     fetchPipelines();
-    const interval = setInterval(fetchPipelines, 5000); // Refresh every 5 seconds
+    const interval = setInterval(fetchPipelines, 5000);
     return () => clearInterval(interval);
   }, [namespace]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push('/login');
+      router.refresh();
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
+  };
 
   const deletePipeline = async (name: string) => {
     if (!confirm(`Are you sure you want to delete pipeline "${name}"?`)) {
@@ -77,20 +117,20 @@ export default function Home() {
   const getStatusColor = (phase?: string) => {
     switch (phase) {
       case 'Running':
-        return 'text-green-600 bg-green-50';
+        return 'text-green-600 bg-green-50 border-green-200';
       case 'Pending':
-        return 'text-yellow-600 bg-yellow-50';
+        return 'text-yellow-600 bg-yellow-50 border-yellow-200';
       case 'Failed':
-        return 'text-red-600 bg-red-50';
+        return 'text-red-600 bg-red-50 border-red-200';
       default:
-        return 'text-gray-600 bg-gray-50';
+        return 'text-gray-600 bg-gray-50 border-gray-200';
     }
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -102,13 +142,29 @@ export default function Home() {
                 High-performance Kafka streaming pipelines
               </p>
             </div>
-            <Link
-              href="/pipelines/new"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="w-5 h-5" />
-              New Pipeline
-            </Link>
+            <div className="flex items-center gap-4">
+              {user && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-lg">
+                  <User className="w-4 h-4 text-gray-600" />
+                  <span className="text-sm font-medium text-gray-700">{user.username}</span>
+                  <span className="text-xs text-gray-500">({user.role})</span>
+                </div>
+              )}
+              <Link
+                href="/pipelines/new"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Plus className="w-5 h-5" />
+                New Pipeline
+              </Link>
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <LogOut className="w-5 h-5" />
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -137,6 +193,9 @@ export default function Home() {
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
+            <div className="ml-auto text-sm text-gray-500">
+              Auto-refresh: Every 5 seconds
+            </div>
           </div>
         </div>
 
@@ -216,7 +275,7 @@ export default function Home() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
-                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${getStatusColor(
                           pipeline.status?.phase
                         )}`}
                       >
@@ -227,13 +286,22 @@ export default function Home() {
                       {pipeline.status?.replicas || 0} / {pipeline.spec.replicas}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => deletePipeline(pipeline.metadata.name)}
-                        className="text-red-600 hover:text-red-900 inline-flex items-center gap-1"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        Delete
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setSelectedPipeline(pipeline)}
+                          className="text-blue-600 hover:text-blue-900 inline-flex items-center gap-1"
+                        >
+                          <FileText className="w-4 h-4" />
+                          Logs
+                        </button>
+                        <button
+                          onClick={() => deletePipeline(pipeline.metadata.name)}
+                          className="text-red-600 hover:text-red-900 inline-flex items-center gap-1"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -242,6 +310,15 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      {/* Logs Modal */}
+      {selectedPipeline && (
+        <PipelineLogs
+          pipelineName={selectedPipeline.metadata.name}
+          namespace={selectedPipeline.metadata.namespace}
+          onClose={() => setSelectedPipeline(null)}
+        />
+      )}
     </div>
   );
 }

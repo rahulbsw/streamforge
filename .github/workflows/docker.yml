@@ -1,0 +1,65 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-streamforge:
+    name: Build Streamforge Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build streamforge image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: streamforge:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-operator:
+    name: Build Operator Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build operator image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./operator/Dockerfile
+          push: false
+          tags: streamforge-operator:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-ui:
+    name: Build UI Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build UI image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ui
+          file: ./ui/Dockerfile
+          push: false
+          tags: streamforge-ui:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
