@@ -1,0 +1,28 @@
+# Simple Mirror Pipeline
+# Mirrors messages from one Kafka topic to another with no transformations
+apiVersion: streamforge.io/v1alpha1
+kind: StreamforgePipeline
+metadata:
+  name: simple-mirror
+  namespace: streamforge-system
+spec:
+  # Source Kafka configuration
+  source:
+    brokers: "kafka.kafka.svc.cluster.local:9092"
+    topic: "input-topic"
+    offset: "latest"  # Start from latest messages
+    groupId: "simple-mirror-group"
+
+  # Destination Kafka configuration
+  destinations:
+    - brokers: "kafka.kafka.svc.cluster.local:9092"
+      topic: "output-topic"
+
+  # Number of replicas for high availability
+  replicas: 2
+
+  # Application identifier
+  appid: "simple-mirror-app"
+
+  # Worker threads per replica
+  threads: 4
