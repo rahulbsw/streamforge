@@ -1,0 +1,45 @@
+apiVersion: streamforge.io/v1alpha1
+kind: StreamforgePipeline
+metadata:
+  name: filtered-routing
+  namespace: default
+spec:
+  appid: filtered-routing
+
+  source:
+    brokers: "kafka-source:9092"
+    topic: "events"
+    groupId: "streamforge-filtered"
+    offset: "latest"
+
+  # Multi-destination with filters
+  destinations:
+    # Active events to one topic
+    - brokers: "kafka-target:9092"
+      topic: "active-events"
+      filter: "/status,==,active"
+      compression: "snappy"
+
+    # Inactive events to another topic
+    - brokers: "kafka-target:9092"
+      topic: "inactive-events"
+      filter: "/status,==,inactive"
+      compression: "snappy"
+
+    # High-priority events with complex filter
+    - brokers: "kafka-target:9092"
+      topic: "priority-events"
+      filter: "AND:/priority,==,high:/status,==,active"
+      compression: "lz4"
+
+  resources:
+    requests:
+      cpu: "300m"
+      memory: "384Mi"
+    limits:
+      cpu: "1500m"
+      memory: "768Mi"
+
+  replicas: 3
+  threads: 4
+  logLevel: "info"

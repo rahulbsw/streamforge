@@ -1,0 +1,38 @@
+apiVersion: streamforge.io/v1alpha1
+kind: StreamforgePipeline
+metadata:
+  name: simple-mirror
+  namespace: default
+spec:
+  appid: simple-mirror
+
+  # Source Kafka configuration
+  source:
+    brokers: "kafka-source:9092"
+    topic: "source-topic"
+    groupId: "streamforge-simple"
+    offset: "latest"
+
+  # Single destination
+  destinations:
+    - brokers: "kafka-target:9092"
+      topic: "target-topic"
+      compression: "snappy"
+
+  # Resource limits
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+
+  # Number of replicas (maps to Kafka partitions)
+  replicas: 2
+
+  # Consumer threads per replica
+  threads: 4
+
+  # Logging level
+  logLevel: "info"

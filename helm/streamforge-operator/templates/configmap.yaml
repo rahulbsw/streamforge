@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "streamforge-operator.fullname" . }}-config
+  labels:
+    {{- include "streamforge-operator.labels" . | nindent 4 }}
+data:
+  defaults.yaml: |
+    image:
+      repository: {{ .Values.defaults.image.repository }}
+      tag: {{ .Values.defaults.image.tag }}
+      pullPolicy: {{ .Values.defaults.image.pullPolicy }}
+    resources:
+      {{- toYaml .Values.defaults.resources | nindent 6 }}
+    replicas: {{ .Values.defaults.replicas }}
+    threads: {{ .Values.defaults.threads }}
+    logLevel: {{ .Values.defaults.logLevel }}
+    serviceAccount: {{ include "streamforge-operator.pipelineServiceAccountName" . }}

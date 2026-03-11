@@ -1,0 +1,143 @@
+# Streamforge Operator Configuration
+
+# Operator deployment settings
+operator:
+  image:
+    repository: ghcr.io/rahulbsw/streamforge-operator
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # Service account for the operator
+  serviceAccount:
+    create: true
+    name: streamforge-operator
+    annotations: {}
+
+  # RBAC settings
+  rbac:
+    create: true
+
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity
+  affinity: {}
+
+  # Environment variables
+  env:
+    - name: RUST_LOG
+      value: info
+    - name: RECONCILE_INTERVAL
+      value: "30"
+
+# Default settings for StreamforgePipeline resources
+defaults:
+  image:
+    repository: ghcr.io/rahulbsw/streamforge
+    tag: "0.3.0"
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+  replicas: 1
+  threads: 4
+  logLevel: info
+
+  # ServiceAccount for pipeline pods
+  serviceAccount:
+    create: true
+    name: streamforge-pipeline
+    annotations: {}
+
+# Monitoring settings
+monitoring:
+  enabled: false
+
+  # Prometheus ServiceMonitor
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+  # Grafana dashboard
+  grafanaDashboard:
+    enabled: false
+    namespace: monitoring
+
+# Example pipelines (can be enabled for quick start)
+examples:
+  enabled: false
+
+  pipelines:
+    - name: simple-mirror
+      spec:
+        appid: simple-mirror
+        source:
+          brokers: kafka-source:9092
+          topic: source-topic
+          groupId: streamforge-simple
+          offset: latest
+        destinations:
+          - brokers: kafka-target:9092
+            topic: target-topic
+        replicas: 1
+
+    - name: filtered-pipeline
+      spec:
+        appid: filtered-pipeline
+        source:
+          brokers: kafka-source:9092
+          topic: events
+          groupId: streamforge-filtered
+        destinations:
+          - brokers: kafka-target:9092
+            topic: active-events
+            filter: "/status,==,active"
+          - brokers: kafka-target:9092
+            topic: inactive-events
+            filter: "/status,==,inactive"
+        replicas: 2
+
+# Namespace to deploy pipelines (leave empty for current namespace)
+namespace: ""
+
+# CRD installation
+crds:
+  # Whether to install CRDs
+  install: true
+
+  # Keep CRDs on chart uninstall
+  keep: true

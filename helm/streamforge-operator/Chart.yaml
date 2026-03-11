@@ -1,0 +1,18 @@
+apiVersion: v2
+name: streamforge-operator
+description: Kubernetes Operator for managing Streamforge pipelines
+type: application
+version: 0.1.0
+appVersion: "0.3.0"
+keywords:
+  - kafka
+  - streaming
+  - operator
+  - data-pipeline
+home: https://github.com/rahulbsw/streamforge
+sources:
+  - https://github.com/rahulbsw/streamforge
+maintainers:
+  - name: Rahul Jain
+    email: rahul.oracle.db@gmail.com
+icon: https://raw.githubusercontent.com/rahulbsw/streamforge/main/docs/logo.png

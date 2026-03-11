@@ -1,0 +1,63 @@
+apiVersion: streamforge.io/v1alpha1
+kind: StreamforgePipeline
+metadata:
+  name: secure-transform
+  namespace: default
+spec:
+  appid: secure-transform
+
+  # Source with SSL/SASL
+  source:
+    brokers: "kafka-source.example.com:9093"
+    topic: "raw-events"
+    groupId: "streamforge-secure"
+    offset: "latest"
+    security:
+      protocol: "SASL_SSL"
+      ssl:
+        caLocation: "/etc/kafka/certs/ca.crt"
+      sasl:
+        mechanism: "SCRAM-SHA-256"
+        username: "streamforge-consumer"
+        password: "consumer-secret"
+
+  # Destination with transformation
+  destinations:
+    - brokers: "kafka-target.example.com:9093"
+      topic: "transformed-events"
+
+      # Transform: Extract fields and construct new object
+      transform: "CONSTRUCT:output,/user/id:userId,/user/email:userEmail,/event/type:eventType,/timestamp:timestamp"
+
+      # Only process active users
+      filter: "/user/active,==,true"
+
+      # Custom partitioning by userId
+      partitioner: "field"
+      partitionerField: "/user/id"
+
+      compression: "zstd"
+
+      security:
+        protocol: "SASL_SSL"
+        ssl:
+          caLocation: "/etc/kafka/certs/ca.crt"
+        sasl:
+          mechanism: "SCRAM-SHA-256"
+          username: "streamforge-producer"
+          password: "producer-secret"
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2000m"
+      memory: "1Gi"
+
+  replicas: 4
+  threads: 8
+  logLevel: "info"
+
+  # Mount secrets for SSL certs
+  # (Handled by operator - maps secrets to pod volumes)
