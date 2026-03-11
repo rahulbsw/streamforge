@@ -10,7 +10,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@kubernetes/client-node": "^0.21.0",
+    "@kubernetes/client-node": "^1.4.0",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.1",
     "js-yaml": "^4.1.0",
