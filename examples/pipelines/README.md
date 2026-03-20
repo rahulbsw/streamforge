@@ -68,6 +68,25 @@ kubectl create secret generic kafka-tls-certs \
 kubectl apply -f secure-tls-pipeline.yaml
 ```
 
+### multi-cluster-secure-pipeline.yaml
+Advanced example: Mirror between multiple Kafka clusters with different credentials.
+
+**Features:**
+- Source and 2 destinations, each with different authentication
+- Production → Analytics (SASL) + Backup (mTLS)
+- Demonstrates secret path organization (source/, destination-0/, destination-1/)
+- No credential conflicts between clusters
+
+**Usage:**
+```bash
+# See the file for complete secret creation commands
+kubectl apply -f multi-cluster-secure-pipeline.yaml
+
+# Verify secret mounting paths
+kubectl exec -n streamforge-system deployment/multi-cluster-secure-pipeline -- \
+  ls -R /etc/streamforge/secrets/
+```
+
 **📖 For detailed secret management documentation, see [SECRETS.md](./SECRETS.md)**
 
 ## Pipeline Specification

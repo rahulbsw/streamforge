@@ -1,0 +1,268 @@
+# At-Least-Once Delivery Examples
+#
+# This file demonstrates different at-least-once delivery configurations
+
+---
+# Example 1: Basic At-Least-Once (Async Commit)
+appid: at-least-once-basic
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: important-events
+output: processed-events
+offset: earliest
+
+commit_strategy:
+  # Enable manual commits for at-least-once delivery
+  manual_commit: true
+
+  # Async commit (faster, but may lose commits on crash)
+  commit_mode: async
+
+  # Commit every 5 seconds (batch commits)
+  commit_interval_ms: 5000
+
+---
+# Example 2: At-Least-Once with Sync Commit (Strongest Guarantee)
+appid: at-least-once-sync
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: financial-transactions
+output: processed-transactions
+offset: earliest
+
+commit_strategy:
+  manual_commit: true
+
+  # Sync commit (slower, but guaranteed)
+  commit_mode: sync
+
+  # More frequent commits for critical data
+  commit_interval_ms: 1000
+
+---
+# Example 3: At-Least-Once with Dead Letter Queue
+appid: at-least-once-dlq
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: user-events
+output: processed-events
+offset: earliest
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 5000
+
+  # Enable DLQ for failed messages
+  enable_dlq: true
+  dlq_topic: "user-events-dlq"
+
+  # Retry configuration
+  max_retries: 3
+  retry_backoff:
+    initial_backoff_ms: 100
+    max_backoff_ms: 30000
+    multiplier: 2.0
+
+---
+# Example 4: At-Least-Once with Custom Retry Policy
+appid: at-least-once-custom-retry
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: api-events
+output: processed-api-events
+offset: earliest
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 10000
+
+  enable_dlq: true
+  dlq_topic: "api-events-dlq"
+
+  # More aggressive retries
+  max_retries: 5
+  retry_backoff:
+    initial_backoff_ms: 50    # Start faster
+    max_backoff_ms: 60000     # Cap at 1 minute
+    multiplier: 1.5           # Slower exponential growth
+
+---
+# Example 5: Production-Grade At-Least-Once
+appid: production-pipeline
+bootstrap: kafka-prod:9092
+target_broker: kafka-prod:9092
+input: orders
+output: processed-orders
+offset: earliest
+threads: 8
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 5000
+
+  enable_dlq: true
+  dlq_topic: "orders-dlq"
+
+  max_retries: 3
+  retry_backoff:
+    initial_backoff_ms: 100
+    max_backoff_ms: 30000
+    multiplier: 2.0
+
+# Producer settings for at-least-once
+producer_properties:
+  acks: "all"                          # Wait for all replicas
+  enable.idempotence: "true"           # Prevent duplicates
+  max.in.flight.requests.per.connection: "5"
+  retries: "10"                        # Producer retries
+  compression.type: "snappy"
+
+# Consumer settings
+consumer_properties:
+  enable.auto.commit: "false"          # Must be false for manual commit
+  auto.offset.reset: "earliest"
+  session.timeout.ms: "30000"
+  heartbeat.interval.ms: "3000"
+
+---
+# Example 6: Backward Compatible (Default Auto-Commit)
+appid: legacy-pipeline
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: events
+output: processed
+
+# No commit_strategy = auto-commit (at-most-once)
+# This is the default for backward compatibility
+# Existing configs continue to work unchanged
+
+---
+# Example 7: Mixed Mode - Manual Commit Disabled
+appid: high-throughput
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: metrics
+output: processed-metrics
+
+commit_strategy:
+  # Explicitly disable manual commit (same as default)
+  manual_commit: false
+
+  # Other settings ignored when manual_commit is false
+  # Pipeline uses auto-commit for maximum throughput
+
+---
+# Example 8: At-Least-Once with Transform and Filter
+appid: at-least-once-with-logic
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: user-actions
+output: important-actions
+offset: earliest
+
+# Only process high-value events
+filter: "/value,>,100"
+
+# Anonymize user data
+transform: "HASH:SHA256,/userId,userIdHash"
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 5000
+
+  enable_dlq: true
+  dlq_topic: "user-actions-dlq"
+  max_retries: 3
+
+---
+# Example 9: Multi-Destination with At-Least-Once
+appid: fan-out-at-least-once
+bootstrap: kafka:9092
+input: events
+offset: earliest
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 10000
+
+  enable_dlq: true
+  dlq_topic: "events-dlq"
+  max_retries: 3
+
+destinations:
+  # High-value events
+  - output: high-value-events
+    filter: "/value,>,1000"
+    transform: "HASH:SHA256,/customerId,customerHash"
+
+  # All events (backup)
+  - output: all-events-backup
+    transform: "/."
+
+---
+# Example 10: At-Least-Once with Compression
+appid: compressed-at-least-once
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: large-events
+output: compressed-events
+offset: earliest
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 5000
+
+# Use native Kafka compression
+compression:
+  compression_type: raw
+  compression_algo: zstd  # Best compression ratio
+
+producer_properties:
+  acks: "all"
+  enable.idempotence: "true"
+
+---
+# CONFIGURATION NOTES
+#
+# Commit Modes:
+#   - async: Faster, but may lose commits on crash
+#            Use for: High throughput, occasional duplicates OK
+#
+#   - sync:  Slower, but guaranteed commits
+#            Use for: Financial data, audit logs, critical events
+#
+# Commit Interval:
+#   - Lower (1000ms): More frequent commits, less duplicates on crash
+#   - Higher (10000ms): Better throughput, more duplicates on crash
+#
+# Dead Letter Queue:
+#   - Enable for production pipelines
+#   - Monitor DLQ topic for failed messages
+#   - Set up alerts on DLQ activity
+#
+# Retry Configuration:
+#   - max_retries: Balance between reliability and latency
+#   - initial_backoff_ms: Start fast for transient errors
+#   - max_backoff_ms: Cap to avoid excessive delays
+#   - multiplier: 2.0 = exponential backoff (100ms, 200ms, 400ms, ...)
+#
+# Best Practices:
+#   1. Always enable DLQ in production
+#   2. Use async commit unless strong guarantees needed
+#   3. Set producer acks=all and enable.idempotence=true
+#   4. Monitor commit lag and DLQ topic
+#   5. Design processors to be idempotent
+#   6. Use deduplication keys where possible
+#
+# Migration from At-Most-Once:
+#   1. Start: No commit_strategy (auto-commit)
+#   2. Test: Add commit_strategy with manual_commit: true
+#   3. Monitor: Check for duplicates and processing time
+#   4. Tune: Adjust commit_interval_ms and retry_backoff
+#   5. Production: Enable DLQ and monitoring

@@ -111,22 +111,40 @@ kubectl create secret generic kafka-kerberos \
 
 ## How Secrets Are Mounted
 
-The operator automatically mounts referenced secrets as volumes in pipeline pods:
+The operator automatically mounts referenced secrets as volumes in pipeline pods. Secrets are organized by their role (source vs destinations) to avoid conflicts when multiple Kafka clusters use different credentials:
 
 ```
 /etc/streamforge/secrets/
-├── kafka-credentials/
-│   ├── username
-│   └── password
-├── kafka-tls/
-│   ├── ca.crt
-│   ├── client.crt
-│   ├── client.key
-│   └── key.password
-└── kafka-kerberos/
-    ├── krb5.keytab
-    └── krb5.conf
+├── source/
+│   ├── kafka-credentials/
+│   │   ├── username
+│   │   └── password
+│   └── kafka-tls/
+│       ├── ca.crt
+│       ├── client.crt
+│       └── client.key
+├── destination-0/
+│   ├── kafka-credentials/
+│   │   ├── username
+│   │   └── password
+│   └── kafka-ca/
+│       └── ca.crt
+└── destination-1/
+    └── kafka-tls/
+        ├── ca.crt
+        ├── client.crt
+        └── client.key
 ```
+
+**Path Structure:**
+- Source cluster secrets: `/etc/streamforge/secrets/source/{secret-name}/{key}`
+- Destination 0 secrets: `/etc/streamforge/secrets/destination-0/{secret-name}/{key}`
+- Destination 1 secrets: `/etc/streamforge/secrets/destination-1/{secret-name}/{key}`
+
+This organization ensures that:
+✅ Different clusters can use different credentials without conflicts
+✅ Secret paths clearly indicate which cluster they belong to
+✅ Multiple destinations can have independent authentication
 
 Secrets are mounted as **read-only** with **0400 permissions** (owner read-only).
 

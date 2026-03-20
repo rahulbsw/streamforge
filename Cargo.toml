@@ -45,6 +45,21 @@ async-trait = "0.1"
 bytes = "1.7"
 regex = "1.10"  # Regular expressions
 
+# Hashing functions
+md-5 = "0.10"
+sha2 = "0.10"
+murmur3 = "0.5"
+digest = "0.10"
+hex = "0.4"
+
+# Caching
+moka = { version = "0.12", features = ["future"] }
+dashmap = "6.0"  # Concurrent HashMap
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], optional = true }
+
+# Retry logic
+tokio-retry = "0.3"
+
 [dev-dependencies]
 testcontainers = "0.23"
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -60,3 +75,10 @@ harness = false
 [[bench]]
 name = "transform_benchmarks"
 harness = false
+
+[features]
+default = ["hash-functions", "local-cache"]
+hash-functions = []
+local-cache = []
+redis-cache = ["redis"]
+all-caches = ["local-cache", "redis-cache"]

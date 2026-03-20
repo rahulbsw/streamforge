@@ -1,0 +1,221 @@
+# Example configuration demonstrating hash functions and cache lookups
+#
+# This example shows:
+# 1. Hashing user IDs with SHA256 for anonymization
+# 2. Hashing partition keys with Murmur128 for distribution
+# 3. Using MD5 for fast deduplication
+# 4. Cache lookups for enriching messages
+
+appid: hash-and-cache-example
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: user-events
+output: processed-events
+offset: latest
+threads: 4
+
+# Example 1: Hash user ID with SHA256 (anonymization)
+# Input:  {"userId": "user123", "action": "login", "timestamp": 1234567890}
+# Output: {"userId": "user123", "action": "login", "timestamp": 1234567890, "userIdHash": "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3"}
+transform: "HASH:SHA256,/userId,userIdHash"
+
+---
+# Example 2: Hash email with MD5 for fast partitioning
+appid: email-hash-partition
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: user-registrations
+output: user-registrations-by-hash
+offset: latest
+
+# Replace email with MD5 hash
+# Input:  {"email": "user@example.com", "name": "John Doe"}
+# Output: "55502f40dc8b7c769880b10874abc9d0"
+transform: "HASH:MD5,/email"
+
+---
+# Example 3: Multiple hashing for different purposes
+appid: multi-hash-example
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: transactions
+output: processed-transactions
+offset: latest
+
+# Use CONSTRUCT to create object with multiple hashes
+# Input:  {"transactionId": "tx123", "userId": "user456", "amount": 100.50}
+# Output: {
+#   "txHash": "...",           # SHA256 of transaction ID
+#   "userHash": "...",         # Murmur128 of user ID (for partitioning)
+#   "original": {...}          # Original data
+# }
+transform: "CONSTRUCT:txHash=HASH:SHA256,/transactionId:userHash=HASH:MURMUR128,/userId:original=/."
+
+---
+# Example 4: Hash-based deduplication key
+appid: dedup-by-hash
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: raw-events
+output: deduplicated-events
+offset: latest
+
+# Create a hash of the entire message for deduplication
+# Can be used with Kafka's deduplication based on key
+# Input:  {"event": "click", "user": "123", "timestamp": 1234567890}
+# Output: {"dedupKey": "hash-of-entire-message", "event": "click", "user": "123", "timestamp": 1234567890}
+transform: "HASH:MD5,/.,dedupKey"
+
+---
+# Example 5: Murmur hash for consistent partitioning
+appid: murmur-partition
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: user-activities
+output: user-activities-partitioned
+offset: latest
+
+# Use Murmur128 for fast, consistent partitioning
+# Murmur is faster than SHA256 and better distributed than MD5
+# Input:  {"userId": "12345", "action": "view_product", "productId": "prod-abc"}
+# Output: "00000000000000000000000000003039"  (128-bit hash as hex)
+transform: "HASH:MURMUR128,/userId"
+
+---
+# Example 6: SHA512 for high-security hashing
+appid: secure-hash-example
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: sensitive-data
+output: anonymized-data
+offset: latest
+
+# Use SHA512 for maximum security
+# Input:  {"ssn": "123-45-6789", "name": "John Doe"}
+# Output: {"ssnHash": "...", "name": "John Doe"}  # SSN replaced with SHA512 hash
+transform: "HASH:SHA512,/ssn,ssnHash"
+
+---
+# Example 7: Hash with filtering
+appid: hash-filtered-events
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: user-events
+output: hashed-premium-events
+offset: latest
+
+# Only hash premium user events
+filter: "/userTier,==,premium"
+transform: "HASH:SHA256,/userId,userIdHash"
+
+---
+# Example 8: Hash for routing to different topics
+appid: hash-based-routing
+bootstrap: kafka-source:9092
+input: all-events
+offset: latest
+
+destinations:
+  # Route to topic based on hash prefix (sharding)
+  - brokers: kafka-target:9092
+    topic: events-shard-0
+    filter: "REGEX:/eventId,^[0-7]"  # First char 0-7
+    transform: "HASH:MURMUR64,/eventId,eventHash"
+
+  - brokers: kafka-target:9092
+    topic: events-shard-1
+    filter: "REGEX:/eventId,^[8-9a-f]"  # First char 8-f
+    transform: "HASH:MURMUR64,/eventId,eventHash"
+
+---
+# Example 9: Combine hashing with arithmetic
+appid: hash-and-calculate
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: order-events
+output: processed-orders
+offset: latest
+
+# Step 1: Hash customer ID
+# Step 2: Calculate total (handled in multiple transformations in real scenario)
+# For demonstration, showing hash only here
+transform: "HASH:MD5,/customerId,customerHash"
+
+# NOTE: For complex multi-step transformations, you would typically use
+# multiple destination configurations with different transforms
+
+---
+# Example 10: Hash arrays (hash each element)
+appid: hash-array-elements
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: batch-events
+output: hashed-batch-events
+offset: latest
+
+# Use ARRAY_MAP to hash each element in an array
+# Input:  {"userIds": ["user1", "user2", "user3"]}
+# Output: {"userHashes": ["hash1", "hash2", "hash3"]}
+transform: "CONSTRUCT:userHashes=ARRAY_MAP:/userIds,HASH:SHA256,."
+
+---
+# CACHE EXAMPLES
+# Note: Cache examples show the syntax, but actual cache population
+# would typically be done via a separate process or Redis integration
+
+# Example 11: User enrichment from cache
+appid: cache-user-enrichment
+bootstrap: kafka-source:9092
+target_broker: kafka-target:9092
+input: user-actions
+output: enriched-user-actions
+offset: latest
+
+# NOTE: CacheLookupTransform requires async context
+# This is a conceptual example showing desired usage
+# Actual implementation would use AsyncTransform
+#
+# Input:  {"userId": "123", "action": "purchase"}
+# Cache:  user:123 -> {"name": "John Doe", "tier": "premium"}
+# Output: {"userId": "123", "action": "purchase", "userProfile": {"name": "John Doe", "tier": "premium"}}
+#
+# transform: "CACHE_LOOKUP:user,/userId,userProfile"
+
+---
+# PERFORMANCE NOTES:
+#
+# Hash Algorithm Performance (fastest to slowest):
+# 1. Murmur64/128  - Fastest, best for partitioning/distribution
+# 2. MD5           - Fast, good for deduplication
+# 3. SHA256        - Moderate, good balance of speed and security
+# 4. SHA512        - Slowest, maximum security
+#
+# Use Cases:
+# - Murmur: Partitioning, sharding, load balancing
+# - MD5: Fast deduplication, non-cryptographic hashing
+# - SHA256: PII anonymization, moderate security
+# - SHA512: High-security applications, compliance requirements
+#
+# Cache Performance:
+# - Local cache (Moka): 10-50ns lookup time
+# - Max capacity configurable (default 10,000 entries)
+# - TTL and TTI support for automatic expiration
+# - Thread-safe, async-friendly
+
+# CONFIGURATION TIPS:
+#
+# 1. Chain transforms with CONSTRUCT:
+#    transform: "CONSTRUCT:hash=HASH:SHA256,/field:original=/."
+#
+# 2. Use hash for custom partitioning:
+#    partitioner_type: field
+#    partitioner_field: "/hashField"
+#    transform: "HASH:MURMUR64,/userId,hashField"
+#
+# 3. Filter before hashing to reduce CPU:
+#    filter: "/important,==,true"
+#    transform: "HASH:SHA256,/data"
+#
+# 4. Use hash output field to preserve original:
+#    transform: "HASH:SHA256,/email,emailHash"
+#    # Original email still in message

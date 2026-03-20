@@ -1,0 +1,395 @@
+# Cache Backend Configuration Examples
+#
+# This file demonstrates different cache backend configurations:
+# - Local (Moka) cache
+# - Redis cache
+# - Kafka-backed cache
+# - Multi-level cache
+
+---
+# Example 1: Local Cache (Moka) - Default
+appid: local-cache-example
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: user-events
+output: enriched-events
+
+cache:
+  backend_type: local
+  local:
+    max_capacity: 10000
+    ttl_seconds: 3600    # 1 hour
+    tti_seconds: 600     # 10 minutes idle timeout
+
+# How to populate:
+# See "How to Build/Populate Moka Cache" section in docs
+
+---
+# Example 2: Redis Cache - Shared Across Instances
+appid: redis-cache-example
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: transactions
+output: enriched-transactions
+
+cache:
+  backend_type: redis
+  redis:
+    # Redis connection URL
+    url: "redis://localhost:6379/0"
+
+    # Connection pool size (concurrent connections)
+    pool_size: 10
+
+    # Key prefix to avoid collisions
+    key_prefix: "streamforge"
+
+    # Default TTL for cache entries (optional)
+    default_ttl_seconds: 3600
+
+# Redis must be running:
+# docker run -d -p 6379:6379 redis:7-alpine
+
+---
+# Example 3: Redis with Authentication
+appid: redis-secure-example
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: sensitive-data
+output: processed-data
+
+cache:
+  backend_type: redis
+  redis:
+    # Redis URL with password
+    url: "redis://:mypassword@redis-server:6379/0"
+
+    pool_size: 20
+    key_prefix: "secure-pipeline"
+    default_ttl_seconds: 7200
+
+---
+# Example 4: Kafka-Backed Cache (Compacted Topic)
+appid: kafka-cache-example
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: orders
+output: enriched-orders
+
+cache:
+  backend_type: kafka
+  kafka:
+    # Kafka bootstrap servers for cache topic
+    bootstrap: "kafka:9092"
+
+    # Compacted topic name
+    topic: "customer-profiles"
+
+    # Consumer group for cache consumer
+    group_id: "streamforge-cache-consumer"
+
+    # JSON path to extract key from message
+    key_field: "/customerId"
+
+    # JSON path to extract value (or "." for entire message)
+    value_field: "."
+
+    # Warm up cache on startup (consume entire topic)
+    warmup_on_start: true
+
+# Create compacted topic:
+# kafka-topics.sh --create --topic customer-profiles \
+#   --partitions 10 \
+#   --replication-factor 3 \
+#   --config cleanup.policy=compact \
+#   --config min.cleanable.dirty.ratio=0.1 \
+#   --config segment.ms=100
+
+---
+# Example 5: Kafka Cache with Nested Fields
+appid: kafka-cache-nested
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: events
+output: enriched-events
+
+cache:
+  backend_type: kafka
+  kafka:
+    bootstrap: "kafka:9092"
+    topic: "user-profiles-compacted"
+    group_id: "streamforge-cache"
+
+    # Extract nested fields
+    key_field: "/user/id"              # From message.user.id
+    value_field: "/user/profile"       # Cache only profile object
+
+    warmup_on_start: true
+
+# Message format:
+# {
+#   "user": {
+#     "id": "123",
+#     "profile": {
+#       "name": "John Doe",
+#       "email": "john@example.com"
+#     }
+#   }
+# }
+
+---
+# Example 6: Multi-Level Cache (Local + Redis)
+appid: multi-level-cache-example
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: high-volume-events
+output: enriched-events
+
+cache:
+  backend_type: multi
+
+  # L1: Fast local cache (hot set)
+  local:
+    max_capacity: 5000     # Smaller for hot entries
+    ttl_seconds: 300       # 5 minutes
+    tti_seconds: 60        # 1 minute idle
+
+  # L2: Large shared Redis cache
+  redis:
+    url: "redis://localhost:6379/0"
+    pool_size: 20
+    key_prefix: "multi-cache"
+    default_ttl_seconds: 3600  # 1 hour
+
+# Behavior:
+# 1. Check L1 (local) - 50ns if hit
+# 2. On miss, check L2 (Redis) - 1-2ms
+# 3. On L2 hit, promote to L1
+# 4. On L2 miss, cache miss
+
+---
+# Example 7: Production Multi-Level Cache
+appid: production-cache
+bootstrap: kafka-prod:9092
+target_broker: kafka-prod:9092
+input: user-activities
+output: enriched-activities
+threads: 16
+
+cache:
+  backend_type: multi
+
+  # L1: Large local cache
+  local:
+    max_capacity: 100000   # 100K entries
+    ttl_seconds: 600       # 10 minutes
+    tti_seconds: 300       # 5 minutes idle
+
+  # L2: Redis cluster
+  redis:
+    url: "redis://redis-cluster:6379/0"
+    pool_size: 50
+    key_prefix: "prod:enrichment"
+    default_ttl_seconds: 3600
+
+---
+# Example 8: No Cache (Disabled)
+appid: no-cache-example
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: events
+output: processed
+
+# No cache configuration = no caching
+# Use when:
+# - No enrichment needed
+# - Lookup not required
+# - Simple transformations only
+
+---
+# Example 9: Local Cache with Long TTL
+appid: reference-data-cache
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: transactions
+output: enriched-transactions
+
+cache:
+  backend_type: local
+  local:
+    # Large capacity for reference data
+    max_capacity: 500000
+
+    # Long TTL for slowly changing data
+    ttl_seconds: 86400  # 24 hours
+
+    # No idle timeout (keep all entries)
+    tti_seconds: null
+
+---
+# Example 10: Redis Cache with Short TTL
+appid: real-time-prices
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: trades
+output: enriched-trades
+
+cache:
+  backend_type: redis
+  redis:
+    url: "redis://localhost:6379/0"
+    pool_size: 30
+    key_prefix: "prices"
+
+    # Short TTL for real-time data
+    default_ttl_seconds: 60  # 1 minute
+
+---
+# HOW TO POPULATE MOKA CACHE
+
+# Method 1: Pre-populate on Startup (Rust Code)
+# ```rust
+# let cache = Arc::new(LookupCache::new(CacheConfig::default()));
+#
+# // Load from database
+# let users = load_from_db().await;
+# for user in users {
+#     cache.put(format!("user:{}", user.id), json!(user)).await;
+# }
+# ```
+
+# Method 2: Lazy Load (Get-or-Insert)
+# ```rust
+# cache.get_or_insert_with("user:123".to_string(), || async {
+#     Ok(fetch_from_database("123").await?)
+# }).await
+# ```
+
+# Method 3: Kafka Topic Consumer
+# ```rust
+# async fn sync_from_kafka(cache: Arc<LookupCache>) {
+#     let consumer = create_consumer("kafka:9092", "users");
+#     while let Ok(msg) = consumer.recv().await {
+#         let user: User = serde_json::from_slice(msg.payload())?;
+#         cache.put(format!("user:{}", user.id), json!(user)).await;
+#     }
+# }
+# ```
+
+# Method 4: Redis Sync
+# ```rust
+# async fn sync_from_redis(redis: &mut Connection, moka: &LookupCache) {
+#     let keys: Vec<String> = redis.keys("user:*").await?;
+#     for key in keys {
+#         let value: String = redis.get(&key).await?;
+#         moka.put(key, serde_json::from_str(&value)?).await;
+#     }
+# }
+# ```
+
+# Method 5: Scheduled Refresh
+# ```rust
+# tokio::spawn(async move {
+#     let mut interval = tokio::time::interval(Duration::from_secs(3600));
+#     loop {
+#         interval.tick().await;
+#         cache.clear().await;
+#         reload_cache(&cache).await;
+#     }
+# });
+# ```
+
+---
+# CACHE BACKEND COMPARISON
+
+# Local (Moka):
+#   Latency: 10-50ns (fastest)
+#   Capacity: Limited by RAM
+#   Shared: No (per-instance)
+#   Persistence: No (lost on restart)
+#   Use case: Small reference data, high QPS
+#
+# Redis:
+#   Latency: 1-2ms (network)
+#   Capacity: Large (GB-TB)
+#   Shared: Yes (all instances)
+#   Persistence: Yes (AOF/RDB)
+#   Use case: Shared state, large datasets
+#
+# Kafka:
+#   Latency: 5-10ms (network + Kafka)
+#   Capacity: Very large (compacted)
+#   Shared: Yes (via topic)
+#   Persistence: Yes (Kafka retention)
+#   Use case: Event-sourced cache, audit trail
+#
+# Multi-Level:
+#   Latency: 10ns-2ms (L1 hit / L2 hit)
+#   Capacity: Large (L2 capacity)
+#   Shared: Yes (L2 shared)
+#   Persistence: Yes (L2 persistence)
+#   Use case: Best of both worlds
+
+---
+# PERFORMANCE TIPS
+
+# 1. Choose the right backend:
+#    - Local: < 10K entries, read-heavy, no sharing needed
+#    - Redis: > 10K entries, need sharing, persistent
+#    - Kafka: Event-sourced, audit requirements
+#    - Multi: High QPS + sharing needed
+
+# 2. Tune capacity:
+#    - Local: Set based on available RAM
+#    - Redis: Monitor memory usage
+#    - Kafka: Ensure consumer keeps up
+
+# 3. Set appropriate TTL:
+#    - Frequently changing: Short TTL (5-15 min)
+#    - Stable reference data: Long TTL (hours/days)
+#    - Real-time data: Very short TTL (seconds/minutes)
+
+# 4. Use key prefixes:
+#    - Avoid collisions: "app1:user:123"
+#    - Enable bulk operations: DELETE keys app1:*
+#    - Organize namespaces: "prod:enrichment:user:123"
+
+# 5. Monitor cache hit rate:
+#    - Low hit rate = increase capacity or TTL
+#    - High miss rate = cache not being populated
+#    - Check logs for cache misses
+
+---
+# TROUBLESHOOTING
+
+# Problem: Low cache hit rate
+# Solution: Increase capacity or TTL
+cache:
+  local:
+    max_capacity: 50000  # Increase from 10000
+    ttl_seconds: 7200    # Increase from 3600
+
+# Problem: Redis connection timeouts
+# Solution: Increase pool size
+cache:
+  redis:
+    pool_size: 50  # Increase from 10
+
+# Problem: Kafka cache lag
+# Solution: Disable warmup or add partitions
+cache:
+  kafka:
+    warmup_on_start: false  # Skip warmup
+
+# Problem: High memory usage
+# Solution: Reduce capacity or enable TTI
+cache:
+  local:
+    max_capacity: 5000     # Reduce
+    tti_seconds: 300       # Enable idle eviction
+
+# Problem: Stale data in cache
+# Solution: Reduce TTL
+cache:
+  redis:
+    default_ttl_seconds: 300  # 5 minutes instead of 1 hour

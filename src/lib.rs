@@ -1,19 +1,27 @@
+pub mod cache;
+pub mod cache_backend;
+pub mod compression;
 pub mod config;
 pub mod error;
-pub mod kafka;
-pub mod processor;
-pub mod compression;
-pub mod partitioner;
-pub mod metrics;
 pub mod filter;
 pub mod filter_parser;
+pub mod hash;
+pub mod kafka;
+pub mod metrics;
+pub mod partitioner;
+pub mod processor;
 
-pub use config::{MirrorMakerConfig, DestinationConfig, RoutingConfig};
+pub use cache::{CacheConfig, CacheManager, CacheStats, LookupCache};
+pub use cache_backend::CacheBackend;
+pub use config::{
+    CacheBackendConfig, CacheBackendType, CommitMode, CommitStrategyConfig, DestinationConfig,
+    KafkaCacheConfig, LocalCacheConfig, MirrorMakerConfig, RedisCacheConfig, RoutingConfig,
+};
 pub use error::{MirrorMakerError, Result};
-pub use kafka::sink::KafkaSink;
 pub use filter::{
-    Filter, Transform,
-    JsonPathFilter, JsonPathTransform, ObjectConstructTransform,
-    AndFilter, OrFilter, NotFilter
+    AndFilter, AsyncTransform, CacheLookupTransform, Filter, HashTransform, JsonPathFilter,
+    JsonPathTransform, NotFilter, ObjectConstructTransform, OrFilter, Transform,
 };
 pub use filter_parser::{parse_filter, parse_transform};
+pub use hash::{hash_bytes, hash_value, HashAlgorithm};
+pub use kafka::sink::KafkaSink;

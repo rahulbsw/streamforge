@@ -45,6 +45,14 @@ pub struct MirrorMakerConfig {
     /// Security configuration
     #[serde(default)]
     pub security: Option<SecurityConfig>,
+
+    /// Commit strategy configuration
+    #[serde(default)]
+    pub commit_strategy: CommitStrategyConfig,
+
+    /// Cache configuration
+    #[serde(default)]
+    pub cache: Option<CacheBackendConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,6 +218,210 @@ impl Default for CompressionConfig {
         Self {
             compression_type: CompressionType::None,
             compression_algo: CompressionAlgo::Gzip,
+        }
+    }
+}
+
+/// Commit strategy configuration for at-least-once/at-most-once semantics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitStrategyConfig {
+    /// Enable manual commits (at-least-once) vs auto-commit (at-most-once)
+    /// Default: false (auto-commit for backward compatibility)
+    #[serde(default)]
+    pub manual_commit: bool,
+
+    /// Commit mode: Async or Sync
+    /// Async is faster but may lose commits on crash
+    /// Sync is slower but guarantees commits
+    #[serde(default)]
+    pub commit_mode: CommitMode,
+
+    /// Commit interval in milliseconds (for batching)
+    /// Only applies when manual_commit is true
+    /// Default: 5000 (5 seconds)
+    #[serde(default = "default_commit_interval_ms")]
+    pub commit_interval_ms: u64,
+
+    /// Enable dead letter queue for failed messages
+    #[serde(default)]
+    pub enable_dlq: bool,
+
+    /// Dead letter queue topic name
+    pub dlq_topic: Option<String>,
+
+    /// Maximum retries before sending to DLQ
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+
+    /// Retry backoff strategy
+    #[serde(default)]
+    pub retry_backoff: RetryBackoffConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CommitMode {
+    /// Async commit (faster, may lose on crash)
+    #[default]
+    Async,
+    /// Sync commit (slower, guaranteed)
+    Sync,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryBackoffConfig {
+    /// Initial backoff in milliseconds
+    #[serde(default = "default_initial_backoff_ms")]
+    pub initial_backoff_ms: u64,
+
+    /// Maximum backoff in milliseconds
+    #[serde(default = "default_max_backoff_ms")]
+    pub max_backoff_ms: u64,
+
+    /// Backoff multiplier
+    #[serde(default = "default_backoff_multiplier")]
+    pub multiplier: f64,
+}
+
+/// Cache backend configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheBackendConfig {
+    /// Cache backend type: local, redis, kafka
+    pub backend_type: CacheBackendType,
+
+    /// Local cache configuration
+    pub local: Option<LocalCacheConfig>,
+
+    /// Redis cache configuration
+    pub redis: Option<RedisCacheConfig>,
+
+    /// Kafka-backed cache configuration
+    pub kafka: Option<KafkaCacheConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CacheBackendType {
+    /// In-memory cache (Moka)
+    Local,
+    /// Redis cache
+    Redis,
+    /// Kafka compacted topic as cache
+    Kafka,
+    /// Multi-level: local + Redis
+    Multi,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalCacheConfig {
+    /// Maximum number of cache entries
+    #[serde(default = "default_cache_capacity")]
+    pub max_capacity: u64,
+
+    /// Time-to-live in seconds
+    pub ttl_seconds: Option<u64>,
+
+    /// Time-to-idle in seconds
+    pub tti_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedisCacheConfig {
+    /// Redis connection URL
+    /// Format: redis://[:password@]host[:port][/database]
+    /// Example: redis://localhost:6379/0
+    pub url: String,
+
+    /// Connection pool size
+    #[serde(default = "default_redis_pool_size")]
+    pub pool_size: usize,
+
+    /// Key prefix for all cache keys
+    pub key_prefix: Option<String>,
+
+    /// Default TTL in seconds for cache entries
+    pub default_ttl_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KafkaCacheConfig {
+    /// Kafka bootstrap servers for cache topic
+    pub bootstrap: String,
+
+    /// Compacted topic name to use as cache
+    pub topic: String,
+
+    /// Consumer group for cache consumer
+    pub group_id: String,
+
+    /// Key field in message (JSON path)
+    pub key_field: String,
+
+    /// Value field in message (JSON path, or "." for entire message)
+    #[serde(default = "default_value_field")]
+    pub value_field: String,
+
+    /// Warm up cache on startup (consume entire topic)
+    #[serde(default = "default_true")]
+    pub warmup_on_start: bool,
+}
+
+fn default_commit_interval_ms() -> u64 {
+    5000 // 5 seconds
+}
+
+fn default_max_retries() -> u32 {
+    3
+}
+
+fn default_initial_backoff_ms() -> u64 {
+    100
+}
+
+fn default_max_backoff_ms() -> u64 {
+    30000 // 30 seconds
+}
+
+fn default_backoff_multiplier() -> f64 {
+    2.0
+}
+
+fn default_cache_capacity() -> u64 {
+    10_000
+}
+
+fn default_redis_pool_size() -> usize {
+    10
+}
+
+fn default_value_field() -> String {
+    ".".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for CommitStrategyConfig {
+    fn default() -> Self {
+        Self {
+            manual_commit: false, // Auto-commit by default for backward compatibility
+            commit_mode: CommitMode::Async,
+            commit_interval_ms: default_commit_interval_ms(),
+            enable_dlq: false,
+            dlq_topic: None,
+            max_retries: default_max_retries(),
+            retry_backoff: RetryBackoffConfig::default(),
+        }
+    }
+}
+
+impl Default for RetryBackoffConfig {
+    fn default() -> Self {
+        Self {
+            initial_backoff_ms: default_initial_backoff_ms(),
+            max_backoff_ms: default_max_backoff_ms(),
+            multiplier: default_backoff_multiplier(),
         }
     }
 }

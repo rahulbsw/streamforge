@@ -1,0 +1,126 @@
+# Multi-Cluster Pipeline with Different Credentials
+# This example shows a pipeline that mirrors data between two different
+# Kafka clusters, each with their own authentication credentials
+apiVersion: streamforge.io/v1alpha1
+kind: StreamforgePipeline
+metadata:
+  name: multi-cluster-secure-pipeline
+  namespace: streamforge-system
+spec:
+  # Source: Production Kafka cluster with SASL/SCRAM
+  source:
+    brokers: "prod-kafka.prod.svc.cluster.local:9093"
+    topic: "prod-events"
+    offset: "latest"
+    groupId: "mirror-to-analytics"
+    security:
+      protocol: "SASL_SSL"
+      ssl:
+        # Production CA certificate
+        caSecret:
+          name: prod-kafka-ca
+          key: ca.crt
+      sasl:
+        mechanism: "SCRAM-SHA-512"
+        # Production credentials
+        usernameSecret:
+          name: prod-kafka-credentials
+          key: username
+        passwordSecret:
+          name: prod-kafka-credentials
+          key: password
+
+  # Destination 1: Analytics Kafka cluster with different SASL credentials
+  destinations:
+    - brokers: "analytics-kafka.analytics.svc.cluster.local:9093"
+      topic: "analytics-events"
+      security:
+        protocol: "SASL_SSL"
+        ssl:
+          # Analytics CA certificate (different from prod)
+          caSecret:
+            name: analytics-kafka-ca
+            key: ca.crt
+        sasl:
+          mechanism: "SCRAM-SHA-256"
+          # Analytics credentials (different from prod)
+          usernameSecret:
+            name: analytics-kafka-credentials
+            key: username
+          passwordSecret:
+            name: analytics-kafka-credentials
+            key: password
+
+    # Destination 2: Backup Kafka cluster with mTLS authentication
+    - brokers: "backup-kafka.backup.svc.cluster.local:9093"
+      topic: "backup-events"
+      security:
+        protocol: "SSL"
+        ssl:
+          # Backup cluster uses client certificates
+          caSecret:
+            name: backup-kafka-tls
+            key: ca.crt
+          certificateSecret:
+            name: backup-kafka-tls
+            key: client.crt
+          keySecret:
+            name: backup-kafka-tls
+            key: client.key
+
+  replicas: 3
+  threads: 8
+  appid: "multi-cluster-mirror"
+
+---
+# Secret Mounting Result:
+# The operator will mount secrets to avoid conflicts:
+#
+# /etc/streamforge/secrets/
+# ├── source/                          # Production cluster credentials
+# │   ├── prod-kafka-ca/
+# │   │   └── ca.crt
+# │   └── prod-kafka-credentials/
+# │       ├── username
+# │       └── password
+# ├── destination-0/                   # Analytics cluster credentials
+# │   ├── analytics-kafka-ca/
+# │   │   └── ca.crt
+# │   └── analytics-kafka-credentials/
+# │       ├── username
+# │       └── password
+# └── destination-1/                   # Backup cluster credentials
+#     └── backup-kafka-tls/
+#         ├── ca.crt
+#         ├── client.crt
+#         └── client.key
+
+---
+# Create the required secrets:
+#
+# # Production cluster
+# kubectl create secret generic prod-kafka-ca \
+#   --from-file=ca.crt=prod-ca.pem \
+#   -n streamforge-system
+#
+# kubectl create secret generic prod-kafka-credentials \
+#   --from-literal=username=prod-user \
+#   --from-literal=password=prod-password \
+#   -n streamforge-system
+#
+# # Analytics cluster
+# kubectl create secret generic analytics-kafka-ca \
+#   --from-file=ca.crt=analytics-ca.pem \
+#   -n streamforge-system
+#
+# kubectl create secret generic analytics-kafka-credentials \
+#   --from-literal=username=analytics-user \
+#   --from-literal=password=analytics-password \
+#   -n streamforge-system
+#
+# # Backup cluster
+# kubectl create secret generic backup-kafka-tls \
+#   --from-file=ca.crt=backup-ca.pem \
+#   --from-file=client.crt=backup-client.pem \
+#   --from-file=client.key=backup-client-key.pem \
+#   -n streamforge-system

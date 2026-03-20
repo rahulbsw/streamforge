@@ -206,8 +206,7 @@ impl MultiSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{CompressionConfig, MirrorMakerConfig};
-    use serde_json::json;
+    use crate::config::{CompressionConfig, CommitStrategyConfig, MirrorMakerConfig};
 
     fn create_test_config() -> MirrorMakerConfig {
         MirrorMakerConfig {
@@ -223,6 +222,8 @@ mod tests {
             consumer_properties: HashMap::new(),
             producer_properties: HashMap::new(),
             security: None,
+            commit_strategy: CommitStrategyConfig::default(),
+            cache: None,
         }
     }
 
@@ -238,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_multi_sink() {
-        let mut multi = MultiSink::new();
+        let multi = MultiSink::new();
         assert_eq!(multi.sinks.len(), 0);
     }
 }

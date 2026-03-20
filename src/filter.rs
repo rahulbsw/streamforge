@@ -1,6 +1,9 @@
+use crate::cache::LookupCache;
 use crate::error::{MirrorMakerError, Result};
+use crate::hash::{hash_value, HashAlgorithm};
 use regex::Regex;
 use serde_json::{json, Map, Value};
+use std::sync::Arc;
 
 /// Filter trait for evaluating whether a message should be processed
 pub trait Filter: Send + Sync {
@@ -693,6 +696,256 @@ impl Transform for ArithmeticTransform {
     }
 }
 
+/// Hash transform
+///
+/// Hashes a field value using the specified algorithm.
+///
+/// Algorithms: MD5, SHA256, SHA512, Murmur64, Murmur128
+///
+/// Example:
+/// ```
+/// # use streamforge::filter::HashTransform;
+/// # use streamforge::hash::HashAlgorithm;
+/// // Hash a field with SHA256
+/// let transform = HashTransform::new("/message/userId", HashAlgorithm::Sha256).unwrap();
+///
+/// // Hash with MD5 for fast partitioning
+/// let transform = HashTransform::new("/message/id", HashAlgorithm::Md5).unwrap();
+///
+/// // Hash with Murmur for deterministic distribution
+/// let transform = HashTransform::new("/message/key", HashAlgorithm::Murmur128).unwrap();
+/// ```
+pub struct HashTransform {
+    path: String,
+    algorithm: HashAlgorithm,
+    output_field: Option<String>,
+}
+
+impl HashTransform {
+    /// Create a new hash transform
+    ///
+    /// # Arguments
+    /// * `path` - JSON path to the field to hash
+    /// * `algorithm` - Hash algorithm to use
+    pub fn new(path: &str, algorithm: HashAlgorithm) -> Result<Self> {
+        Ok(Self {
+            path: path.to_string(),
+            algorithm,
+            output_field: None,
+        })
+    }
+
+    /// Create a new hash transform with output field name
+    ///
+    /// # Arguments
+    /// * `path` - JSON path to the field to hash
+    /// * `algorithm` - Hash algorithm to use
+    /// * `output_field` - Name of the field to store hash in (preserves original)
+    pub fn new_with_output(path: &str, algorithm: HashAlgorithm, output_field: &str) -> Result<Self> {
+        Ok(Self {
+            path: path.to_string(),
+            algorithm,
+            output_field: Some(output_field.to_string()),
+        })
+    }
+
+    /// Extract value from JSON using path
+    fn extract_value(&self, value: &Value) -> Option<Value> {
+        let parts: Vec<&str> = self.path.trim_matches('/').split('/').collect();
+
+        let mut current = value;
+        for part in parts {
+            current = current.get(part)?;
+        }
+
+        Some(current.clone())
+    }
+}
+
+impl Transform for HashTransform {
+    fn transform(&self, value: Value) -> Result<Value> {
+        let extracted = self
+            .extract_value(&value)
+            .ok_or_else(|| MirrorMakerError::Processing(format!("Path not found: {}", self.path)))?;
+
+        let hash = hash_value(&extracted, self.algorithm)?;
+
+        // If output_field is specified, merge hash with original value
+        if let Some(output_field) = &self.output_field {
+            if let Value::Object(mut obj) = value {
+                obj.insert(output_field.clone(), Value::String(hash));
+                Ok(Value::Object(obj))
+            } else {
+                // If not an object, create a new object with both
+                let mut result = Map::new();
+                result.insert("original".to_string(), value);
+                result.insert(output_field.clone(), Value::String(hash));
+                Ok(Value::Object(result))
+            }
+        } else {
+            // Replace with hash value only
+            Ok(Value::String(hash))
+        }
+    }
+}
+
+/// Cache lookup transform
+///
+/// Looks up a value in cache and enriches the message with the result.
+///
+/// Example:
+/// ```ignore
+/// # use streamforge::filter::CacheLookupTransform;
+/// # use streamforge::cache::{LookupCache, CacheConfig};
+/// # use std::sync::Arc;
+/// // Create cache
+/// let cache = Arc::new(LookupCache::new(CacheConfig::default()));
+///
+/// // Lookup user by ID and add to message
+/// let transform = CacheLookupTransform::new(
+///     cache,
+///     "/userId",           // Key path in message
+///     "user",              // Cache key prefix
+///     Some("userProfile")  // Output field name
+/// ).unwrap();
+/// ```
+pub struct CacheLookupTransform {
+    cache: Arc<LookupCache>,
+    key_path: String,
+    cache_key_prefix: Option<String>,
+    output_field: String,
+    merge_result: bool,
+}
+
+impl CacheLookupTransform {
+    /// Create a new cache lookup transform
+    ///
+    /// # Arguments
+    /// * `cache` - Shared cache instance
+    /// * `key_path` - JSON path to extract lookup key from
+    /// * `cache_key_prefix` - Optional prefix for cache keys (e.g., "user:")
+    /// * `output_field` - Field name to store lookup result
+    pub fn new(
+        cache: Arc<LookupCache>,
+        key_path: &str,
+        cache_key_prefix: Option<&str>,
+        output_field: Option<&str>,
+    ) -> Result<Self> {
+        Ok(Self {
+            cache,
+            key_path: key_path.to_string(),
+            cache_key_prefix: cache_key_prefix.map(|s| s.to_string()),
+            output_field: output_field.unwrap_or("lookup_result").to_string(),
+            merge_result: false,
+        })
+    }
+
+    /// Create a cache lookup transform that merges results
+    ///
+    /// Instead of adding a new field, merge the lookup result into the message
+    pub fn new_with_merge(
+        cache: Arc<LookupCache>,
+        key_path: &str,
+        cache_key_prefix: Option<&str>,
+    ) -> Result<Self> {
+        Ok(Self {
+            cache,
+            key_path: key_path.to_string(),
+            cache_key_prefix: cache_key_prefix.map(|s| s.to_string()),
+            output_field: String::new(),
+            merge_result: true,
+        })
+    }
+
+    /// Extract lookup key from JSON using path
+    fn extract_key(&self, value: &Value) -> Option<String> {
+        let parts: Vec<&str> = self.key_path.trim_matches('/').split('/').collect();
+
+        let mut current = value;
+        for part in parts {
+            current = current.get(part)?;
+        }
+
+        // Convert to string
+        match current {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Build cache key with optional prefix
+    fn build_cache_key(&self, key: &str) -> String {
+        if let Some(prefix) = &self.cache_key_prefix {
+            format!("{}:{}", prefix, key)
+        } else {
+            key.to_string()
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Transform for CacheLookupTransform {
+    fn transform(&self, _value: Value) -> Result<Value> {
+        // Note: We can't use async in the sync Transform trait
+        // This is a limitation - in practice, you'd want to use an async transform trait
+        // For now, this serves as a placeholder structure
+        Err(MirrorMakerError::Processing(
+            "CacheLookupTransform requires async context - use AsyncTransform instead".to_string()
+        ))
+    }
+}
+
+/// Async transform trait for cache lookups
+#[async_trait::async_trait]
+pub trait AsyncTransform: Send + Sync {
+    async fn transform_async(&self, value: Value) -> Result<Value>;
+}
+
+#[async_trait::async_trait]
+impl AsyncTransform for CacheLookupTransform {
+    async fn transform_async(&self, value: Value) -> Result<Value> {
+        let key = self
+            .extract_key(&value)
+            .ok_or_else(|| MirrorMakerError::Processing(format!("Key path not found: {}", self.key_path)))?;
+
+        let cache_key = self.build_cache_key(&key);
+
+        // Lookup in cache
+        if let Some(lookup_result) = self.cache.get(&cache_key).await {
+            if self.merge_result {
+                // Merge lookup result into original value
+                if let (Value::Object(mut orig_obj), Value::Object(lookup_obj)) = (value, lookup_result) {
+                    for (k, v) in lookup_obj {
+                        orig_obj.insert(k, v);
+                    }
+                    Ok(Value::Object(orig_obj))
+                } else {
+                    Err(MirrorMakerError::Processing(
+                        "Cannot merge: both values must be objects".to_string()
+                    ))
+                }
+            } else {
+                // Add lookup result as new field
+                if let Value::Object(mut obj) = value {
+                    obj.insert(self.output_field.clone(), lookup_result);
+                    Ok(Value::Object(obj))
+                } else {
+                    // If not an object, create a new object
+                    let mut result = Map::new();
+                    result.insert("original".to_string(), value);
+                    result.insert(self.output_field.clone(), lookup_result);
+                    Ok(Value::Object(result))
+                }
+            }
+        } else {
+            // Cache miss - return original value unchanged
+            tracing::debug!("Cache miss for key: {}", cache_key);
+            Ok(value)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1090,5 +1343,228 @@ mod tests {
         let input = json!({"order": {"price": 100.0, "shipping": 10.0}});
         let result = transform.transform(input).unwrap();
         assert_eq!(result, json!(110.0));
+    }
+
+    #[test]
+    fn test_hash_transform_md5() {
+        use crate::hash::HashAlgorithm;
+
+        let transform = HashTransform::new("/message/userId", HashAlgorithm::Md5).unwrap();
+        let input = json!({"message": {"userId": "user123"}});
+        let result = transform.transform(input).unwrap();
+
+        // Should return MD5 hash as string
+        assert!(result.is_string());
+        let hash = result.as_str().unwrap();
+        assert_eq!(hash.len(), 32); // MD5 is 32 hex chars
+    }
+
+    #[test]
+    fn test_hash_transform_sha256() {
+        use crate::hash::HashAlgorithm;
+
+        let transform = HashTransform::new("/message/email", HashAlgorithm::Sha256).unwrap();
+        let input = json!({"message": {"email": "user@example.com"}});
+        let result = transform.transform(input).unwrap();
+
+        assert!(result.is_string());
+        let hash = result.as_str().unwrap();
+        assert_eq!(hash.len(), 64); // SHA256 is 64 hex chars
+    }
+
+    #[test]
+    fn test_hash_transform_with_output_field() {
+        use crate::hash::HashAlgorithm;
+
+        let transform = HashTransform::new_with_output(
+            "/userId",
+            HashAlgorithm::Md5,
+            "userIdHash"
+        ).unwrap();
+
+        let input = json!({"userId": "user123", "name": "Test User"});
+        let result = transform.transform(input).unwrap();
+
+        // Should preserve original fields and add hash
+        assert_eq!(result.get("userId").unwrap(), &json!("user123"));
+        assert_eq!(result.get("name").unwrap(), &json!("Test User"));
+        assert!(result.get("userIdHash").unwrap().is_string());
+    }
+
+    #[test]
+    fn test_hash_transform_murmur() {
+        use crate::hash::HashAlgorithm;
+
+        let transform = HashTransform::new("/message/key", HashAlgorithm::Murmur128).unwrap();
+        let input = json!({"message": {"key": "partition-key"}});
+        let result = transform.transform(input).unwrap();
+
+        assert!(result.is_string());
+        let hash = result.as_str().unwrap();
+        assert_eq!(hash.len(), 32); // Murmur128 is 32 hex chars
+    }
+
+    #[test]
+    fn test_hash_transform_consistency() {
+        use crate::hash::HashAlgorithm;
+
+        let transform = HashTransform::new("/value", HashAlgorithm::Sha256).unwrap();
+        let input = json!({"value": "test"});
+
+        let result1 = transform.transform(input.clone()).unwrap();
+        let result2 = transform.transform(input).unwrap();
+
+        // Same input should produce same hash
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_hash_transform_missing_field() {
+        use crate::hash::HashAlgorithm;
+
+        let transform = HashTransform::new("/nonexistent", HashAlgorithm::Md5).unwrap();
+        let input = json!({"other": "field"});
+        let result = transform.transform(input);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hash_transform_nested_path() {
+        use crate::hash::HashAlgorithm;
+
+        let transform = HashTransform::new("/user/profile/email", HashAlgorithm::Sha256).unwrap();
+        let input = json!({
+            "user": {
+                "profile": {
+                    "email": "test@example.com"
+                }
+            }
+        });
+        let result = transform.transform(input).unwrap();
+
+        assert!(result.is_string());
+        assert_eq!(result.as_str().unwrap().len(), 64);
+    }
+
+    #[tokio::test]
+    async fn test_cache_lookup_transform_basic() {
+        use crate::cache::{CacheConfig, LookupCache};
+        use std::sync::Arc;
+
+        let cache = Arc::new(LookupCache::new(CacheConfig::default()));
+
+        // Pre-populate cache
+        cache.put("user:123".to_string(), json!({"name": "John Doe", "age": 30})).await;
+
+        let transform = CacheLookupTransform::new(
+            cache,
+            "/userId",
+            Some("user"),
+            Some("userProfile")
+        ).unwrap();
+
+        let input = json!({"userId": "123", "action": "login"});
+        let result = transform.transform_async(input).await.unwrap();
+
+        assert_eq!(result.get("userId").unwrap(), &json!("123"));
+        assert_eq!(result.get("action").unwrap(), &json!("login"));
+        assert_eq!(
+            result.get("userProfile").unwrap(),
+            &json!({"name": "John Doe", "age": 30})
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cache_lookup_transform_miss() {
+        use crate::cache::{CacheConfig, LookupCache};
+        use std::sync::Arc;
+
+        let cache = Arc::new(LookupCache::new(CacheConfig::default()));
+
+        let transform = CacheLookupTransform::new(
+            cache,
+            "/userId",
+            Some("user"),
+            Some("userProfile")
+        ).unwrap();
+
+        let input = json!({"userId": "999", "action": "login"});
+        let result = transform.transform_async(input.clone()).await.unwrap();
+
+        // On cache miss, should return original value unchanged
+        assert_eq!(result, input);
+    }
+
+    #[tokio::test]
+    async fn test_cache_lookup_transform_merge() {
+        use crate::cache::{CacheConfig, LookupCache};
+        use std::sync::Arc;
+
+        let cache = Arc::new(LookupCache::new(CacheConfig::default()));
+
+        // Pre-populate cache
+        cache.put("product:ABC".to_string(), json!({"price": 99.99, "inStock": true})).await;
+
+        let transform = CacheLookupTransform::new_with_merge(
+            cache,
+            "/productId",
+            Some("product")
+        ).unwrap();
+
+        let input = json!({"productId": "ABC", "quantity": 2});
+        let result = transform.transform_async(input).await.unwrap();
+
+        // Should merge cache result into original
+        assert_eq!(result.get("productId").unwrap(), &json!("ABC"));
+        assert_eq!(result.get("quantity").unwrap(), &json!(2));
+        assert_eq!(result.get("price").unwrap(), &json!(99.99));
+        assert_eq!(result.get("inStock").unwrap(), &json!(true));
+    }
+
+    #[tokio::test]
+    async fn test_cache_lookup_transform_no_prefix() {
+        use crate::cache::{CacheConfig, LookupCache};
+        use std::sync::Arc;
+
+        let cache = Arc::new(LookupCache::new(CacheConfig::default()));
+
+        // Pre-populate cache without prefix
+        cache.put("123".to_string(), json!({"value": "cached"})).await;
+
+        let transform = CacheLookupTransform::new(
+            cache,
+            "/id",
+            None,
+            Some("cached_data")
+        ).unwrap();
+
+        let input = json!({"id": "123"});
+        let result = transform.transform_async(input).await.unwrap();
+
+        assert_eq!(result.get("cached_data").unwrap(), &json!({"value": "cached"}));
+    }
+
+    #[tokio::test]
+    async fn test_cache_lookup_transform_numeric_key() {
+        use crate::cache::{CacheConfig, LookupCache};
+        use std::sync::Arc;
+
+        let cache = Arc::new(LookupCache::new(CacheConfig::default()));
+
+        // Pre-populate cache
+        cache.put("order:12345".to_string(), json!({"status": "shipped"})).await;
+
+        let transform = CacheLookupTransform::new(
+            cache,
+            "/orderId",
+            Some("order"),
+            Some("orderDetails")
+        ).unwrap();
+
+        let input = json!({"orderId": 12345});
+        let result = transform.transform_async(input).await.unwrap();
+
+        assert_eq!(result.get("orderDetails").unwrap(), &json!({"status": "shipped"}));
     }
 }

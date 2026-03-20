@@ -259,7 +259,12 @@ threads: 4
   - `app.kubernetes.io/name: streamforge`
   - `app.kubernetes.io/instance: {pipeline-name}`
   - `streamforge.io/pipeline: {pipeline-name}`
-- **Volume Mounts**: ConfigMap mounted at `/etc/streamforge/config.yaml`
+- **Volume Mounts**:
+  - ConfigMap mounted at `/etc/streamforge/config.yaml`
+  - Secrets mounted at `/etc/streamforge/secrets/{role}/{secret-name}/`
+    - `role` = `source`, `destination-0`, `destination-1`, etc.
+    - Organized by cluster to avoid conflicts
+    - Read-only with 0400 permissions
 
 ## Advanced Features
 
@@ -282,7 +287,7 @@ spec:
 
 ### Security Configuration
 
-#### SASL/SCRAM
+#### SASL/SCRAM (Inline - Not Recommended)
 
 ```yaml
 spec:
@@ -293,11 +298,49 @@ spec:
       protocol: "SASL_SSL"
       sasl:
         mechanism: "SCRAM-SHA-512"
-        username: "user"
-        password: "pass"
+        username: "user"    # ❌ Not secure - credentials in Git
+        password: "pass"    # ❌ Not secure - credentials in Git
 ```
 
-#### Kerberos
+#### SASL with Kubernetes Secrets (Recommended)
+
+```yaml
+spec:
+  source:
+    brokers: "kafka:9093"
+    topic: "input"
+    security:
+      protocol: "SASL_SSL"
+      ssl:
+        caSecret:
+          name: kafka-ca-cert
+          key: ca.crt
+      sasl:
+        mechanism: "SCRAM-SHA-512"
+        usernameSecret:      # ✅ Secure - from K8s secret
+          name: kafka-credentials
+          key: username
+        passwordSecret:      # ✅ Secure - from K8s secret
+          name: kafka-credentials
+          key: password
+```
+
+**Create the secret:**
+```bash
+kubectl create secret generic kafka-credentials \
+  --from-literal=username=myuser \
+  --from-literal=password=mypassword \
+  -n streamforge-system
+```
+
+**Secrets are automatically mounted at:**
+```
+/etc/streamforge/secrets/source/kafka-credentials/
+├── username
+└── password
+```
+
+#### Kerberos with Secrets
 
 ```yaml
 spec:
@@ -306,12 +349,76 @@ spec:
     topic: "input"
     security:
       protocol: "SASL_SSL"
-      kerberos:
-        serviceName: "kafka"
-        realm: "EXAMPLE.COM"
-        principal: "user@EXAMPLE.COM"
-        keytab: "/etc/keytab"
+      sasl:
+        mechanism: "GSSAPI"
+        kerberosServiceName: "kafka"
+        keytabSecret:
+          name: kafka-kerberos
+          key: krb5.keytab
 ```
+
+**Create the keytab secret:**
+```bash
+kubectl create secret generic kafka-kerberos \
+  --from-file=krb5.keytab=/path/to/keytab \
+  -n streamforge-system
+```
+
+#### Multi-Cluster with Different Credentials
+
+When mirroring between different Kafka clusters with independent authentication:
+
+```yaml
+spec:
+  source:
+    brokers: "prod-kafka:9093"
+    topic: "events"
+    security:
+      protocol: "SASL_SSL"
+      ssl:
+        caSecret:
+          name: prod-ca
+          key: ca.crt
+      sasl:
+        mechanism: "SCRAM-SHA-512"
+        usernameSecret:
+          name: prod-credentials
+          key: username
+        passwordSecret:
+          name: prod-credentials
+          key: password
+
+  destinations:
+    - brokers: "analytics-kafka:9093"
+      topic: "analytics-events"
+      security:
+        protocol: "SASL_SSL"
+        ssl:
+          caSecret:
+            name: analytics-ca
+            key: ca.crt
+        sasl:
+          mechanism: "SCRAM-SHA-256"
+          usernameSecret:
+            name: analytics-credentials
+            key: username
+          passwordSecret:
+            name: analytics-credentials
+            key: password
+```
+
+**Secrets are mounted with role prefixes to avoid conflicts:**
+```
+/etc/streamforge/secrets/
+├── source/
+│   ├── prod-ca/
+│   └── prod-credentials/
+└── destination-0/
+    ├── analytics-ca/
+    └── analytics-credentials/
+```
+
+📖 **See [examples/pipelines/SECRETS.md](../../examples/pipelines/SECRETS.md) for complete secret management guide**
 
 ### Resource Overrides
 

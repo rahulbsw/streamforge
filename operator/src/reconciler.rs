@@ -247,6 +247,7 @@ impl PipelineReconciler {
     }
 
     /// Add secret volumes and mounts for SSL/SASL credentials
+    /// Secrets are mounted with source/destination prefixes to avoid conflicts
     fn add_secret_volumes(
         &self,
         pipeline: &StreamforgePipeline,
@@ -258,29 +259,30 @@ impl PipelineReconciler {
         // Collect secrets from source security config
         if let Some(security) = &pipeline.spec.source.security {
             if let Some(ssl) = &security.ssl {
-                self.collect_ssl_secrets(ssl, &mut secret_names);
+                self.collect_ssl_secrets(ssl, &mut secret_names, "source");
             }
             if let Some(sasl) = &security.sasl {
-                self.collect_sasl_secrets(sasl, &mut secret_names);
+                self.collect_sasl_secrets(sasl, &mut secret_names, "source");
             }
         }
 
         // Collect secrets from destination security configs
-        for dest in &pipeline.spec.destinations {
+        for (idx, dest) in pipeline.spec.destinations.iter().enumerate() {
+            let prefix = format!("destination-{}", idx);
             if let Some(security) = &dest.security {
                 if let Some(ssl) = &security.ssl {
-                    self.collect_ssl_secrets(ssl, &mut secret_names);
+                    self.collect_ssl_secrets(ssl, &mut secret_names, &prefix);
                 }
                 if let Some(sasl) = &security.sasl {
-                    self.collect_sasl_secrets(sasl, &mut secret_names);
+                    self.collect_sasl_secrets(sasl, &mut secret_names, &prefix);
                 }
             }
         }
 
-        // Create volumes and mounts for each unique secret
-        for (idx, secret_name) in secret_names.iter().enumerate() {
+        // Create volumes and mounts for each unique secret with role prefix
+        for (idx, (role, secret_name)) in secret_names.iter().enumerate() {
             let volume_name = format!("secret-{}", idx);
-            let mount_path = format!("/etc/streamforge/secrets/{}", secret_name);
+            let mount_path = format!("/etc/streamforge/secrets/{}/{}", role, secret_name);
 
             volumes.push(Volume {
                 name: volume_name.clone(),
@@ -302,30 +304,40 @@ impl PipelineReconciler {
         }
     }
 
-    fn collect_ssl_secrets(&self, ssl: &crate::crd::SslConfig, secrets: &mut std::collections::HashSet<String>) {
+    fn collect_ssl_secrets(
+        &self,
+        ssl: &crate::crd::SslConfig,
+        secrets: &mut std::collections::HashSet<(String, String)>,
+        role: &str,
+    ) {
         if let Some(ref secret_ref) = ssl.ca_secret {
-            secrets.insert(secret_ref.name.clone());
+            secrets.insert((role.to_string(), secret_ref.name.clone()));
         }
         if let Some(ref secret_ref) = ssl.certificate_secret {
-            secrets.insert(secret_ref.name.clone());
+            secrets.insert((role.to_string(), secret_ref.name.clone()));
         }
         if let Some(ref secret_ref) = ssl.key_secret {
-            secrets.insert(secret_ref.name.clone());
+            secrets.insert((role.to_string(), secret_ref.name.clone()));
         }
         if let Some(ref secret_ref) = ssl.key_password_secret {
-            secrets.insert(secret_ref.name.clone());
+            secrets.insert((role.to_string(), secret_ref.name.clone()));
         }
     }
 
-    fn collect_sasl_secrets(&self, sasl: &crate::crd::SaslConfig, secrets: &mut std::collections::HashSet<String>) {
+    fn collect_sasl_secrets(
+        &self,
+        sasl: &crate::crd::SaslConfig,
+        secrets: &mut std::collections::HashSet<(String, String)>,
+        role: &str,
+    ) {
         if let Some(ref secret_ref) = sasl.username_secret {
-            secrets.insert(secret_ref.name.clone());
+            secrets.insert((role.to_string(), secret_ref.name.clone()));
         }
         if let Some(ref secret_ref) = sasl.password_secret {
-            secrets.insert(secret_ref.name.clone());
+            secrets.insert((role.to_string(), secret_ref.name.clone()));
         }
         if let Some(ref secret_ref) = sasl.keytab_secret {
-            secrets.insert(secret_ref.name.clone());
+            secrets.insert((role.to_string(), secret_ref.name.clone()));
         }
     }
 

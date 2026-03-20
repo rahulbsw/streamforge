@@ -1,9 +1,10 @@
 use crate::error::{MirrorMakerError, Result};
 use crate::filter::{
     AndFilter, ArithmeticOp, ArithmeticTransform, ArrayFilter, ArrayFilterMode, ArrayMapTransform,
-    Filter, JsonPathFilter, JsonPathTransform, NotFilter, ObjectConstructTransform, OrFilter,
-    RegexFilter, Transform,
+    Filter, HashTransform, JsonPathFilter, JsonPathTransform, NotFilter, ObjectConstructTransform,
+    OrFilter, RegexFilter, Transform,
 };
+use crate::hash::HashAlgorithm;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -157,6 +158,8 @@ fn parse_array_filter(parts: &[&str], mode: ArrayFilterMode) -> Result<Box<dyn F
 /// - Arithmetic: "ARITHMETIC:op,operand1,operand2"
 ///   - op: ADD, SUB, MUL, DIV
 ///   - operands: /path or numeric constant
+/// - Hash: "HASH:algorithm,/path" or "HASH:algorithm,/path,output_field"
+///   - algorithm: MD5, SHA256, SHA512, MURMUR64, MURMUR128
 pub fn parse_transform(expr: &str) -> Result<Arc<dyn Transform>> {
     if expr.starts_with("CONSTRUCT:") {
         parse_construct_transform(&expr[10..])
@@ -164,6 +167,8 @@ pub fn parse_transform(expr: &str) -> Result<Arc<dyn Transform>> {
         parse_array_map_transform(&expr[10..])
     } else if expr.starts_with("ARITHMETIC:") {
         parse_arithmetic_transform(&expr[11..])
+    } else if expr.starts_with("HASH:") {
+        parse_hash_transform(&expr[5..])
     } else {
         Ok(Arc::new(JsonPathTransform::new(expr)?))
     }
@@ -234,6 +239,29 @@ fn parse_arithmetic_transform(expr: &str) -> Result<Arc<dyn Transform>> {
         Ok(Arc::new(ArithmeticTransform::new_with_constant(op, left_path, constant)?))
     } else {
         Ok(Arc::new(ArithmeticTransform::new_with_paths(op, left_path, parts[2])?))
+    }
+}
+
+fn parse_hash_transform(expr: &str) -> Result<Arc<dyn Transform>> {
+    let parts: Vec<&str> = expr.split(',').collect();
+
+    if parts.len() < 2 {
+        return Err(MirrorMakerError::Config(format!(
+            "Invalid HASH format: {}. Expected 'HASH:algorithm,/path' or 'HASH:algorithm,/path,output_field'",
+            expr
+        )));
+    }
+
+    let algorithm = HashAlgorithm::from_str(parts[0])?;
+    let path = parts[1];
+
+    if parts.len() >= 3 {
+        // With output field - preserves original value
+        let output_field = parts[2];
+        Ok(Arc::new(HashTransform::new_with_output(path, algorithm, output_field)?))
+    } else {
+        // Without output field - replaces with hash
+        Ok(Arc::new(HashTransform::new(path, algorithm)?))
     }
 }
 
@@ -414,5 +442,66 @@ mod tests {
         let input = json!({"value": 50.0});
         let result = transform.transform(input).unwrap();
         assert_eq!(result, json!(25.0));
+    }
+
+    #[test]
+    fn test_parse_hash_transform_md5() {
+        let transform = parse_transform("HASH:MD5,/userId").unwrap();
+
+        let input = json!({"userId": "user123"});
+        let result = transform.transform(input).unwrap();
+
+        assert!(result.is_string());
+        let hash = result.as_str().unwrap();
+        assert_eq!(hash.len(), 32); // MD5 is 32 hex chars
+    }
+
+    #[test]
+    fn test_parse_hash_transform_sha256() {
+        let transform = parse_transform("HASH:SHA256,/message/email").unwrap();
+
+        let input = json!({"message": {"email": "test@example.com"}});
+        let result = transform.transform(input).unwrap();
+
+        assert!(result.is_string());
+        let hash = result.as_str().unwrap();
+        assert_eq!(hash.len(), 64); // SHA256 is 64 hex chars
+    }
+
+    #[test]
+    fn test_parse_hash_transform_with_output_field() {
+        let transform = parse_transform("HASH:MD5,/userId,userIdHash").unwrap();
+
+        let input = json!({"userId": "user123", "name": "Test"});
+        let result = transform.transform(input).unwrap();
+
+        // Should preserve original fields and add hash
+        assert_eq!(result.get("userId").unwrap(), &json!("user123"));
+        assert_eq!(result.get("name").unwrap(), &json!("Test"));
+        assert!(result.get("userIdHash").unwrap().is_string());
+    }
+
+    #[test]
+    fn test_parse_hash_transform_murmur128() {
+        let transform = parse_transform("HASH:MURMUR128,/key").unwrap();
+
+        let input = json!({"key": "partition-key"});
+        let result = transform.transform(input).unwrap();
+
+        assert!(result.is_string());
+        let hash = result.as_str().unwrap();
+        assert_eq!(hash.len(), 32); // Murmur128 is 32 hex chars
+    }
+
+    #[test]
+    fn test_parse_hash_transform_consistency() {
+        let transform = parse_transform("HASH:SHA256,/value").unwrap();
+        let input = json!({"value": "test"});
+
+        let result1 = transform.transform(input.clone()).unwrap();
+        let result2 = transform.transform(input).unwrap();
+
+        // Same input should produce same hash
+        assert_eq!(result1, result2);
     }
 }
