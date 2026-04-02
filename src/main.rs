@@ -63,11 +63,14 @@ async fn main() -> Result<()> {
     });
 
     // Main processing loop with concurrent message processing
-    let parallelism = config.threads * 10;
-    let batch_size = 100; // Process 100 messages per batch
+    const BATCH_SIZE: usize = 100;
+    const BATCH_FILL_TIMEOUT_MS: u64 = 100;
+    const PARALLELISM_FACTOR: usize = 10;
+
+    let parallelism = (config.threads * PARALLELISM_FACTOR).max(1);
     let manual_commit = config.commit_strategy.manual_commit;
 
-    info!("Starting concurrent message processing (parallelism: {}, batch_size: {})", parallelism, batch_size);
+    info!("Starting concurrent message processing (parallelism: {}, batch_size: {})", parallelism, BATCH_SIZE);
 
     if manual_commit {
         info!("Using batch-level commits for at-least-once delivery");
@@ -76,23 +79,34 @@ async fn main() -> Result<()> {
     let mut message_stream = consumer.stream();
 
     loop {
-        // Collect batch of messages
-        let mut batch = Vec::new();
+        // Collect batch of messages with single deadline
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(BATCH_FILL_TIMEOUT_MS);
+        let mut stream_ended = false;
 
-        for _ in 0..batch_size {
-            match tokio::time::timeout(Duration::from_millis(100), message_stream.next()).await {
+        for _ in 0..BATCH_SIZE {
+            match tokio::time::timeout_at(deadline, message_stream.next()).await {
                 Ok(Some(msg_result)) => batch.push(msg_result),
-                Ok(None) => break, // Stream ended
-                Err(_) => break,   // Timeout - process what we have
+                Ok(None) => {
+                    stream_ended = true;
+                    break;
+                }
+                Err(_) => break, // Timeout - process what we have
             }
         }
 
         if batch.is_empty() {
+            if stream_ended {
+                info!("Consumer stream ended, shutting down");
+                break;
+            }
+            // Backoff to avoid spin loop when idle
+            tokio::time::sleep(Duration::from_millis(50)).await;
             continue;
         }
 
         // Process batch concurrently
-        let results = futures::stream::iter(batch.into_iter())
+        let stream = futures::stream::iter(batch.into_iter())
             .map(|msg_result| {
                 let processor = processor.clone();
                 let stats = stats.clone();
@@ -102,29 +116,13 @@ async fn main() -> Result<()> {
                         Ok(msg) => {
                             stats.processed();
 
-                            // Extract key and value
-                            let key = match msg.key() {
-                                Some(k) => match serde_json::from_slice::<Value>(k) {
-                                    Ok(v) => v,
-                                    Err(_) => {
-                                        Value::String(String::from_utf8_lossy(k).to_string())
-                                    }
-                                },
-                                None => Value::Null,
-                            };
-
-                            let value = match msg.payload() {
-                                Some(v) => match serde_json::from_slice::<Value>(v) {
-                                    Ok(json) => json,
-                                    Err(e) => {
-                                        warn!("Failed to parse message as JSON: {}", e);
-                                        stats.error();
-                                        return Err(MirrorMakerError::Processing(format!("Invalid JSON: {}", e)));
-                                    }
-                                },
-                                None => {
-                                    warn!("Empty message payload");
-                                    return Err(MirrorMakerError::Processing("Empty payload".to_string()));
+                            let key = parse_message_key(msg.key());
+                            let value = match parse_message_value(msg.payload()) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    warn!("{}", e);
+                                    stats.error();
+                                    return Err(e);
                                 }
                             };
 
@@ -149,16 +147,15 @@ async fn main() -> Result<()> {
                     }
                 }
             })
-            .buffer_unordered(parallelism)
-            .collect::<Vec<_>>()
-            .await;
+            .buffer_unordered(parallelism);
 
-        // Commit batch if using manual commits
+        // Different handling based on commit mode
         if manual_commit {
+            // Collect results to check success before committing
+            let results: Vec<_> = stream.collect().await;
             let all_success = results.iter().all(|r| r.is_ok());
 
             if all_success {
-                // Commit the batch
                 if let Err(e) = consumer.commit_consumer_state(
                     rdkafka::consumer::CommitMode::Async
                 ) {
@@ -168,8 +165,13 @@ async fn main() -> Result<()> {
             } else {
                 warn!("Batch had errors, skipping commit (messages will be reprocessed)");
             }
+        } else {
+            // Fire-and-forget: just drive stream to completion
+            stream.for_each(|_| async {}).await;
         }
     }
+
+    Ok(())
 }
 
 fn load_config() -> Result<MirrorMakerConfig> {
@@ -292,4 +294,24 @@ async fn build_multi_destination_processor(
         destinations,
         routing.path.clone(),
     )))
+}
+
+/// Parse Kafka message key into a JSON Value
+fn parse_message_key(raw: Option<&[u8]>) -> Value {
+    match raw {
+        Some(k) => match serde_json::from_slice::<Value>(k) {
+            Ok(v) => v,
+            Err(_) => Value::String(String::from_utf8_lossy(k).to_string()),
+        },
+        None => Value::Null,
+    }
+}
+
+/// Parse Kafka message payload into a JSON Value
+fn parse_message_value(raw: Option<&[u8]>) -> Result<Value> {
+    match raw {
+        Some(v) => serde_json::from_slice::<Value>(v)
+            .map_err(|e| MirrorMakerError::Processing(format!("Invalid JSON: {}", e))),
+        None => Err(MirrorMakerError::Processing("Empty payload".to_string())),
+    }
 }
