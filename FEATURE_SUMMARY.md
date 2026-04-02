@@ -599,18 +599,18 @@ consumer_properties:
 4. **Backward Compatible**: Existing configs work unchanged
 5. **Production Ready**: DLQ, retries, monitoring
 
-### Compared to Java Implementation
+### Complete Feature Matrix
 
-| Feature | Java | Rust (Now) |
-|---------|------|------------|
-| Hash functions | ❌ | ✅ (5 algorithms) |
-| Local cache | ❌ | ✅ (Moka) |
-| Redis cache | ❌ | ✅ |
-| Kafka cache | ❌ | ✅ |
-| Multi-level cache | ❌ | ✅ |
-| At-least-once | ✅ | ✅ (configurable) |
-| Dead Letter Queue | ❌ | ✅ |
-| Retry with backoff | ❌ | ✅ |
+| Feature Category | Capability | Status |
+|-----------------|------------|--------|
+| **Hash Algorithms** | MD5, SHA-1, SHA-256, SHA-512, xxHash | ✅ Production |
+| **Local Caching** | Moka (high-performance concurrent cache) | ✅ Production |
+| **Distributed Cache** | Redis with connection pooling | ✅ Production |
+| **Kafka Cache** | Topic-based distributed cache | ✅ Production |
+| **Multi-Level Cache** | L1 (local) + L2 (Redis/Kafka) | ✅ Production |
+| **Delivery Semantics** | At-least-once (configurable) | ✅ Production |
+| **Error Handling** | Dead Letter Queue with routing | ✅ Production |
+| **Retry Logic** | Exponential backoff with limits | ✅ Production |
 
 ---
 

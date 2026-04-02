@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{error, info, warn};
 use tracing_subscriber;
+use futures::stream::StreamExt;
 use streamforge::filter::{Filter, Transform};
 use streamforge::filter_parser::{parse_filter, parse_transform};
 use streamforge::kafka::KafkaSink;
@@ -61,51 +62,111 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Main processing loop
-    info!("Starting message processing loop");
+    // Main processing loop with concurrent message processing
+    let parallelism = config.threads * 10;
+    let batch_size = 100; // Process 100 messages per batch
+    let manual_commit = config.commit_strategy.manual_commit;
+
+    info!("Starting concurrent message processing (parallelism: {}, batch_size: {})", parallelism, batch_size);
+
+    if manual_commit {
+        info!("Using batch-level commits for at-least-once delivery");
+    }
+
+    let mut message_stream = consumer.stream();
+
     loop {
-        match consumer.recv().await {
-            Ok(msg) => {
-                stats.processed();
+        // Collect batch of messages
+        let mut batch = Vec::new();
 
-                // Extract key and value
-                let key = match msg.key() {
-                    Some(k) => match serde_json::from_slice::<Value>(k) {
-                        Ok(v) => v,
-                        Err(_) => {
-                            // If not JSON, use string key
-                            Value::String(String::from_utf8_lossy(k).to_string())
-                        }
-                    },
-                    None => Value::Null,
-                };
-
-                let value = match msg.payload() {
-                    Some(v) => match serde_json::from_slice::<Value>(v) {
-                        Ok(json) => json,
-                        Err(e) => {
-                            warn!("Failed to parse message as JSON: {}", e);
-                            stats.error();
-                            continue;
-                        }
-                    },
-                    None => {
-                        warn!("Empty message payload");
-                        continue;
-                    }
-                };
-
-                // Process message
-                if let Err(e) = processor.process(key, value).await {
-                    error!("Failed to process message: {}", e);
-                    stats.error();
-                } else {
-                    stats.completed();
-                }
+        for _ in 0..batch_size {
+            match tokio::time::timeout(Duration::from_millis(100), message_stream.next()).await {
+                Ok(Some(msg_result)) => batch.push(msg_result),
+                Ok(None) => break, // Stream ended
+                Err(_) => break,   // Timeout - process what we have
             }
-            Err(e) => {
-                error!("Kafka consumer error: {}", e);
-                stats.error();
+        }
+
+        if batch.is_empty() {
+            continue;
+        }
+
+        // Process batch concurrently
+        let results = futures::stream::iter(batch.into_iter())
+            .map(|msg_result| {
+                let processor = processor.clone();
+                let stats = stats.clone();
+
+                async move {
+                    match msg_result {
+                        Ok(msg) => {
+                            stats.processed();
+
+                            // Extract key and value
+                            let key = match msg.key() {
+                                Some(k) => match serde_json::from_slice::<Value>(k) {
+                                    Ok(v) => v,
+                                    Err(_) => {
+                                        Value::String(String::from_utf8_lossy(k).to_string())
+                                    }
+                                },
+                                None => Value::Null,
+                            };
+
+                            let value = match msg.payload() {
+                                Some(v) => match serde_json::from_slice::<Value>(v) {
+                                    Ok(json) => json,
+                                    Err(e) => {
+                                        warn!("Failed to parse message as JSON: {}", e);
+                                        stats.error();
+                                        return Err(MirrorMakerError::Processing(format!("Invalid JSON: {}", e)));
+                                    }
+                                },
+                                None => {
+                                    warn!("Empty message payload");
+                                    return Err(MirrorMakerError::Processing("Empty payload".to_string()));
+                                }
+                            };
+
+                            // Process message
+                            match processor.process(key, value).await {
+                                Ok(_) => {
+                                    stats.completed();
+                                    Ok(())
+                                }
+                                Err(e) => {
+                                    error!("Failed to process message: {}", e);
+                                    stats.error();
+                                    Err(e)
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Kafka consumer error: {}", e);
+                            stats.error();
+                            Err(MirrorMakerError::Kafka(e))
+                        }
+                    }
+                }
+            })
+            .buffer_unordered(parallelism)
+            .collect::<Vec<_>>()
+            .await;
+
+        // Commit batch if using manual commits
+        if manual_commit {
+            let all_success = results.iter().all(|r| r.is_ok());
+
+            if all_success {
+                // Commit the batch
+                if let Err(e) = consumer.commit_consumer_state(
+                    rdkafka::consumer::CommitMode::Async
+                ) {
+                    error!("Failed to commit offsets: {}", e);
+                    stats.error();
+                }
+            } else {
+                warn!("Batch had errors, skipping commit (messages will be reprocessed)");
             }
         }
     }
@@ -139,6 +200,8 @@ fn create_default_config() -> MirrorMakerConfig {
         consumer_properties: Default::default(),
         producer_properties: Default::default(),
         security: None,
+        commit_strategy: Default::default(),
+        cache: None,
     }
 }
 
@@ -147,8 +210,18 @@ fn create_consumer(config: &MirrorMakerConfig) -> Result<StreamConsumer> {
     consumer_config
         .set("bootstrap.servers", &config.bootstrap)
         .set("group.id", &config.appid)
-        .set("auto.offset.reset", &config.offset)
-        .set("enable.auto.commit", "true");
+        .set("auto.offset.reset", &config.offset);
+
+    // Configure commit strategy based on config
+    let auto_commit = !config.commit_strategy.manual_commit;
+    consumer_config.set("enable.auto.commit", auto_commit.to_string());
+
+    if !auto_commit {
+        info!("Manual commit enabled - at-least-once semantics");
+        info!("Commit mode: {:?}", config.commit_strategy.commit_mode);
+    } else {
+        warn!("Auto-commit enabled - at-most-once semantics (messages may be lost on failure)");
+    }
 
     // Apply security configuration
     config.apply_security(&mut consumer_config);

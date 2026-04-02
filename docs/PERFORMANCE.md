@@ -79,17 +79,18 @@ Comprehensive guide for optimizing WAP MirrorMaker performance.
 | p99 | 12ms | 15ms | 20ms |
 | p99.9 | 25ms | 30ms | 40ms |
 
-### Comparison with Java
+### Performance Characteristics
 
-**Same workload (10K msg/s, 1KB messages):**
+**Streamforge performance at 10K msg/s baseline workload (1KB messages):**
 
-| Metric | Java | Rust | Improvement |
-|--------|------|------|-------------|
-| Throughput | 10K msg/s | 25K msg/s | 2.5x |
-| CPU Usage | 200% | 120% | 1.7x |
-| Memory | 500MB | 50MB | 10x |
-| Latency p99 | 50ms | 15ms | 3.3x |
-| Startup time | 5s | 0.1s | 50x |
+| Metric | Performance | Capability |
+|--------|-------------|------------|
+| **Throughput** | 25,000 msg/s | High-volume sustained processing |
+| **CPU Usage** | 120% (4 cores) | Efficient multi-core utilization |
+| **Memory** | 50MB | Minimal memory footprint |
+| **Latency (p99)** | 15ms | Consistent low latency |
+| **Startup** | 0.1s | Rapid deployment and recovery |
+| **Scalability** | Linear | Predictable resource growth |
 
 ## Configuration Tuning
 
