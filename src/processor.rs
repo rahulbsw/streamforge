@@ -1,9 +1,9 @@
 use crate::filter::{Filter, Transform, PassThroughFilter, IdentityTransform};
 use crate::kafka::sink::KafkaSink;
-use crate::Result;
+use crate::{MirrorMakerError, Result};
 use serde_json::Value;
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 /// Message processor trait
 #[async_trait::async_trait]
@@ -104,6 +104,7 @@ impl MultiDestinationProcessor {
 impl MessageProcessor for MultiDestinationProcessor {
     async fn process(&self, key: Value, value: Value) -> Result<()> {
         let mut processed = false;
+        let mut errors = Vec::new();
 
         // Process through each destination
         for dest in &self.destinations {
@@ -111,13 +112,23 @@ impl MessageProcessor for MultiDestinationProcessor {
                 Ok(true) => processed = true,
                 Ok(false) => {} // Filtered out, that's ok
                 Err(e) => {
-                    warn!("Error processing destination {}: {}", dest.name, e);
+                    error!("Error processing destination {}: {}", dest.name, e);
+                    errors.push(format!("{}: {}", dest.name, e));
                 }
             }
         }
 
+        // Fail if any destination had errors (fail-fast for data integrity)
+        if !errors.is_empty() {
+            return Err(MirrorMakerError::Processing(format!(
+                "Failed to process {} destination(s): {}",
+                errors.len(),
+                errors.join("; ")
+            )));
+        }
+
         if !processed {
-            debug!("Message not processed by any destination");
+            debug!("Message not processed by any destination (filtered out by all)");
         }
 
         Ok(())

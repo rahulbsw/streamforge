@@ -69,11 +69,15 @@ async fn main() -> Result<()> {
 
     let parallelism = (config.threads * PARALLELISM_FACTOR).max(1);
     let manual_commit = config.commit_strategy.manual_commit;
+    let commit_mode = match config.commit_strategy.commit_mode {
+        streamforge::config::CommitMode::Async => rdkafka::consumer::CommitMode::Async,
+        streamforge::config::CommitMode::Sync => rdkafka::consumer::CommitMode::Sync,
+    };
 
     info!("Starting concurrent message processing (parallelism: {}, batch_size: {})", parallelism, BATCH_SIZE);
 
     if manual_commit {
-        info!("Using batch-level commits for at-least-once delivery");
+        info!("Using batch-level commits for at-least-once delivery (mode: {:?})", commit_mode);
     }
 
     let mut message_stream = consumer.stream();
@@ -120,7 +124,14 @@ async fn main() -> Result<()> {
                             let value = match parse_message_value(msg.payload()) {
                                 Ok(v) => v,
                                 Err(e) => {
-                                    warn!("{}", e);
+                                    error!(
+                                        "Failed to parse message: {} (topic={}, partition={}, offset={}, key={:?})",
+                                        e,
+                                        msg.topic(),
+                                        msg.partition(),
+                                        msg.offset(),
+                                        msg.key().map(|k| String::from_utf8_lossy(k).to_string())
+                                    );
                                     stats.error();
                                     return Err(e);
                                 }
@@ -133,7 +144,10 @@ async fn main() -> Result<()> {
                                     Ok(())
                                 }
                                 Err(e) => {
-                                    error!("Failed to process message: {}", e);
+                                    error!(
+                                        "Failed to process message: {} (topic={}, partition={}, offset={})",
+                                        e, msg.topic(), msg.partition(), msg.offset()
+                                    );
                                     stats.error();
                                     Err(e)
                                 }
@@ -153,21 +167,69 @@ async fn main() -> Result<()> {
         if manual_commit {
             // Collect results to check success before committing
             let results: Vec<_> = stream.collect().await;
-            let all_success = results.iter().all(|r| r.is_ok());
+            let error_count = results.iter().filter(|r| r.is_err()).count();
 
-            if all_success {
-                if let Err(e) = consumer.commit_consumer_state(
-                    rdkafka::consumer::CommitMode::Async
-                ) {
-                    error!("Failed to commit offsets: {}", e);
-                    stats.error();
+            if error_count == 0 {
+                // All messages processed successfully - commit with retry
+                const MAX_COMMIT_RETRIES: u32 = 3;
+                let mut retry_count = 0;
+
+                loop {
+                    match consumer.commit_consumer_state(commit_mode) {
+                        Ok(_) => {
+                            if retry_count > 0 {
+                                info!("Successfully committed batch after {} retries", retry_count);
+                            }
+                            break;
+                        }
+                        Err(e) => {
+                            error!("Failed to commit offsets (attempt {}/{}): {}",
+                                   retry_count + 1, MAX_COMMIT_RETRIES, e);
+                            stats.error();
+
+                            retry_count += 1;
+                            if retry_count >= MAX_COMMIT_RETRIES {
+                                error!("CRITICAL: Unable to commit offsets after {} attempts. \
+                                        Halting to prevent data loss. Manual intervention required.",
+                                        MAX_COMMIT_RETRIES);
+                                return Err(MirrorMakerError::Kafka(e));
+                            }
+
+                            // Exponential backoff
+                            let backoff_ms = 100 * 2_u64.pow(retry_count);
+                            warn!("Retrying commit in {}ms...", backoff_ms);
+                            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                        }
+                    }
                 }
             } else {
-                warn!("Batch had errors, skipping commit (messages will be reprocessed)");
+                // Batch has errors - halt processing to prevent skipping failed messages
+                error!("CRITICAL: Batch processing failed with {} errors out of {} messages. \
+                        Halting to prevent data loss.", error_count, results.len());
+                error!("Failed messages will be reprocessed on restart. \
+                        Note: Successfully processed messages in this batch may create duplicates.");
+                return Err(MirrorMakerError::Processing(
+                    format!("Batch processing failed: {} errors", error_count)
+                ));
             }
         } else {
-            // Fire-and-forget: just drive stream to completion
-            stream.for_each(|_| async {}).await;
+            // Auto-commit mode: collect results to count errors
+            let results: Vec<_> = stream.collect().await;
+            let error_count = results.iter().filter(|r| r.is_err()).count();
+
+            // Log each error
+            for result in results.iter() {
+                if let Err(e) = result {
+                    error!("Message processing failed in auto-commit mode (data loss): {}", e);
+                }
+            }
+
+            if error_count > 0 {
+                warn!("Batch completed with {} errors in auto-commit mode. \
+                       Failed messages will NOT be reprocessed (data loss). \
+                       Consider enabling manual_commit for at-least-once delivery guarantees.",
+                       error_count);
+            }
         }
     }
 
