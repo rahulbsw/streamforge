@@ -1,0 +1,25 @@
+appid: test-8thread
+bootstrap: localhost:9092
+target_broker: localhost:9092
+input: test-8p-input
+output: test-8p-output
+offset: earliest
+threads: 8
+group_id: test-8thread-group
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+
+consumer_properties:
+  fetch.min.bytes: "1"
+  fetch.wait.max.ms: "1"
+  max.partition.fetch.bytes: "10485760"
+  session.timeout.ms: "30000"
+  enable.auto.commit: "false"
+
+producer_properties:
+  batch.size: "16384"
+  linger.ms: "0"
+  acks: "1"
+  compression.type: "none"
