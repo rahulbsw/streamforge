@@ -256,7 +256,7 @@ See [USAGE.md](USAGE.md) for 8 comprehensive use cases with examples.
 ### Operations & Deployment
 
 - **[DOCKER.md](DOCKER.md)** - Docker & Kubernetes deployment
-- **[SECURITY.md](SECURITY.md)** - Security configuration (SSL/TLS, SASL, Kerberos)
+- **[SECURITY_CONFIGURATION.md](SECURITY_CONFIGURATION.md)** - Security configuration (SSL/TLS, SASL, Kerberos)
 - **[PERFORMANCE.md](PERFORMANCE.md)** - Performance tuning guide
 - **[SCALING.md](SCALING.md)** - Horizontal & vertical scaling guide
 

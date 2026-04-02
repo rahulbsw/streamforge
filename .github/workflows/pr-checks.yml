@@ -1,0 +1,230 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [ main ]
+
+jobs:
+  # ==================== PR Metadata Checks ====================
+  pr-metadata:
+    name: Validate PR Metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR Title
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Require PR titles to follow conventional commits
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          requireScope: false
+          subjectPattern: ^[A-Z].+$
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}"
+            must start with an uppercase character.
+
+      - name: Check PR Size
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const additions = pr.additions;
+            const deletions = pr.deletions;
+            const totalChanges = additions + deletions;
+
+            console.log(`PR changes: +${additions} -${deletions} (total: ${totalChanges})`);
+
+            // Warn on large PRs (over 500 lines changed)
+            if (totalChanges > 500) {
+              core.warning(`This PR is quite large (${totalChanges} lines changed). Consider splitting into smaller PRs for easier review.`);
+            }
+
+            // Error on very large PRs (over 1500 lines changed)
+            if (totalChanges > 1500) {
+              core.setFailed(`This PR is too large (${totalChanges} lines changed). Please split into smaller, focused PRs.`);
+            }
+
+  # ==================== Dependency Review ====================
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-2.0, GPL-3.0
+
+  # ==================== Label Checks ====================
+  require-label:
+    name: Require Label
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for required labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const labels = pr.labels.map(label => label.name);
+
+            const requiredLabels = ['bug', 'enhancement', 'documentation', 'maintenance', 'dependencies'];
+            const hasRequiredLabel = labels.some(label => requiredLabels.includes(label));
+
+            if (!hasRequiredLabel) {
+              core.setFailed(`PR must have at least one of these labels: ${requiredLabels.join(', ')}`);
+            }
+
+            console.log(`PR labels: ${labels.join(', ')}`);
+
+  # ==================== Documentation Checks ====================
+  docs-updated:
+    name: Check Documentation Updated
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if docs need updating
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const files = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            const codeChanged = files.data.some(file =>
+              file.filename.startsWith('src/') ||
+              file.filename.startsWith('operator/') ||
+              file.filename === 'Cargo.toml'
+            );
+
+            const docsChanged = files.data.some(file =>
+              file.filename.startsWith('docs/') ||
+              file.filename === 'README.md' ||
+              file.filename.startsWith('examples/')
+            );
+
+            if (codeChanged && !docsChanged) {
+              core.warning('Code changes detected but no documentation updates. Consider updating docs if needed.');
+            }
+
+  # ==================== Changelog Check ====================
+  changelog-updated:
+    name: Check Changelog Updated
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.pull_request.labels.*.name, 'skip-changelog')"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check changelog
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const files = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            const changelogUpdated = files.data.some(file =>
+              file.filename === 'docs/CHANGELOG.md'
+            );
+
+            const isDraft = pr.draft;
+            const hasSkipLabel = pr.labels.some(label => label.name === 'skip-changelog');
+
+            if (!changelogUpdated && !isDraft && !hasSkipLabel) {
+              core.warning('CHANGELOG.md not updated. Add "skip-changelog" label if this is intentional.');
+            }
+
+  # ==================== Breaking Change Check ====================
+  breaking-change:
+    name: Check Breaking Changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for breaking changes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            const title = pr.title || '';
+
+            const hasBreakingLabel = pr.labels.some(label => label.name === 'breaking-change');
+            const hasBangInTitle = title.includes('!:');
+            const hasBreakingInBody = body.toLowerCase().includes('breaking change');
+
+            if (hasBreakingLabel || hasBangInTitle || hasBreakingInBody) {
+              core.warning('⚠️ This PR contains BREAKING CHANGES. Ensure proper documentation and migration guide.');
+            }
+
+  # ==================== Security Check ====================
+  security-review:
+    name: Security Review Required
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for security-sensitive changes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const files = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            const securityPaths = [
+              'src/security',
+              'SECURITY.md',
+              '.github/workflows',
+              'Dockerfile',
+              'src/kafka/sink.rs'
+            ];
+
+            const touchesSecurityCode = files.data.some(file =>
+              securityPaths.some(path => file.filename.includes(path))
+            );
+
+            if (touchesSecurityCode) {
+              core.warning('🔒 This PR touches security-sensitive code. Extra review required.');
+
+              // Check if security label exists
+              const hasSecurityLabel = pr.labels.some(label => label.name === 'security');
+              if (!hasSecurityLabel) {
+                core.setFailed('Security-sensitive PR must have "security" label');
+              }
+            }

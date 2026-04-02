@@ -1,0 +1,138 @@
+# Labeler Configuration
+# Automatically labels PRs based on changed files
+# https://github.com/actions/labeler
+
+# ==================== Area Labels ====================
+
+'area/core':
+  - changed-files:
+    - any-glob-to-any-file: 'src/**/*.rs'
+    - all-globs-to-all-files: '!src/ui/**'
+    - all-globs-to-all-files: '!src/operator/**'
+
+'area/kafka':
+  - changed-files:
+    - any-glob-to-any-file: 'src/kafka/**'
+
+'area/dsl':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'src/filter/**'
+      - 'src/transform.rs'
+      - 'src/filter_parser.rs'
+
+'area/config':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'src/config.rs'
+      - 'examples/**/*.yaml'
+      - 'examples/**/*.json'
+
+'area/security':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'src/security/**'
+      - 'SECURITY.md'
+
+# ==================== Component Labels ====================
+
+'component/operator':
+  - changed-files:
+    - any-glob-to-any-file: 'operator/**'
+
+'component/ui':
+  - changed-files:
+    - any-glob-to-any-file: 'ui/**'
+
+'component/helm':
+  - changed-files:
+    - any-glob-to-any-file: 'helm/**'
+
+'component/docker':
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/Dockerfile'
+      - 'docker-compose*.yml'
+      - '.dockerignore'
+
+# ==================== Type Labels ====================
+
+'documentation':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'docs/**'
+      - '*.md'
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+
+'dependencies':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '**/package.json'
+      - '**/package-lock.json'
+
+'ci/cd':
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/**'
+      - '.github/workflows/**'
+
+'tests':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'src/**/*test*.rs'
+      - 'tests/**'
+      - 'benches/**'
+
+'examples':
+  - changed-files:
+    - any-glob-to-any-file: 'examples/**'
+
+'benchmarks':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'benches/**'
+      - 'benchmarks/**'
+
+# ==================== Priority Labels ====================
+# These need manual review, just flagging for awareness
+
+'needs-review':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'src/kafka/sink.rs'
+      - 'src/processor.rs'
+      - 'src/main.rs'
+
+'performance':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'benches/**'
+      - 'benchmarks/**'
+  - head-branch: ['perf/*', 'performance/*']
+
+'breaking-change':
+  - head-branch: ['breaking/*', 'major/*']
+
+# ==================== Version Labels ====================
+
+'version/patch':
+  - head-branch: ['fix/*', 'hotfix/*', 'patch/*']
+
+'version/minor':
+  - head-branch: ['feature/*', 'feat/*']
+
+'version/major':
+  - head-branch: ['breaking/*', 'major/*']
+
+# ==================== Infrastructure ====================
+
+'infrastructure':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'helm/**'
+      - 'operator/**'
+      - 'docker-compose*.yml'
+      - '.github/workflows/**'

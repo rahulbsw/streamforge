@@ -1,0 +1,153 @@
+name: Auto Label
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [ main ]
+  issues:
+    types: [opened, reopened]
+
+jobs:
+  # ==================== PR Auto-Labeling ====================
+  label-pr:
+    name: Label Pull Request
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Label based on files changed
+        uses: actions/labeler@v5
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          configuration-path: .github/labeler.yml
+
+      - name: Label based on size
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const additions = pr.additions;
+            const deletions = pr.deletions;
+            const totalChanges = additions + deletions;
+
+            const labels = [];
+
+            // Size labels
+            if (totalChanges < 10) {
+              labels.push('size/XS');
+            } else if (totalChanges < 50) {
+              labels.push('size/S');
+            } else if (totalChanges < 200) {
+              labels.push('size/M');
+            } else if (totalChanges < 500) {
+              labels.push('size/L');
+            } else {
+              labels.push('size/XL');
+            }
+
+            // Add labels
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: labels
+              });
+            }
+
+  # ==================== Issue Auto-Labeling ====================
+  label-issue:
+    name: Label Issue
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues'
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Label based on issue content
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title.toLowerCase();
+            const body = (issue.body || '').toLowerCase();
+            const labels = [];
+
+            // Detect issue type from title/body
+            if (title.includes('bug') || body.includes('bug')) {
+              labels.push('bug');
+            }
+            if (title.includes('feature') || title.includes('enhancement')) {
+              labels.push('enhancement');
+            }
+            if (title.includes('doc') || body.includes('documentation')) {
+              labels.push('documentation');
+            }
+            if (title.includes('performance') || body.includes('performance')) {
+              labels.push('performance');
+            }
+            if (title.includes('security')) {
+              labels.push('security');
+            }
+
+            // Detect component
+            if (body.includes('kafka') || title.includes('kafka')) {
+              labels.push('component/kafka');
+            }
+            if (body.includes('docker') || title.includes('docker')) {
+              labels.push('component/docker');
+            }
+            if (body.includes('kubernetes') || title.includes('k8s')) {
+              labels.push('component/kubernetes');
+            }
+            if (body.includes('filter') || body.includes('transform')) {
+              labels.push('component/dsl');
+            }
+
+            // Add labels if detected
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: labels
+              });
+            }
+
+  # ==================== Welcome New Contributors ====================
+  welcome:
+    name: Welcome First Time Contributors
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Welcome first-time contributors
+        uses: actions/first-interaction@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: |
+            👋 Thanks for opening your first issue! We appreciate your contribution to the project.
+
+            Please make sure you've provided all the necessary information and follow our [contributing guidelines](https://github.com/${{ github.repository }}/blob/main/docs/CONTRIBUTING.md).
+
+            A maintainer will review your issue soon.
+          pr-message: |
+            🎉 Thanks for your first contribution! We're excited to review your pull request.
+
+            Please make sure:
+            - [ ] Your PR follows our [contributing guidelines](https://github.com/${{ github.repository }}/blob/main/docs/CONTRIBUTING.md)
+            - [ ] All tests pass (`cargo test`)
+            - [ ] You've updated relevant documentation
+            - [ ] CHANGELOG.md is updated (or add `skip-changelog` label)
+
+            A maintainer will review your PR soon. Feel free to ask questions if you need help!

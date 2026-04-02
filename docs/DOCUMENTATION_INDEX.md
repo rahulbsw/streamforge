@@ -133,7 +133,7 @@ See [examples/README.md](../examples/README.md) for comprehensive configuration 
 - Health checks and monitoring
 - Troubleshooting
 
-#### [SECURITY.md](SECURITY.md)
+#### [SECURITY_CONFIGURATION.md](SECURITY_CONFIGURATION.md)
 **Complete security configuration guide (600+ lines)**
 - SSL/TLS encryption (one-way and mutual TLS)
 - SASL authentication (PLAIN, SCRAM-SHA-256/512, GSSAPI)
@@ -314,13 +314,24 @@ See [examples/README.md](../examples/README.md) for comprehensive configuration 
 
 ## Performance Benchmarks
 
-### Running Benchmarks
+### Performance & Benchmarks
 
+**Overview:**
+- **[benchmarks/README.md](../benchmarks/README.md)** - Benchmarks overview and methodology
+
+**Performance Results:**
+- **[benchmarks/results/CONCURRENT_PROCESSING_RESULTS.md](../benchmarks/results/CONCURRENT_PROCESSING_RESULTS.md)** - 132x throughput improvement (83 → 11,000 msg/s)
+- **[benchmarks/results/SCALING_TEST_RESULTS.md](../benchmarks/results/SCALING_TEST_RESULTS.md)** - Linear scaling validation (8 threads, 8 partitions)
+- **[benchmarks/results/BENCHMARKS.md](../benchmarks/results/BENCHMARKS.md)** - Comprehensive benchmark analysis
+- **[benchmarks/results/BENCHMARK_RESULTS.md](../benchmarks/results/BENCHMARK_RESULTS.md)** - DSL micro-benchmark results
+- **[benchmarks/results/DELIVERY_SEMANTICS_IMPLEMENTATION.md](../benchmarks/results/DELIVERY_SEMANTICS_IMPLEMENTATION.md)** - At-least-once vs at-most-once
+
+**Test Configurations:**
+- **[benchmarks/configs/](../benchmarks/configs/)** - Test YAML configurations for reproducing benchmarks
+
+**Running Micro-Benchmarks:**
 ```bash
-# Run all benchmarks
-./scripts/run-benchmarks.sh
-
-# Or manually
+# Run all criterion benchmarks
 cargo bench
 
 # Specific benchmarks
@@ -329,28 +340,11 @@ cargo bench transform_benchmarks
 
 # Save baseline for comparison
 cargo bench -- --save-baseline main
-
-# Compare against baseline
-cargo bench -- --baseline main
 ```
 
-### Benchmark Files
-
-- **[benches/filter_benchmarks.rs](../benches/filter_benchmarks.rs)**
-  - Simple filter benchmarks (~100ns)
-  - Boolean logic benchmarks (~300ns)
-  - Regex filter benchmarks (~500ns)
-  - Array filter benchmarks (~5µs)
-  - Parser benchmarks
-  - Throughput benchmarks
-
-- **[benches/transform_benchmarks.rs](../benches/transform_benchmarks.rs)**
-  - Simple transform benchmarks (~50ns)
-  - Object construction benchmarks (~500ns)
-  - Array transform benchmarks (~5µs)
-  - Arithmetic benchmarks (~50ns)
-  - Parser benchmarks
-  - Combined operation benchmarks
+**Benchmark Code:**
+- **[benches/filter_benchmarks.rs](../benches/filter_benchmarks.rs)** - Filter DSL micro-benchmarks (44-145ns)
+- **[benches/transform_benchmarks.rs](../benches/transform_benchmarks.rs)** - Transform DSL micro-benchmarks (810-1,633ns)
 
 ---
 

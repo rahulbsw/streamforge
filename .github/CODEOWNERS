@@ -1,0 +1,72 @@
+# CODEOWNERS - Automatic Reviewer Assignment
+#
+# This file defines code ownership for automatic review requests.
+# When a PR touches these files, the specified owners are automatically
+# requested for review.
+#
+# Format: path/pattern @username @team
+# More specific patterns override less specific ones.
+#
+# Documentation: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# ==================== Global Owners ====================
+# Default owners for everything in the repo
+* @rahulbsw
+
+# ==================== Critical Files ====================
+# Security and configuration files require careful review
+/SECURITY.md @rahulbsw
+/CODE_OF_CONDUCT.md @rahulbsw
+/LICENSE @rahulbsw
+/.github/workflows/ @rahulbsw
+
+# ==================== Core Application ====================
+# Main Rust application code
+/src/ @rahulbsw
+/Cargo.toml @rahulbsw
+/Cargo.lock @rahulbsw
+
+# ==================== Infrastructure ====================
+# Docker and Kubernetes configurations
+/Dockerfile @rahulbsw
+/docker-compose.yml @rahulbsw
+/helm/ @rahulbsw
+/.dockerignore @rahulbsw
+
+# Kubernetes operator
+/operator/ @rahulbsw
+
+# ==================== Documentation ====================
+# Documentation changes
+/docs/ @rahulbsw
+/README.md @rahulbsw
+/ARCHITECTURE.md @rahulbsw
+/CONTRIBUTING.md @rahulbsw
+
+# Examples and configuration
+/examples/ @rahulbsw
+/benchmarks/ @rahulbsw
+
+# ==================== Testing ====================
+# Test files and benchmarks
+/tests/ @rahulbsw
+/benches/ @rahulbsw
+
+# ==================== UI (if applicable) ====================
+/ui/ @rahulbsw
+
+# ==================== CI/CD ====================
+# GitHub Actions and automation
+/.github/ @rahulbsw
+
+# ==================== Notes ====================
+# To add team-based ownership:
+# 1. Create a GitHub team (e.g., @org/security-team)
+# 2. Replace @rahulbsw with @org/team-name for specific paths
+#
+# Example:
+# /src/security/ @org/security-team
+# /docs/ @org/docs-team
+#
+# Multiple owners can be specified:
+# /src/kafka/ @rahulbsw @org/kafka-experts

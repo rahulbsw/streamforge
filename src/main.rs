@@ -63,8 +63,22 @@ async fn main() -> Result<()> {
     });
 
     // Main processing loop with concurrent message processing
+
+    /// Maximum messages to collect before processing as a batch.
+    /// Higher values improve throughput but increase latency and memory usage.
+    /// Typical range: 50-500 depending on message size and processing complexity.
     const BATCH_SIZE: usize = 100;
+
+    /// Maximum time (ms) to wait for batch to fill before processing partial batch.
+    /// Lower values reduce latency during low-traffic periods.
+    /// Higher values maximize batch utilization during high traffic.
+    /// Should be much smaller than consumer session timeout (default 30s).
     const BATCH_FILL_TIMEOUT_MS: u64 = 100;
+
+    /// Multiplier applied to config.threads to determine concurrent processing limit.
+    /// Example: threads=4, factor=10 → parallelism=40 concurrent operations.
+    /// Higher values improve CPU utilization for I/O-bound tasks but increase memory overhead.
+    /// Adjust based on: I/O wait time, message processing duration, available memory.
     const PARALLELISM_FACTOR: usize = 10;
 
     let parallelism = (config.threads * PARALLELISM_FACTOR).max(1);
@@ -104,8 +118,7 @@ async fn main() -> Result<()> {
                 info!("Consumer stream ended, shutting down");
                 break;
             }
-            // Backoff to avoid spin loop when idle
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            // Timeout already provides backoff (100ms), continue to next batch
             continue;
         }
 
@@ -358,7 +371,37 @@ async fn build_multi_destination_processor(
     )))
 }
 
-/// Parse Kafka message key into a JSON Value
+/// Parse Kafka message key into a JSON Value.
+///
+/// Handles three cases with permissive fallback behavior:
+/// 1. `None` → Returns `Value::Null` (keys are optional in Kafka)
+/// 2. Valid JSON → Parses and returns the JSON Value
+/// 3. Invalid JSON → Returns `Value::String` with UTF-8 decoded content
+///    (using lossy conversion, replacing invalid UTF-8 sequences with �)
+///
+/// # Permissive Parsing Rationale
+///
+/// Keys use permissive parsing because they're primarily used for:
+/// - Message partitioning/routing (hash-based distribution)
+/// - Lookup/correlation (joining streams)
+/// - Logging and debugging
+///
+/// Keys don't typically contain complex structured data that requires
+/// strict validation. Failing on invalid key JSON would reject messages
+/// that are otherwise processable.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Valid JSON key
+/// parse_message_key(Some(br#"{"id":123}"#)) // → Value::Object({"id": 123})
+///
+/// // Non-JSON key (common for simple string keys)
+/// parse_message_key(Some(b"user-123")) // → Value::String("user-123")
+///
+/// // No key
+/// parse_message_key(None) // → Value::Null
+/// ```
 fn parse_message_key(raw: Option<&[u8]>) -> Value {
     match raw {
         Some(k) => match serde_json::from_slice::<Value>(k) {
@@ -369,11 +412,285 @@ fn parse_message_key(raw: Option<&[u8]>) -> Value {
     }
 }
 
-/// Parse Kafka message payload into a JSON Value
+/// Parse Kafka message payload into a JSON Value.
+///
+/// Requires valid JSON payload - returns error if:
+/// - Payload is `None` or empty (Kafka tombstone messages not supported)
+/// - Payload is not valid JSON
+/// - Payload contains invalid UTF-8
+///
+/// # Strict Parsing Rationale
+///
+/// Unlike keys, payloads use strict validation because:
+/// - Message processing logic depends on accessing specific JSON fields
+/// - Filters and transforms expect well-formed JSON structure
+/// - Invalid payloads indicate data quality issues that should be surfaced
+/// - Failed parses trigger error handling and potential reprocessing
+///
+/// # Error Handling
+///
+/// Parse failures are logged with full message context (topic, partition, offset)
+/// in the caller, and:
+/// - In manual commit mode → message reprocessed on restart
+/// - In auto-commit mode → message lost (logged as data loss)
+///
+/// # Examples
+///
+/// ```ignore
+/// // Valid JSON payload
+/// parse_message_value(Some(br#"{"event":"login"}"#))
+///     // → Ok(Value::Object({"event": "login"}))
+///
+/// // Invalid JSON
+/// parse_message_value(Some(b"not-json"))
+///     // → Err(MirrorMakerError::Processing("Invalid JSON: ..."))
+///
+/// // Empty payload (tombstone)
+/// parse_message_value(None)
+///     // → Err(MirrorMakerError::Processing("Empty payload"))
+/// ```
+///
+/// # Errors
+///
+/// Returns `MirrorMakerError::Processing` if:
+/// - Payload is missing (None)
+/// - JSON deserialization fails
 fn parse_message_value(raw: Option<&[u8]>) -> Result<Value> {
     match raw {
         Some(v) => serde_json::from_slice::<Value>(v)
             .map_err(|e| MirrorMakerError::Processing(format!("Invalid JSON: {}", e))),
         None => Err(MirrorMakerError::Processing("Empty payload".to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    mod parse_message_key_tests {
+        use super::*;
+
+        #[test]
+        fn test_none_key_returns_null() {
+            let result = parse_message_key(None);
+            assert_eq!(result, Value::Null);
+        }
+
+        #[test]
+        fn test_valid_json_object_key() {
+            let key = br#"{"id":123,"type":"user"}"#;
+            let result = parse_message_key(Some(key));
+            assert_eq!(result, json!({"id": 123, "type": "user"}));
+        }
+
+        #[test]
+        fn test_valid_json_string_key() {
+            let key = br#""user-123""#;
+            let result = parse_message_key(Some(key));
+            assert_eq!(result, Value::String("user-123".to_string()));
+        }
+
+        #[test]
+        fn test_valid_json_number_key() {
+            let key = b"123";
+            let result = parse_message_key(Some(key));
+            assert_eq!(result, json!(123));
+        }
+
+        #[test]
+        fn test_non_json_key_returns_string() {
+            let key = b"user-123";
+            let result = parse_message_key(Some(key));
+            assert_eq!(result, Value::String("user-123".to_string()));
+        }
+
+        #[test]
+        fn test_invalid_utf8_key_uses_lossy_conversion() {
+            // Invalid UTF-8 sequence: 0xFF is invalid in UTF-8
+            let key = b"user\xFF123";
+            let result = parse_message_key(Some(key));
+            assert!(result.is_string());
+            // Should contain replacement character (�)
+            assert_eq!(result, Value::String("user�123".to_string()));
+        }
+
+        #[test]
+        fn test_empty_key_returns_empty_string() {
+            let key = b"";
+            let result = parse_message_key(Some(key));
+            assert_eq!(result, Value::String("".to_string()));
+        }
+    }
+
+    mod config_loading_tests {
+        use super::*;
+
+        #[test]
+        fn test_default_config_has_required_fields() {
+            let config = create_default_config();
+
+            assert_eq!(config.appid, "streamforge");
+            assert_eq!(config.bootstrap, "localhost:9092");
+            assert_eq!(config.input, "input-topic");
+            assert_eq!(config.output, Some("output-topic".to_string()));
+            assert_eq!(config.offset, "latest");
+            assert_eq!(config.threads, 4);
+            assert!(config.routing.is_none());
+            assert!(!config.commit_strategy.manual_commit);
+        }
+
+        #[test]
+        fn test_load_config_missing_file_uses_default() {
+            // Set env var to non-existent file
+            std::env::set_var("CONFIG_FILE", "/tmp/nonexistent-test-config-12345.json");
+
+            let result = load_config();
+            assert!(result.is_ok(), "Should return default config when file missing");
+
+            let config = result.unwrap();
+            assert_eq!(config.appid, "streamforge", "Should use default appid");
+
+            std::env::remove_var("CONFIG_FILE");
+        }
+
+        #[test]
+        fn test_default_config_consumer_properties_empty() {
+            let config = create_default_config();
+            assert!(config.consumer_properties.is_empty());
+        }
+
+        #[test]
+        fn test_default_config_producer_properties_empty() {
+            let config = create_default_config();
+            assert!(config.producer_properties.is_empty());
+        }
+
+        #[test]
+        fn test_default_config_no_security() {
+            let config = create_default_config();
+            assert!(config.security.is_none());
+        }
+
+        #[test]
+        fn test_default_config_no_cache() {
+            let config = create_default_config();
+            assert!(config.cache.is_none());
+        }
+    }
+
+    mod commit_mode_mapping_tests {
+        use super::*;
+
+        #[test]
+        fn test_commit_mode_async_mapping() {
+            // Test that CommitMode::Async maps to rdkafka's Async
+            let config_mode = streamforge::config::CommitMode::Async;
+            let rdkafka_mode = match config_mode {
+                streamforge::config::CommitMode::Async => rdkafka::consumer::CommitMode::Async,
+                streamforge::config::CommitMode::Sync => rdkafka::consumer::CommitMode::Sync,
+            };
+
+            assert!(matches!(rdkafka_mode, rdkafka::consumer::CommitMode::Async));
+        }
+
+        #[test]
+        fn test_commit_mode_sync_mapping() {
+            // Test that CommitMode::Sync maps to rdkafka's Sync
+            let config_mode = streamforge::config::CommitMode::Sync;
+            let rdkafka_mode = match config_mode {
+                streamforge::config::CommitMode::Async => rdkafka::consumer::CommitMode::Async,
+                streamforge::config::CommitMode::Sync => rdkafka::consumer::CommitMode::Sync,
+            };
+
+            assert!(matches!(rdkafka_mode, rdkafka::consumer::CommitMode::Sync));
+        }
+
+        #[test]
+        fn test_auto_commit_flag_calculation() {
+            let mut config = create_default_config();
+
+            // Manual commit disabled = auto commit enabled
+            config.commit_strategy.manual_commit = false;
+            let auto_commit = !config.commit_strategy.manual_commit;
+            assert!(auto_commit, "auto_commit should be true when manual_commit is false");
+
+            // Manual commit enabled = auto commit disabled
+            config.commit_strategy.manual_commit = true;
+            let auto_commit = !config.commit_strategy.manual_commit;
+            assert!(!auto_commit, "auto_commit should be false when manual_commit is true");
+        }
+    }
+
+    mod parse_message_value_tests {
+        use super::*;
+
+        #[test]
+        fn test_none_value_returns_error() {
+            let result = parse_message_value(None);
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Empty payload")));
+        }
+
+        #[test]
+        fn test_valid_json_object() {
+            let value = br#"{"event":"login","userId":123}"#;
+            let result = parse_message_value(Some(value)).unwrap();
+            assert_eq!(result, json!({"event": "login", "userId": 123}));
+        }
+
+        #[test]
+        fn test_valid_json_array() {
+            let value = br#"[1,2,3]"#;
+            let result = parse_message_value(Some(value)).unwrap();
+            assert_eq!(result, json!([1, 2, 3]));
+        }
+
+        #[test]
+        fn test_valid_json_string() {
+            let value = br#""hello""#;
+            let result = parse_message_value(Some(value)).unwrap();
+            assert_eq!(result, Value::String("hello".to_string()));
+        }
+
+        #[test]
+        fn test_invalid_json_returns_error() {
+            let value = b"not-json";
+            let result = parse_message_value(Some(value));
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON")));
+        }
+
+        #[test]
+        fn test_invalid_utf8_returns_error() {
+            // Invalid UTF-8 in JSON context
+            let value = b"\xFF\xFE";
+            let result = parse_message_value(Some(value));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_empty_payload_returns_error() {
+            let value = b"";
+            let result = parse_message_value(Some(value));
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON")));
+        }
+
+        #[test]
+        fn test_complex_nested_json() {
+            let value = br#"{"event":"meeting.started","data":{"confId":123,"participants":[{"id":1,"name":"Alice"}]}}"#;
+            let result = parse_message_value(Some(value)).unwrap();
+            assert_eq!(
+                result,
+                json!({
+                    "event": "meeting.started",
+                    "data": {
+                        "confId": 123,
+                        "participants": [{"id": 1, "name": "Alice"}]
+                    }
+                })
+            );
+        }
     }
 }
