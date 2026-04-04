@@ -186,12 +186,12 @@ impl MessageEnvelope {
 
     /// Check if message is older than specified seconds
     pub fn is_older_than(&self, seconds: i64) -> bool {
-        self.age_seconds().map_or(false, |age| age > seconds)
+        self.age_seconds().is_some_and(|age| age > seconds)
     }
 
     /// Check if message is newer than specified seconds
     pub fn is_newer_than(&self, seconds: i64) -> bool {
-        self.age_seconds().map_or(false, |age| age < seconds)
+        self.age_seconds().is_some_and(|age| age < seconds)
     }
 }
 

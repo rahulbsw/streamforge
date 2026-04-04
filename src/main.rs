@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
 use tracing::{error, info, warn};
-use tracing_subscriber;
 use futures::stream::StreamExt;
 use streamforge::filter::{EnvelopeTransform, Filter, Transform};
 use streamforge::filter_parser::{

@@ -135,34 +135,34 @@ impl JsonPathFilter {
     fn compare(&self, actual: &Value) -> bool {
         match (&self.expected, &self.operator) {
             (ComparisonValue::Number(expected), ComparisonOp::Gt) => {
-                actual.as_f64().map_or(false, |v| v > *expected)
+                actual.as_f64().is_some_and(|v| v > *expected)
             }
             (ComparisonValue::Number(expected), ComparisonOp::Gte) => {
-                actual.as_f64().map_or(false, |v| v >= *expected)
+                actual.as_f64().is_some_and(|v| v >= *expected)
             }
             (ComparisonValue::Number(expected), ComparisonOp::Lt) => {
-                actual.as_f64().map_or(false, |v| v < *expected)
+                actual.as_f64().is_some_and(|v| v < *expected)
             }
             (ComparisonValue::Number(expected), ComparisonOp::Lte) => {
-                actual.as_f64().map_or(false, |v| v <= *expected)
+                actual.as_f64().is_some_and(|v| v <= *expected)
             }
             (ComparisonValue::Number(expected), ComparisonOp::Eq) => {
-                actual.as_f64().map_or(false, |v| (v - *expected).abs() < f64::EPSILON)
+                actual.as_f64().is_some_and(|v| (v - *expected).abs() < f64::EPSILON)
             }
             (ComparisonValue::Number(expected), ComparisonOp::Ne) => {
-                actual.as_f64().map_or(true, |v| (v - *expected).abs() >= f64::EPSILON)
+                actual.as_f64().is_none_or(|v| (v - *expected).abs() >= f64::EPSILON)
             }
             (ComparisonValue::String(expected), ComparisonOp::Eq) => {
-                actual.as_str().map_or(false, |v| v == expected)
+                actual.as_str().is_some_and(|v| v == expected)
             }
             (ComparisonValue::String(expected), ComparisonOp::Ne) => {
-                actual.as_str().map_or(true, |v| v != expected)
+                actual.as_str().is_none_or(|v| v != expected)
             }
             (ComparisonValue::Bool(expected), ComparisonOp::Eq) => {
-                actual.as_bool().map_or(false, |v| v == *expected)
+                actual.as_bool() == Some(*expected)
             }
             (ComparisonValue::Bool(expected), ComparisonOp::Ne) => {
-                actual.as_bool().map_or(true, |v| v != *expected)
+                actual.as_bool() != Some(*expected)
             }
             _ => false,
         }

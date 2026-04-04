@@ -51,9 +51,10 @@ jobs:
               core.warning(`This PR is quite large (${totalChanges} lines changed). Consider splitting into smaller PRs for easier review.`);
             }
 
-            // Error on very large PRs (over 1500 lines changed)
-            if (totalChanges > 1500) {
-              core.setFailed(`This PR is too large (${totalChanges} lines changed). Please split into smaller, focused PRs.`);
+            // Error on very large PRs (over 1500 lines changed), unless skip-size-check label is present
+            const hasSkipLabel = pr.labels.some(label => label.name === 'skip-size-check');
+            if (totalChanges > 1500 && !hasSkipLabel) {
+              core.setFailed(`This PR is too large (${totalChanges} lines changed). Please split into smaller, focused PRs or add the "skip-size-check" label.`);
             }
 
   # ==================== Dependency Review ====================
@@ -70,6 +71,9 @@ jobs:
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-2.0, GPL-3.0
+          # GHSA-2gh3-rmm4-6rq5: protobuf crash via prometheus 0.13 — no upstream fix available.
+          # Only reachable from internal Prometheus scraper, not public-facing.
+          allow-ghsas: GHSA-2gh3-rmm4-6rq5
 
   # ==================== Label Checks ====================
   require-label:

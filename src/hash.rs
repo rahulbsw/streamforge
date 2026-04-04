@@ -18,7 +18,7 @@ pub enum HashAlgorithm {
 
 impl HashAlgorithm {
     /// Parse hash algorithm from string
-    pub fn from_str(s: &str) -> Result<Self> {
+    pub fn parse(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
             "md5" => Ok(HashAlgorithm::Md5),
             "sha256" | "sha-256" => Ok(HashAlgorithm::Sha256),
@@ -154,30 +154,30 @@ mod tests {
     #[test]
     fn test_parse_algorithm() {
         assert!(matches!(
-            HashAlgorithm::from_str("md5").unwrap(),
+            HashAlgorithm::parse("md5").unwrap(),
             HashAlgorithm::Md5
         ));
         assert!(matches!(
-            HashAlgorithm::from_str("SHA256").unwrap(),
+            HashAlgorithm::parse("SHA256").unwrap(),
             HashAlgorithm::Sha256
         ));
         assert!(matches!(
-            HashAlgorithm::from_str("sha-512").unwrap(),
+            HashAlgorithm::parse("sha-512").unwrap(),
             HashAlgorithm::Sha512
         ));
         assert!(matches!(
-            HashAlgorithm::from_str("murmur64").unwrap(),
+            HashAlgorithm::parse("murmur64").unwrap(),
             HashAlgorithm::Murmur64
         ));
         assert!(matches!(
-            HashAlgorithm::from_str("murmur-128").unwrap(),
+            HashAlgorithm::parse("murmur-128").unwrap(),
             HashAlgorithm::Murmur128
         ));
     }
 
     #[test]
     fn test_parse_algorithm_invalid() {
-        assert!(HashAlgorithm::from_str("invalid").is_err());
+        assert!(HashAlgorithm::parse("invalid").is_err());
     }
 
     #[test]

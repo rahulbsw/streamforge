@@ -50,6 +50,6 @@ mod tests {
 
         let metrics = metrics_handler().await;
         // Check that we got Prometheus-formatted output
-        assert!(metrics.contains("# HELP") || metrics.len() > 0);
+        assert!(metrics.contains("# HELP") || !metrics.is_empty());
     }
 }

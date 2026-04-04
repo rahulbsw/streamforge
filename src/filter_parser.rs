@@ -269,14 +269,14 @@ fn parse_array_filter(parts: &[&str], mode: ArrayFilterMode) -> Result<Box<dyn F
 /// - Hash: "HASH:algorithm,/path" or "HASH:algorithm,/path,output_field"
 ///   - algorithm: MD5, SHA256, SHA512, MURMUR64, MURMUR128
 pub fn parse_transform(expr: &str) -> Result<Arc<dyn Transform>> {
-    if expr.starts_with("CONSTRUCT:") {
-        parse_construct_transform(&expr[10..])
-    } else if expr.starts_with("ARRAY_MAP:") {
-        parse_array_map_transform(&expr[10..])
-    } else if expr.starts_with("ARITHMETIC:") {
-        parse_arithmetic_transform(&expr[11..])
-    } else if expr.starts_with("HASH:") {
-        parse_hash_transform(&expr[5..])
+    if let Some(rest) = expr.strip_prefix("CONSTRUCT:") {
+        parse_construct_transform(rest)
+    } else if let Some(rest) = expr.strip_prefix("ARRAY_MAP:") {
+        parse_array_map_transform(rest)
+    } else if let Some(rest) = expr.strip_prefix("ARITHMETIC:") {
+        parse_arithmetic_transform(rest)
+    } else if let Some(rest) = expr.strip_prefix("HASH:") {
+        parse_hash_transform(rest)
     } else {
         Ok(Arc::new(JsonPathTransform::new(expr)?))
     }
@@ -360,7 +360,7 @@ fn parse_hash_transform(expr: &str) -> Result<Arc<dyn Transform>> {
         )));
     }
 
-    let algorithm = HashAlgorithm::from_str(parts[0])?;
+    let algorithm = HashAlgorithm::parse(parts[0])?;
     let path = parts[1];
 
     if parts.len() >= 3 {
@@ -526,10 +526,10 @@ fn parse_timestamp_before_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
 /// - "HASH:algorithm,/path" - Hash a value field
 /// - Other strings - Constant key value
 pub fn parse_key_transform(expr: &str) -> Result<Arc<dyn EnvelopeTransform>> {
-    if expr.starts_with("CONSTRUCT:") {
-        parse_key_construct_transform(&expr[10..])
-    } else if expr.starts_with("HASH:") {
-        parse_key_hash_transform(&expr[5..])
+    if let Some(rest) = expr.strip_prefix("CONSTRUCT:") {
+        parse_key_construct_transform(rest)
+    } else if let Some(rest) = expr.strip_prefix("HASH:") {
+        parse_key_hash_transform(rest)
     } else if expr.starts_with('/') {
         // JSON path extraction
         Ok(Arc::new(KeyFromTransform::new(expr)?))
@@ -570,7 +570,7 @@ fn parse_key_hash_transform(expr: &str) -> Result<Arc<dyn EnvelopeTransform>> {
         )));
     }
 
-    let algorithm = HashAlgorithm::from_str(parts[0])?;
+    let algorithm = HashAlgorithm::parse(parts[0])?;
     let path = parts[1];
 
     Ok(Arc::new(KeyHashTransform::new(path, algorithm)?))
@@ -583,11 +583,9 @@ fn parse_key_hash_transform(expr: &str) -> Result<Arc<dyn EnvelopeTransform>> {
 /// - "COPY:source_header" - Copy from another header
 /// - "REMOVE" - Remove header
 pub fn parse_header_transform(header_name: &str, operation: &str) -> Result<Arc<dyn EnvelopeTransform>> {
-    if operation.starts_with("FROM:") {
-        let path = &operation[5..];
+    if let Some(path) = operation.strip_prefix("FROM:") {
         Ok(Arc::new(HeaderFromTransform::new(header_name, path)?))
-    } else if operation.starts_with("COPY:") {
-        let source_header = &operation[5..];
+    } else if let Some(source_header) = operation.strip_prefix("COPY:") {
         Ok(Arc::new(HeaderCopyTransform::new(source_header, header_name)))
     } else if operation == "REMOVE" {
         Ok(Arc::new(HeaderRemoveTransform::new(header_name)))

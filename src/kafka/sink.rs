@@ -130,7 +130,7 @@ impl KafkaSink {
         debug!("Routing to partition {}/{}", partition, self.num_partitions);
 
         // Serialize key (if present)
-        let key_bytes = envelope.key.as_ref().map(|k| serde_json::to_vec(k)).transpose()?;
+        let key_bytes = envelope.key.as_ref().map(serde_json::to_vec).transpose()?;
 
         // Serialize value
         let mut value_bytes = serde_json::to_vec(&envelope.value)?;
@@ -195,6 +195,12 @@ impl KafkaSink {
 /// Multi-destination sink manager
 pub struct MultiSink {
     sinks: HashMap<String, Arc<KafkaSink>>,
+}
+
+impl Default for MultiSink {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MultiSink {
