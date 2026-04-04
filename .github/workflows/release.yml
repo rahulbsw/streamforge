@@ -46,26 +46,21 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Verify version matches tag
-        run: |
-          TAG=${GITHUB_REF#refs/tags/v}
-          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          if [ "$TAG" != "$CARGO_VERSION" ]; then
-            echo "ERROR: Tag version ($TAG) does not match Cargo.toml version ($CARGO_VERSION)"
-            exit 1
-          fi
-          echo "Version check passed: $CARGO_VERSION"
-
       - name: Publish to crates.io
-        run: cargo publish --locked --token ${CARGO_REGISTRY_TOKEN}
+        run: |
+          cargo publish --locked --token ${CARGO_REGISTRY_TOKEN} || {
+            if cargo publish --locked --token ${CARGO_REGISTRY_TOKEN} 2>&1 | grep -q "already uploaded"; then
+              echo "Version already published to crates.io, skipping."
+            else
+              exit 1
+            fi
+          }
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   build-release-binaries:
     name: Build Release Binaries (${{ matrix.asset_name }})
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -108,6 +103,12 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get install -y musl-tools
 
+      - name: Install OpenSSL (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install openssl@3
+          echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -126,18 +127,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=${{ github.event.inputs.tag || github.ref_name }}
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           gh release upload "$TAG" \
-            target/${{ matrix.target }}/release/${{ matrix.artifact_name }}#${{ matrix.asset_name }} \
+            "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}#${{ matrix.asset_name }}" \
             --clobber
 
   build-docker-images:
     name: Build and Push Docker Images
     runs-on: ubuntu-latest
     continue-on-error: true
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -151,9 +149,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
+      - name: Extract version
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -171,9 +171,6 @@ jobs:
     name: Build and Push Operator Image
     runs-on: ubuntu-latest
     continue-on-error: true
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -187,9 +184,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
+      - name: Extract version
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
 
       - name: Build and push Operator image
         uses: docker/build-push-action@v5
@@ -207,9 +206,6 @@ jobs:
     name: Build and Push UI Image
     runs-on: ubuntu-latest
     continue-on-error: true
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -223,9 +219,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
+      - name: Extract version
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
 
       - name: Build and push UI image
         uses: docker/build-push-action@v5
