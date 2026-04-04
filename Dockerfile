@@ -35,6 +35,10 @@ RUN touch src/main.rs && \
 # Stage 2: Runtime
 FROM cgr.dev/chainguard/rust:latest
 
+LABEL org.opencontainers.image.source="https://github.com/rahulbsw/streamforge"
+LABEL org.opencontainers.image.description="High-performance Kafka streaming toolkit"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
 # Copy binary from builder
 COPY --from=builder /build/target/release/streamforge /usr/local/bin/streamforge
 
