@@ -7,6 +7,10 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+  packages: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -54,6 +58,8 @@ jobs:
   build-release-binaries:
     name: Build Release Binaries (${{ matrix.asset_name }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
