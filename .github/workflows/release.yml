@@ -118,9 +118,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          gh release upload "$TAG" \
-            "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}#${{ matrix.asset_name }}" \
-            --clobber
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+          gh release upload "$TAG" ${{ matrix.asset_name }} --clobber
 
   build-docker-images:
     name: Build and Push Docker Images
