@@ -64,15 +64,12 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: streamforge
             asset_name: streamforge-linux-x86_64
-          - os: macos-13
-            target: x86_64-apple-darwin
-            artifact_name: streamforge
-            asset_name: streamforge-macos-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset_name: streamforge-linux-aarch64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: streamforge
             asset_name: streamforge-macos-aarch64
 
     steps:
@@ -92,6 +89,17 @@ jobs:
             clang \
             libclang-dev
 
+      - name: Install cross-compiler (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            libsasl2-dev:arm64 \
+            libssl-dev:arm64 \
+            libzstd-dev:arm64 \
+            libcurl4-openssl-dev:arm64 || true
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -110,25 +118,27 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
-      - name: Strip binary
-        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+      - name: Strip binary (Linux x86_64 and macOS)
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        run: strip target/${{ matrix.target }}/release/streamforge
 
       - name: Upload binary to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+          cp target/${{ matrix.target }}/release/streamforge ${{ matrix.asset_name }}
           gh release upload "$TAG" ${{ matrix.asset_name }} --clobber
 
   build-docker-images:
     name: Build and Push Docker Images
     runs-on: ubuntu-latest
     continue-on-error: true
-    env:
-      REGISTRY: ghcr.io
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for multi-arch)
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -146,12 +156,13 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
 
-      - name: Build and push Docker image
+      - name: Build and push multi-arch Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
             ghcr.io/${{ github.repository }}:latest
@@ -164,6 +175,9 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for multi-arch)
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -187,43 +201,9 @@ jobs:
           context: .
           file: ./operator/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}-operator:${{ steps.version.outputs.VERSION }}
             ghcr.io/${{ github.repository }}-operator:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-ui-image:
-    name: Build and Push UI Image
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract version
-        id: version
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
-
-      - name: Build and push UI image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./ui
-          file: ./ui/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}-ui:${{ steps.version.outputs.VERSION }}
-            ghcr.io/${{ github.repository }}-ui:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
