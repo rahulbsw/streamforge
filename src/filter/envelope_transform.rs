@@ -135,9 +135,9 @@ impl KeyTemplateTransform {
         let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
         let mut current = value;
         for part in parts {
-            current = current.get(part).ok_or_else(|| {
-                MirrorMakerError::Processing(format!("Path not found: {}", path))
-            })?;
+            current = current
+                .get(part)
+                .ok_or_else(|| MirrorMakerError::Processing(format!("Path not found: {}", path)))?;
         }
         Ok(current.clone())
     }
@@ -274,10 +274,9 @@ impl HeaderSetTransform {
 
 impl EnvelopeTransform for HeaderSetTransform {
     fn transform_envelope(&self, mut envelope: MessageEnvelope) -> Result<MessageEnvelope> {
-        envelope.headers.insert(
-            self.header_name.clone(),
-            self.value.as_bytes().to_vec(),
-        );
+        envelope
+            .headers
+            .insert(self.header_name.clone(), self.value.as_bytes().to_vec());
         Ok(envelope)
     }
 }
@@ -323,10 +322,9 @@ impl HeaderFromTransform {
 impl EnvelopeTransform for HeaderFromTransform {
     fn transform_envelope(&self, mut envelope: MessageEnvelope) -> Result<MessageEnvelope> {
         if let Some(value_str) = self.extract_from_value(&envelope.value) {
-            envelope.headers.insert(
-                self.header_name.clone(),
-                value_str.as_bytes().to_vec(),
-            );
+            envelope
+                .headers
+                .insert(self.header_name.clone(), value_str.as_bytes().to_vec());
             Ok(envelope)
         } else {
             Err(MirrorMakerError::Processing(format!(
@@ -498,7 +496,7 @@ impl EnvelopeTransform for TimestampAddTransform {
             Ok(envelope)
         } else {
             Err(MirrorMakerError::Processing(
-                "Cannot add to timestamp: message has no timestamp".to_string()
+                "Cannot add to timestamp: message has no timestamp".to_string(),
             ))
         }
     }
@@ -530,7 +528,7 @@ impl EnvelopeTransform for TimestampSubtractTransform {
             Ok(envelope)
         } else {
             Err(MirrorMakerError::Processing(
-                "Cannot subtract from timestamp: message has no timestamp".to_string()
+                "Cannot subtract from timestamp: message has no timestamp".to_string(),
             ))
         }
     }
@@ -610,7 +608,10 @@ mod tests {
         let envelope = MessageEnvelope::new(json!({}));
 
         let result = transform.transform_envelope(envelope).unwrap();
-        assert_eq!(result.header_str("x-processed-by"), Some("streamforge".to_string()));
+        assert_eq!(
+            result.header_str("x-processed-by"),
+            Some("streamforge".to_string())
+        );
     }
 
     #[test]
@@ -625,11 +626,14 @@ mod tests {
     #[test]
     fn test_header_copy_transform() {
         let transform = HeaderCopyTransform::new("x-request-id", "x-correlation-id");
-        let envelope = MessageEnvelope::new(json!({}))
-            .with_header_str("x-request-id".to_string(), "req-123");
+        let envelope =
+            MessageEnvelope::new(json!({})).with_header_str("x-request-id".to_string(), "req-123");
 
         let result = transform.transform_envelope(envelope).unwrap();
-        assert_eq!(result.header_str("x-correlation-id"), Some("req-123".to_string()));
+        assert_eq!(
+            result.header_str("x-correlation-id"),
+            Some("req-123".to_string())
+        );
     }
 
     #[test]

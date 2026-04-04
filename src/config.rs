@@ -531,12 +531,14 @@ impl MirrorMakerConfig {
 
         // Detect format based on file extension
         let config = if path.ends_with(".yaml") || path.ends_with(".yml") {
-            serde_yaml::from_str(&content)
-                .map_err(|e| crate::error::MirrorMakerError::Config(format!("YAML parse error: {}", e)))?
+            serde_yaml::from_str(&content).map_err(|e| {
+                crate::error::MirrorMakerError::Config(format!("YAML parse error: {}", e))
+            })?
         } else {
             // Default to JSON for backward compatibility
-            serde_json::from_str(&content)
-                .map_err(|e| crate::error::MirrorMakerError::Config(format!("JSON parse error: {}", e)))?
+            serde_json::from_str(&content).map_err(|e| {
+                crate::error::MirrorMakerError::Config(format!("JSON parse error: {}", e))
+            })?
         };
 
         Ok(config)

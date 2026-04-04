@@ -2,11 +2,11 @@ use crate::error::{MirrorMakerError, Result};
 use crate::filter::{
     AndFilter, ArithmeticOp, ArithmeticTransform, ArrayFilter, ArrayFilterMode, ArrayMapTransform,
     EnvelopeTransform, Filter, HashTransform, HeaderCopyTransform, HeaderExistsFilter,
-    HeaderFilter, HeaderFromTransform, HeaderRemoveTransform, HeaderSetTransform,
-    JsonPathFilter, JsonPathTransform, KeyConstantTransform, KeyConstructTransform,
-    KeyContainsFilter, KeyExistsFilter, KeyFromTransform, KeyHashTransform, KeyMatchesFilter,
-    KeyPrefixFilter, KeySuffixFilter, KeyTemplateTransform, NotFilter, ObjectConstructTransform,
-    OrFilter, RegexFilter, TimestampAddTransform, TimestampAfterFilter, TimestampAgeFilter,
+    HeaderFilter, HeaderFromTransform, HeaderRemoveTransform, HeaderSetTransform, JsonPathFilter,
+    JsonPathTransform, KeyConstantTransform, KeyConstructTransform, KeyContainsFilter,
+    KeyExistsFilter, KeyFromTransform, KeyHashTransform, KeyMatchesFilter, KeyPrefixFilter,
+    KeySuffixFilter, KeyTemplateTransform, NotFilter, ObjectConstructTransform, OrFilter,
+    RegexFilter, TimestampAddTransform, TimestampAfterFilter, TimestampAgeFilter,
     TimestampBeforeFilter, TimestampCurrentTransform, TimestampFromTransform,
     TimestampPreserveTransform, TimestampSubtractTransform, Transform,
 };
@@ -43,7 +43,9 @@ fn parse_filter_as_box(expr: &str) -> Result<Box<dyn Filter>> {
     let parts: Vec<&str> = expr.split(':').collect();
 
     if parts.is_empty() {
-        return Err(MirrorMakerError::Config("Empty filter expression".to_string()));
+        return Err(MirrorMakerError::Config(
+            "Empty filter expression".to_string(),
+        ));
     }
 
     match parts[0] {
@@ -85,8 +87,7 @@ fn reconstruct_filter_expr(parts: &[&str]) -> Result<(String, usize)> {
         "KEY_EXISTS" => Ok((parts[0].to_string(), 1)),
 
         // Two-part filters (keyword:value)
-        "KEY_PREFIX" | "KEY_SUFFIX" | "KEY_CONTAINS" |
-        "KEY_MATCHES" | "HEADER_EXISTS" => {
+        "KEY_PREFIX" | "KEY_SUFFIX" | "KEY_CONTAINS" | "KEY_MATCHES" | "HEADER_EXISTS" => {
             if parts.len() < 2 {
                 return Err(MirrorMakerError::Config(format!(
                     "{} filter requires additional parameters",
@@ -94,7 +95,7 @@ fn reconstruct_filter_expr(parts: &[&str]) -> Result<(String, usize)> {
                 )));
             }
             Ok((format!("{}:{}", parts[0], parts[1]), 2))
-        },
+        }
 
         // Two-part filters (keyword:number)
         "TIMESTAMP_AFTER" | "TIMESTAMP_BEFORE" => {
@@ -105,7 +106,7 @@ fn reconstruct_filter_expr(parts: &[&str]) -> Result<(String, usize)> {
                 )));
             }
             Ok((format!("{}:{}", parts[0], parts[1]), 2))
-        },
+        }
 
         // Three-part filters with comma-separated values
         // These need special handling as they contain commas
@@ -121,7 +122,7 @@ fn reconstruct_filter_expr(parts: &[&str]) -> Result<(String, usize)> {
             // Join the second part onwards until we have a valid expression
             let rest = parts[1..].join(":");
             Ok((format!("{}:{}", parts[0], rest), parts.len()))
-        },
+        }
 
         // Default: simple filter (path,op,value) or other filter type
         _ => {
@@ -150,7 +151,9 @@ fn parse_simple_filter(expr: &str) -> Result<Box<dyn Filter>> {
 
 fn parse_and_filter(conditions: &[&str]) -> Result<Box<dyn Filter>> {
     if conditions.is_empty() {
-        return Err(MirrorMakerError::Config("AND filter requires at least one condition".to_string()));
+        return Err(MirrorMakerError::Config(
+            "AND filter requires at least one condition".to_string(),
+        ));
     }
 
     let mut filters: Vec<Box<dyn Filter>> = Vec::new();
@@ -164,15 +167,17 @@ fn parse_and_filter(conditions: &[&str]) -> Result<Box<dyn Filter>> {
             while or_end < conditions.len() && !matches!(conditions[or_end], "AND" | "OR" | "NOT") {
                 or_end += 1;
             }
-            let or_filter = parse_or_filter(&conditions[i+1..or_end])?;
+            let or_filter = parse_or_filter(&conditions[i + 1..or_end])?;
             filters.push(or_filter);
             i = or_end;
         } else if conditions[i] == "NOT" {
             if i + 1 >= conditions.len() {
-                return Err(MirrorMakerError::Config("NOT requires a condition".to_string()));
+                return Err(MirrorMakerError::Config(
+                    "NOT requires a condition".to_string(),
+                ));
             }
             // Check if it's an envelope filter that needs multiple parts
-            let (filter_str, consumed) = reconstruct_filter_expr(&conditions[i+1..])?;
+            let (filter_str, consumed) = reconstruct_filter_expr(&conditions[i + 1..])?;
             let parsed = parse_filter_as_box(&filter_str)?;
             filters.push(Box::new(NotFilter::new(parsed)));
             i += 1 + consumed;
@@ -190,7 +195,9 @@ fn parse_and_filter(conditions: &[&str]) -> Result<Box<dyn Filter>> {
 
 fn parse_or_filter(conditions: &[&str]) -> Result<Box<dyn Filter>> {
     if conditions.is_empty() {
-        return Err(MirrorMakerError::Config("OR filter requires at least one condition".to_string()));
+        return Err(MirrorMakerError::Config(
+            "OR filter requires at least one condition".to_string(),
+        ));
     }
 
     let mut filters: Vec<Box<dyn Filter>> = Vec::new();
@@ -209,7 +216,9 @@ fn parse_or_filter(conditions: &[&str]) -> Result<Box<dyn Filter>> {
 
 fn parse_not_filter(conditions: &[&str]) -> Result<Box<dyn Filter>> {
     if conditions.len() != 1 {
-        return Err(MirrorMakerError::Config("NOT filter requires exactly one condition".to_string()));
+        return Err(MirrorMakerError::Config(
+            "NOT filter requires exactly one condition".to_string(),
+        ));
     }
 
     // Recursively parse the condition (could be envelope or value filter)
@@ -219,7 +228,9 @@ fn parse_not_filter(conditions: &[&str]) -> Result<Box<dyn Filter>> {
 
 fn parse_regex_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
-        return Err(MirrorMakerError::Config("REGEX filter requires path and pattern".to_string()));
+        return Err(MirrorMakerError::Config(
+            "REGEX filter requires path and pattern".to_string(),
+        ));
     }
 
     let combined = parts.join(":");
@@ -232,12 +243,17 @@ fn parse_regex_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
         )));
     }
 
-    Ok(Box::new(RegexFilter::new(filter_parts[0], filter_parts[1])?))
+    Ok(Box::new(RegexFilter::new(
+        filter_parts[0],
+        filter_parts[1],
+    )?))
 }
 
 fn parse_array_filter(parts: &[&str], mode: ArrayFilterMode) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
-        return Err(MirrorMakerError::Config("ARRAY filter requires path and element filter".to_string()));
+        return Err(MirrorMakerError::Config(
+            "ARRAY filter requires path and element filter".to_string(),
+        ));
     }
 
     let combined = parts.join(":");
@@ -334,19 +350,25 @@ fn parse_arithmetic_transform(expr: &str) -> Result<Arc<dyn Transform>> {
         "SUB" => ArithmeticOp::Sub,
         "MUL" => ArithmeticOp::Mul,
         "DIV" => ArithmeticOp::Div,
-        _ => return Err(MirrorMakerError::Config(format!(
-            "Unknown arithmetic operation: {}. Expected ADD, SUB, MUL, or DIV",
-            parts[0]
-        ))),
+        _ => {
+            return Err(MirrorMakerError::Config(format!(
+                "Unknown arithmetic operation: {}. Expected ADD, SUB, MUL, or DIV",
+                parts[0]
+            )))
+        }
     };
 
     let left_path = parts[1];
 
     // Check if right operand is a constant or path
     if let Ok(constant) = parts[2].parse::<f64>() {
-        Ok(Arc::new(ArithmeticTransform::new_with_constant(op, left_path, constant)?))
+        Ok(Arc::new(ArithmeticTransform::new_with_constant(
+            op, left_path, constant,
+        )?))
     } else {
-        Ok(Arc::new(ArithmeticTransform::new_with_paths(op, left_path, parts[2])?))
+        Ok(Arc::new(ArithmeticTransform::new_with_paths(
+            op, left_path, parts[2],
+        )?))
     }
 }
 
@@ -366,7 +388,11 @@ fn parse_hash_transform(expr: &str) -> Result<Arc<dyn Transform>> {
     if parts.len() >= 3 {
         // With output field - preserves original value
         let output_field = parts[2];
-        Ok(Arc::new(HashTransform::new_with_output(path, algorithm, output_field)?))
+        Ok(Arc::new(HashTransform::new_with_output(
+            path,
+            algorithm,
+            output_field,
+        )?))
     } else {
         // Without output field - replaces with hash
         Ok(Arc::new(HashTransform::new(path, algorithm)?))
@@ -380,7 +406,7 @@ fn parse_hash_transform(expr: &str) -> Result<Arc<dyn Transform>> {
 fn parse_key_matches_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
         return Err(MirrorMakerError::Config(
-            "KEY_MATCHES filter requires a pattern".to_string()
+            "KEY_MATCHES filter requires a pattern".to_string(),
         ));
     }
 
@@ -391,7 +417,7 @@ fn parse_key_matches_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
 fn parse_key_prefix_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
         return Err(MirrorMakerError::Config(
-            "KEY_PREFIX filter requires a prefix".to_string()
+            "KEY_PREFIX filter requires a prefix".to_string(),
         ));
     }
 
@@ -402,7 +428,7 @@ fn parse_key_prefix_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
 fn parse_key_suffix_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
         return Err(MirrorMakerError::Config(
-            "KEY_SUFFIX filter requires a suffix".to_string()
+            "KEY_SUFFIX filter requires a suffix".to_string(),
         ));
     }
 
@@ -413,7 +439,7 @@ fn parse_key_suffix_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
 fn parse_key_contains_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
         return Err(MirrorMakerError::Config(
-            "KEY_CONTAINS filter requires a substring".to_string()
+            "KEY_CONTAINS filter requires a substring".to_string(),
         ));
     }
 
@@ -424,7 +450,7 @@ fn parse_key_contains_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
 fn parse_header_exists_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
         return Err(MirrorMakerError::Config(
-            "HEADER_EXISTS filter requires a header name".to_string()
+            "HEADER_EXISTS filter requires a header name".to_string(),
         ));
     }
 
@@ -435,7 +461,7 @@ fn parse_header_exists_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
 fn parse_header_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
         return Err(MirrorMakerError::Config(
-            "HEADER filter requires name,operator,value".to_string()
+            "HEADER filter requires name,operator,value".to_string(),
         ));
     }
 
@@ -449,13 +475,17 @@ fn parse_header_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
         )));
     }
 
-    Ok(Box::new(HeaderFilter::new(filter_parts[0], filter_parts[1], filter_parts[2])?))
+    Ok(Box::new(HeaderFilter::new(
+        filter_parts[0],
+        filter_parts[1],
+        filter_parts[2],
+    )?))
 }
 
 fn parse_timestamp_age_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
         return Err(MirrorMakerError::Config(
-            "TIMESTAMP_AGE filter requires operator,seconds".to_string()
+            "TIMESTAMP_AGE filter requires operator,seconds".to_string(),
         ));
     }
 
@@ -470,11 +500,9 @@ fn parse_timestamp_age_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     }
 
     let operator = filter_parts[0];
-    let seconds = filter_parts[1].parse::<i64>()
-        .map_err(|_| MirrorMakerError::Config(format!(
-            "Invalid seconds value: {}",
-            filter_parts[1]
-        )))?;
+    let seconds = filter_parts[1].parse::<i64>().map_err(|_| {
+        MirrorMakerError::Config(format!("Invalid seconds value: {}", filter_parts[1]))
+    })?;
 
     Ok(Box::new(TimestampAgeFilter::new(operator, seconds)?))
 }
@@ -482,16 +510,14 @@ fn parse_timestamp_age_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
 fn parse_timestamp_after_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
         return Err(MirrorMakerError::Config(
-            "TIMESTAMP_AFTER filter requires epoch_ms".to_string()
+            "TIMESTAMP_AFTER filter requires epoch_ms".to_string(),
         ));
     }
 
     let epoch_str = parts.join(":");
-    let epoch_ms = epoch_str.parse::<i64>()
-        .map_err(|_| MirrorMakerError::Config(format!(
-            "Invalid epoch_ms value: {}",
-            epoch_str
-        )))?;
+    let epoch_ms = epoch_str
+        .parse::<i64>()
+        .map_err(|_| MirrorMakerError::Config(format!("Invalid epoch_ms value: {}", epoch_str)))?;
 
     Ok(Box::new(TimestampAfterFilter::new(epoch_ms)))
 }
@@ -499,16 +525,14 @@ fn parse_timestamp_after_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
 fn parse_timestamp_before_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
     if parts.is_empty() {
         return Err(MirrorMakerError::Config(
-            "TIMESTAMP_BEFORE filter requires epoch_ms".to_string()
+            "TIMESTAMP_BEFORE filter requires epoch_ms".to_string(),
         ));
     }
 
     let epoch_str = parts.join(":");
-    let epoch_ms = epoch_str.parse::<i64>()
-        .map_err(|_| MirrorMakerError::Config(format!(
-            "Invalid epoch_ms value: {}",
-            epoch_str
-        )))?;
+    let epoch_ms = epoch_str
+        .parse::<i64>()
+        .map_err(|_| MirrorMakerError::Config(format!("Invalid epoch_ms value: {}", epoch_str)))?;
 
     Ok(Box::new(TimestampBeforeFilter::new(epoch_ms)))
 }
@@ -582,11 +606,17 @@ fn parse_key_hash_transform(expr: &str) -> Result<Arc<dyn EnvelopeTransform>> {
 /// - "FROM:/path" - Extract from value JSON path
 /// - "COPY:source_header" - Copy from another header
 /// - "REMOVE" - Remove header
-pub fn parse_header_transform(header_name: &str, operation: &str) -> Result<Arc<dyn EnvelopeTransform>> {
+pub fn parse_header_transform(
+    header_name: &str,
+    operation: &str,
+) -> Result<Arc<dyn EnvelopeTransform>> {
     if let Some(path) = operation.strip_prefix("FROM:") {
         Ok(Arc::new(HeaderFromTransform::new(header_name, path)?))
     } else if let Some(source_header) = operation.strip_prefix("COPY:") {
-        Ok(Arc::new(HeaderCopyTransform::new(source_header, header_name)))
+        Ok(Arc::new(HeaderCopyTransform::new(
+            source_header,
+            header_name,
+        )))
     } else if operation == "REMOVE" {
         Ok(Arc::new(HeaderRemoveTransform::new(header_name)))
     } else {
@@ -709,7 +739,8 @@ mod tests {
 
     #[test]
     fn test_parse_construct_transform() {
-        let transform = parse_transform("CONSTRUCT:id=/message/confId:site=/message/siteId").unwrap();
+        let transform =
+            parse_transform("CONSTRUCT:id=/message/confId:site=/message/siteId").unwrap();
 
         let input = json!({
             "message": {"confId": 123, "siteId": 456, "other": "ignored"}
@@ -966,8 +997,8 @@ mod tests {
 
         let filter = parse_filter("HEADER_EXISTS:x-tenant").unwrap();
 
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .with_header_str("x-tenant".to_string(), "production");
+        let envelope1 =
+            MessageEnvelope::new(json!({})).with_header_str("x-tenant".to_string(), "production");
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
         let envelope2 = MessageEnvelope::new(json!({}));
@@ -980,12 +1011,12 @@ mod tests {
 
         let filter = parse_filter("HEADER:x-tenant,==,production").unwrap();
 
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .with_header_str("x-tenant".to_string(), "production");
+        let envelope1 =
+            MessageEnvelope::new(json!({})).with_header_str("x-tenant".to_string(), "production");
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
-        let envelope2 = MessageEnvelope::new(json!({}))
-            .with_header_str("x-tenant".to_string(), "test");
+        let envelope2 =
+            MessageEnvelope::new(json!({})).with_header_str("x-tenant".to_string(), "test");
         assert!(!filter.evaluate_envelope(&envelope2).unwrap());
     }
 
@@ -1001,13 +1032,11 @@ mod tests {
             .as_millis() as i64;
 
         // Old message (200 seconds ago)
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .timestamp(now - 200_000);
+        let envelope1 = MessageEnvelope::new(json!({})).timestamp(now - 200_000);
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
         // Recent message (50 seconds ago)
-        let envelope2 = MessageEnvelope::new(json!({}))
-            .timestamp(now - 50_000);
+        let envelope2 = MessageEnvelope::new(json!({})).timestamp(now - 50_000);
         assert!(!filter.evaluate_envelope(&envelope2).unwrap());
     }
 
@@ -1018,12 +1047,10 @@ mod tests {
         let threshold = 1704067200000i64; // 2024-01-01 00:00:00 UTC
         let filter = parse_filter(&format!("TIMESTAMP_AFTER:{}", threshold)).unwrap();
 
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .timestamp(threshold + 1000);
+        let envelope1 = MessageEnvelope::new(json!({})).timestamp(threshold + 1000);
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
-        let envelope2 = MessageEnvelope::new(json!({}))
-            .timestamp(threshold - 1000);
+        let envelope2 = MessageEnvelope::new(json!({})).timestamp(threshold - 1000);
         assert!(!filter.evaluate_envelope(&envelope2).unwrap());
     }
 
@@ -1034,12 +1061,10 @@ mod tests {
         let threshold = 1704067200000i64; // 2024-01-01 00:00:00 UTC
         let filter = parse_filter(&format!("TIMESTAMP_BEFORE:{}", threshold)).unwrap();
 
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .timestamp(threshold - 1000);
+        let envelope1 = MessageEnvelope::new(json!({})).timestamp(threshold - 1000);
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
-        let envelope2 = MessageEnvelope::new(json!({}))
-            .timestamp(threshold + 1000);
+        let envelope2 = MessageEnvelope::new(json!({})).timestamp(threshold + 1000);
         assert!(!filter.evaluate_envelope(&envelope2).unwrap());
     }
 

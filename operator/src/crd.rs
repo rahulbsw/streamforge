@@ -190,18 +190,31 @@ pub struct PipelineCondition {
 }
 
 // Default functions
-fn default_replicas() -> i32 { 1 }
-fn default_threads() -> i32 { 4 }
-fn default_log_level() -> String { "info".to_string() }
-fn default_offset() -> String { "latest".to_string() }
-fn default_compression() -> String { "none".to_string() }
-fn default_protocol() -> String { "PLAINTEXT".to_string() }
+fn default_replicas() -> i32 {
+    1
+}
+fn default_threads() -> i32 {
+    4
+}
+fn default_log_level() -> String {
+    "info".to_string()
+}
+fn default_offset() -> String {
+    "latest".to_string()
+}
+fn default_compression() -> String {
+    "none".to_string()
+}
+fn default_protocol() -> String {
+    "PLAINTEXT".to_string()
+}
 fn default_image_repository() -> String {
     std::env::var("DEFAULT_IMAGE_REPOSITORY")
         .unwrap_or_else(|_| "ghcr.io/rahulbsw/streamforge".to_string())
 }
 fn default_image_tag() -> String {
-    std::env::var("DEFAULT_IMAGE_TAG")
-        .unwrap_or_else(|_| "0.3.0".to_string())
+    std::env::var("DEFAULT_IMAGE_TAG").unwrap_or_else(|_| "0.3.0".to_string())
 }
-fn default_image_pull_policy() -> String { "IfNotPresent".to_string() }
+fn default_image_pull_policy() -> String {
+    "IfNotPresent".to_string()
+}

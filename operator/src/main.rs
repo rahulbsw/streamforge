@@ -7,7 +7,7 @@ use kube::{
 };
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 mod crd;
 mod reconciler;
@@ -41,8 +41,18 @@ async fn main() -> Result<()> {
         .json()
         .init();
 
-    info!("Starting Streamforge Operator v{}", env!("CARGO_PKG_VERSION"));
-    info!("Watching namespace: {}", if args.namespace.is_empty() { "all" } else { &args.namespace });
+    info!(
+        "Starting Streamforge Operator v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    info!(
+        "Watching namespace: {}",
+        if args.namespace.is_empty() {
+            "all"
+        } else {
+            &args.namespace
+        }
+    );
 
     // Create Kubernetes client
     let client = Client::try_default().await?;
@@ -66,9 +76,7 @@ async fn main() -> Result<()> {
         .run(
             move |pipeline, ctx| {
                 let reconciler = ctx.clone();
-                async move {
-                    reconciler.reconcile(pipeline).await
-                }
+                async move { reconciler.reconcile(pipeline).await }
             },
             error_policy,
             reconciler,

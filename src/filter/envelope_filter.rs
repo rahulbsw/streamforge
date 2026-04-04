@@ -224,10 +224,12 @@ impl HeaderFilter {
         let op = match operator {
             "==" => ComparisonOp::Eq,
             "!=" => ComparisonOp::Ne,
-            _ => return Err(MirrorMakerError::Config(format!(
-                "Unknown header operator: {}. Expected == or !=",
-                operator
-            ))),
+            _ => {
+                return Err(MirrorMakerError::Config(format!(
+                    "Unknown header operator: {}. Expected == or !=",
+                    operator
+                )))
+            }
         };
 
         Ok(Self {
@@ -288,10 +290,12 @@ impl TimestampAgeFilter {
             "<=" => AgeOp::Lte,
             ">" => AgeOp::Gt,
             ">=" => AgeOp::Gte,
-            _ => return Err(MirrorMakerError::Config(format!(
-                "Unknown age operator: {}. Expected <, <=, >, or >=",
-                operator
-            ))),
+            _ => {
+                return Err(MirrorMakerError::Config(format!(
+                    "Unknown age operator: {}. Expected <, <=, >, or >=",
+                    operator
+                )))
+            }
         };
 
         Ok(Self {
@@ -450,8 +454,8 @@ mod tests {
     fn test_header_exists_filter() {
         let filter = HeaderExistsFilter::new("x-tenant");
 
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .with_header_str("x-tenant".to_string(), "production");
+        let envelope1 =
+            MessageEnvelope::new(json!({})).with_header_str("x-tenant".to_string(), "production");
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
         let envelope2 = MessageEnvelope::new(json!({}));
@@ -462,12 +466,12 @@ mod tests {
     fn test_header_filter_equals() {
         let filter = HeaderFilter::new("x-tenant", "==", "production").unwrap();
 
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .with_header_str("x-tenant".to_string(), "production");
+        let envelope1 =
+            MessageEnvelope::new(json!({})).with_header_str("x-tenant".to_string(), "production");
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
-        let envelope2 = MessageEnvelope::new(json!({}))
-            .with_header_str("x-tenant".to_string(), "test");
+        let envelope2 =
+            MessageEnvelope::new(json!({})).with_header_str("x-tenant".to_string(), "test");
         assert!(!filter.evaluate_envelope(&envelope2).unwrap());
 
         let envelope3 = MessageEnvelope::new(json!({}));
@@ -478,12 +482,12 @@ mod tests {
     fn test_header_filter_not_equals() {
         let filter = HeaderFilter::new("x-tenant", "!=", "production").unwrap();
 
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .with_header_str("x-tenant".to_string(), "test");
+        let envelope1 =
+            MessageEnvelope::new(json!({})).with_header_str("x-tenant".to_string(), "test");
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
-        let envelope2 = MessageEnvelope::new(json!({}))
-            .with_header_str("x-tenant".to_string(), "production");
+        let envelope2 =
+            MessageEnvelope::new(json!({})).with_header_str("x-tenant".to_string(), "production");
         assert!(!filter.evaluate_envelope(&envelope2).unwrap());
 
         // Missing header != "production" should be true
@@ -501,13 +505,11 @@ mod tests {
             .as_millis() as i64;
 
         // Old message (200 seconds ago)
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .timestamp(now - 200_000);
+        let envelope1 = MessageEnvelope::new(json!({})).timestamp(now - 200_000);
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
         // Recent message (50 seconds ago)
-        let envelope2 = MessageEnvelope::new(json!({}))
-            .timestamp(now - 50_000);
+        let envelope2 = MessageEnvelope::new(json!({})).timestamp(now - 50_000);
         assert!(!filter.evaluate_envelope(&envelope2).unwrap());
 
         // No timestamp
@@ -521,12 +523,10 @@ mod tests {
 
         let filter = TimestampAfterFilter::new(threshold);
 
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .timestamp(threshold + 1000);
+        let envelope1 = MessageEnvelope::new(json!({})).timestamp(threshold + 1000);
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
-        let envelope2 = MessageEnvelope::new(json!({}))
-            .timestamp(threshold - 1000);
+        let envelope2 = MessageEnvelope::new(json!({})).timestamp(threshold - 1000);
         assert!(!filter.evaluate_envelope(&envelope2).unwrap());
     }
 
@@ -536,12 +536,10 @@ mod tests {
 
         let filter = TimestampBeforeFilter::new(threshold);
 
-        let envelope1 = MessageEnvelope::new(json!({}))
-            .timestamp(threshold - 1000);
+        let envelope1 = MessageEnvelope::new(json!({})).timestamp(threshold - 1000);
         assert!(filter.evaluate_envelope(&envelope1).unwrap());
 
-        let envelope2 = MessageEnvelope::new(json!({}))
-            .timestamp(threshold + 1000);
+        let envelope2 = MessageEnvelope::new(json!({})).timestamp(threshold + 1000);
         assert!(!filter.evaluate_envelope(&envelope2).unwrap());
     }
 }

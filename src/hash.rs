@@ -73,12 +73,10 @@ pub fn hash_value(value: &Value, algorithm: HashAlgorithm) -> Result<String> {
         Value::Bool(b) => b.to_string().as_bytes().to_vec(),
         Value::Null => b"null".to_vec(),
         // For objects and arrays, serialize to JSON string
-        Value::Object(_) | Value::Array(_) => {
-            serde_json::to_string(value)
-                .map_err(|e| MirrorMakerError::Processing(format!("JSON serialization error: {}", e)))?
-                .as_bytes()
-                .to_vec()
-        }
+        Value::Object(_) | Value::Array(_) => serde_json::to_string(value)
+            .map_err(|e| MirrorMakerError::Processing(format!("JSON serialization error: {}", e)))?
+            .as_bytes()
+            .to_vec(),
     };
 
     hash_bytes(&data, algorithm)

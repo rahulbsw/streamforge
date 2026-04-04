@@ -95,10 +95,9 @@ pub mod redis_backend {
             let client = redis::Client::open(url)
                 .map_err(|e| MirrorMakerError::Config(format!("Redis client error: {}", e)))?;
 
-            let connection = client
-                .get_connection_manager()
-                .await
-                .map_err(|e| MirrorMakerError::Processing(format!("Redis connection error: {}", e)))?;
+            let connection = client.get_connection_manager().await.map_err(|e| {
+                MirrorMakerError::Processing(format!("Redis connection error: {}", e))
+            })?;
 
             info!(
                 "Connected to Redis: prefix={:?}, ttl={:?}s",
@@ -135,9 +134,9 @@ pub mod redis_backend {
             match conn.get::<_, Option<String>>(&redis_key).await {
                 Ok(Some(json_str)) => {
                     debug!("Redis cache hit: {}", key);
-                    serde_json::from_str(&json_str)
-                        .map(Some)
-                        .map_err(|e| MirrorMakerError::Processing(format!("JSON parse error: {}", e)))
+                    serde_json::from_str(&json_str).map(Some).map_err(|e| {
+                        MirrorMakerError::Processing(format!("JSON parse error: {}", e))
+                    })
                 }
                 Ok(None) => {
                     debug!("Redis cache miss: {}", key);
@@ -151,8 +150,9 @@ pub mod redis_backend {
             let redis_key = self.build_key(&key);
             let mut conn = self.connection.clone();
 
-            let json_str = serde_json::to_string(&value)
-                .map_err(|e| MirrorMakerError::Processing(format!("JSON serialize error: {}", e)))?;
+            let json_str = serde_json::to_string(&value).map_err(|e| {
+                MirrorMakerError::Processing(format!("JSON serialize error: {}", e))
+            })?;
 
             if let Some(ttl) = self.default_ttl {
                 // Set with TTL
@@ -261,7 +261,9 @@ pub mod kafka_backend {
                 .set("auto.offset.reset", "earliest")
                 .set("enable.auto.commit", "true")
                 .create()
-                .map_err(|e| MirrorMakerError::Config(format!("Kafka consumer creation failed: {}", e)))?;
+                .map_err(|e| {
+                    MirrorMakerError::Config(format!("Kafka consumer creation failed: {}", e))
+                })?;
 
             consumer
                 .subscribe(&[topic])
@@ -345,7 +347,9 @@ pub mod kafka_backend {
             } else if let Some(n) = key.as_i64() {
                 n.to_string()
             } else {
-                return Err(MirrorMakerError::Processing("Cache key must be string or number".to_string()));
+                return Err(MirrorMakerError::Processing(
+                    "Cache key must be string or number".to_string(),
+                ));
             };
 
             self.cache.put(key_str, cache_value).await;
@@ -362,9 +366,9 @@ pub mod kafka_backend {
             let mut current = value;
 
             for part in parts {
-                current = current
-                    .get(part)
-                    .ok_or_else(|| MirrorMakerError::Processing(format!("Field not found: {}", path)))?;
+                current = current.get(part).ok_or_else(|| {
+                    MirrorMakerError::Processing(format!("Field not found: {}", path))
+                })?;
             }
 
             Ok(current.clone())
@@ -514,7 +518,10 @@ mod tests {
         let backend = local::LocalCacheBackend::new(cache);
 
         // Test put and get
-        backend.put("key1".to_string(), json!("value1")).await.unwrap();
+        backend
+            .put("key1".to_string(), json!("value1"))
+            .await
+            .unwrap();
         let value = backend.get("key1").await.unwrap();
         assert_eq!(value, Some(json!("value1")));
 

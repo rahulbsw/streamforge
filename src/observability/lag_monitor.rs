@@ -7,10 +7,7 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 /// Start monitoring Kafka consumer lag
-pub async fn start_lag_monitor(
-    consumer: Arc<StreamConsumer>,
-    interval_secs: u64,
-) {
+pub async fn start_lag_monitor(consumer: Arc<StreamConsumer>, interval_secs: u64) {
     info!(
         "🔍 Starting consumer lag monitor (interval: {}s)",
         interval_secs
@@ -34,9 +31,7 @@ pub async fn start_lag_monitor(
     }
 }
 
-async fn monitor_lag(
-    consumer: &StreamConsumer,
-) -> Result<i64, Box<dyn std::error::Error>> {
+async fn monitor_lag(consumer: &StreamConsumer) -> Result<i64, Box<dyn std::error::Error>> {
     // Get current assignment
     let assignment = consumer.assignment()?;
 
@@ -56,17 +51,11 @@ async fn monitor_lag(
             Some(tpl) => match tpl.offset() {
                 Offset::Offset(offset) => offset,
                 Offset::Invalid => {
-                    debug!(
-                        "Invalid offset for {}-{}, skipping",
-                        topic, partition
-                    );
+                    debug!("Invalid offset for {}-{}, skipping", topic, partition);
                     continue;
                 }
                 _ => {
-                    debug!(
-                        "Non-offset position for {}-{}, skipping",
-                        topic, partition
-                    );
+                    debug!("Non-offset position for {}-{}, skipping", topic, partition);
                     continue;
                 }
             },
@@ -122,7 +111,6 @@ async fn monitor_lag(
 
 #[cfg(test)]
 mod tests {
-    
 
     #[test]
     fn test_lag_calculation() {

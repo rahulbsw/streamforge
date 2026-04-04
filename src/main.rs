@@ -1,12 +1,10 @@
+use futures::stream::StreamExt;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::{Headers, Message};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::interval;
-use tracing::{error, info, warn};
-use futures::stream::StreamExt;
 use streamforge::filter::{EnvelopeTransform, Filter, Transform};
 use streamforge::filter_parser::{
     parse_filter, parse_header_transform, parse_key_transform, parse_static_headers,
@@ -14,9 +12,15 @@ use streamforge::filter_parser::{
 };
 use streamforge::kafka::KafkaSink;
 use streamforge::metrics::{Stats, StatsReporter};
-use streamforge::observability::{labels, register_metrics, start_lag_monitor, start_metrics_server, METRICS};
-use streamforge::processor::{MessageProcessor, MultiDestinationProcessor, SingleDestinationProcessor, DestinationProcessor};
+use streamforge::observability::{
+    labels, register_metrics, start_lag_monitor, start_metrics_server, METRICS,
+};
+use streamforge::processor::{
+    DestinationProcessor, MessageProcessor, MultiDestinationProcessor, SingleDestinationProcessor,
+};
 use streamforge::{MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result};
+use tokio::time::interval;
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,9 +40,8 @@ async fn main() -> Result<()> {
 
     // Initialize observability (metrics)
     if config.observability.metrics_enabled {
-        register_metrics().map_err(|e| {
-            MirrorMakerError::Config(format!("Failed to register metrics: {}", e))
-        })?;
+        register_metrics()
+            .map_err(|e| MirrorMakerError::Config(format!("Failed to register metrics: {}", e)))?;
         info!("✅ Metrics registered successfully");
 
         // Start metrics HTTP server
@@ -52,8 +55,14 @@ async fn main() -> Result<()> {
 
     // Record service start time for uptime metric
     let start_time = std::time::Instant::now();
-    METRICS.kafka_connections.with_label_values(&[labels::CONNECTION_TYPE_CONSUMER]).set(1.0);
-    METRICS.kafka_connections.with_label_values(&[labels::CONNECTION_TYPE_PRODUCER]).set(1.0);
+    METRICS
+        .kafka_connections
+        .with_label_values(&[labels::CONNECTION_TYPE_CONSUMER])
+        .set(1.0);
+    METRICS
+        .kafka_connections
+        .with_label_values(&[labels::CONNECTION_TYPE_PRODUCER])
+        .set(1.0);
 
     // Create statistics
     let stats = Arc::new(Stats::new());
@@ -87,7 +96,10 @@ async fn main() -> Result<()> {
             start_lag_monitor(consumer_for_lag, lag_interval).await;
         });
 
-        info!("✅ Consumer lag monitoring started (interval: {}s)", lag_interval);
+        info!(
+            "✅ Consumer lag monitoring started (interval: {}s)",
+            lag_interval
+        );
     } else {
         info!("⏭️  Consumer lag monitoring disabled");
     }
@@ -140,10 +152,16 @@ async fn main() -> Result<()> {
         streamforge::config::CommitMode::Sync => rdkafka::consumer::CommitMode::Sync,
     };
 
-    info!("Starting concurrent message processing (parallelism: {}, batch_size: {})", parallelism, BATCH_SIZE);
+    info!(
+        "Starting concurrent message processing (parallelism: {}, batch_size: {})",
+        parallelism, BATCH_SIZE
+    );
 
     if manual_commit {
-        info!("Using batch-level commits for at-least-once delivery (mode: {:?})", commit_mode);
+        info!(
+            "Using batch-level commits for at-least-once delivery (mode: {:?})",
+            commit_mode
+        );
     }
 
     let mut message_stream = consumer.stream();
@@ -281,8 +299,12 @@ async fn main() -> Result<()> {
                             break;
                         }
                         Err(e) => {
-                            error!("Failed to commit offsets (attempt {}/{}): {}",
-                                   retry_count + 1, MAX_COMMIT_RETRIES, e);
+                            error!(
+                                "Failed to commit offsets (attempt {}/{}): {}",
+                                retry_count + 1,
+                                MAX_COMMIT_RETRIES,
+                                e
+                            );
                             stats.error();
 
                             retry_count += 1;
@@ -303,13 +325,20 @@ async fn main() -> Result<()> {
             } else {
                 // Batch has errors - halt processing to prevent skipping failed messages
                 METRICS.messages_in_flight.sub(batch_size as f64);
-                error!("CRITICAL: Batch processing failed with {} errors out of {} messages. \
-                        Halting to prevent data loss.", error_count, results.len());
-                error!("Failed messages will be reprocessed on restart. \
-                        Note: Successfully processed messages in this batch may create duplicates.");
-                return Err(MirrorMakerError::Processing(
-                    format!("Batch processing failed: {} errors", error_count)
-                ));
+                error!(
+                    "CRITICAL: Batch processing failed with {} errors out of {} messages. \
+                        Halting to prevent data loss.",
+                    error_count,
+                    results.len()
+                );
+                error!(
+                    "Failed messages will be reprocessed on restart. \
+                        Note: Successfully processed messages in this batch may create duplicates."
+                );
+                return Err(MirrorMakerError::Processing(format!(
+                    "Batch processing failed: {} errors",
+                    error_count
+                )));
             }
         } else {
             // Auto-commit mode: collect results to count errors
@@ -321,15 +350,20 @@ async fn main() -> Result<()> {
             // Log each error
             for result in results.iter() {
                 if let Err(e) = result {
-                    error!("Message processing failed in auto-commit mode (data loss): {}", e);
+                    error!(
+                        "Message processing failed in auto-commit mode (data loss): {}",
+                        e
+                    );
                 }
             }
 
             if error_count > 0 {
-                warn!("Batch completed with {} errors in auto-commit mode. \
+                warn!(
+                    "Batch completed with {} errors in auto-commit mode. \
                        Failed messages will NOT be reprocessed (data loss). \
                        Consider enabling manual_commit for at-least-once delivery guarantees.",
-                       error_count);
+                    error_count
+                );
             }
         }
     }
@@ -452,12 +486,13 @@ async fn build_multi_destination_processor(
 
         // Parse header transforms if specified
         if let Some(ref header_transforms) = dest.header_transforms {
-            info!("  Dynamic header transforms: {} operation(s)", header_transforms.len());
+            info!(
+                "  Dynamic header transforms: {} operation(s)",
+                header_transforms.len()
+            );
             for header_config in header_transforms {
-                let transform = parse_header_transform(
-                    &header_config.header,
-                    &header_config.operation,
-                )?;
+                let transform =
+                    parse_header_transform(&header_config.header, &header_config.operation)?;
                 envelope_transforms.push(transform);
             }
         }
@@ -469,7 +504,8 @@ async fn build_multi_destination_processor(
         }
 
         // Create value transform if specified (backward compatible)
-        let transform: Option<Arc<dyn Transform>> = if let Some(ref transform_expr) = dest.transform {
+        let transform: Option<Arc<dyn Transform>> = if let Some(ref transform_expr) = dest.transform
+        {
             info!("  Value transform: {}", transform_expr);
             Some(parse_transform(transform_expr)?)
         } else {
@@ -673,7 +709,10 @@ mod tests {
             }
 
             let result = load_config();
-            assert!(result.is_ok(), "Should return default config when file missing");
+            assert!(
+                result.is_ok(),
+                "Should return default config when file missing"
+            );
 
             let config = result.unwrap();
             assert_eq!(config.appid, "streamforge", "Should use default appid");
@@ -742,12 +781,18 @@ mod tests {
             // Manual commit disabled = auto commit enabled
             config.commit_strategy.manual_commit = false;
             let auto_commit = !config.commit_strategy.manual_commit;
-            assert!(auto_commit, "auto_commit should be true when manual_commit is false");
+            assert!(
+                auto_commit,
+                "auto_commit should be true when manual_commit is false"
+            );
 
             // Manual commit enabled = auto commit disabled
             config.commit_strategy.manual_commit = true;
             let auto_commit = !config.commit_strategy.manual_commit;
-            assert!(!auto_commit, "auto_commit should be false when manual_commit is true");
+            assert!(
+                !auto_commit,
+                "auto_commit should be false when manual_commit is true"
+            );
         }
     }
 
@@ -758,7 +803,9 @@ mod tests {
         fn test_none_value_returns_error() {
             let result = parse_message_value(None);
             assert!(result.is_err());
-            assert!(matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Empty payload")));
+            assert!(
+                matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Empty payload"))
+            );
         }
 
         #[test]
@@ -787,7 +834,9 @@ mod tests {
             let value = b"not-json";
             let result = parse_message_value(Some(value));
             assert!(result.is_err());
-            assert!(matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON")));
+            assert!(
+                matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON"))
+            );
         }
 
         #[test]
@@ -803,7 +852,9 @@ mod tests {
             let value = b"";
             let result = parse_message_value(Some(value));
             assert!(result.is_err());
-            assert!(matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON")));
+            assert!(
+                matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON"))
+            );
         }
 
         #[test]

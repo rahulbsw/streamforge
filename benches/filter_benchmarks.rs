@@ -119,7 +119,11 @@ fn bench_filter_parser(c: &mut Criterion) {
     });
 
     c.bench_function("parser/and_filter", |b| {
-        b.iter(|| parse_filter(black_box("AND:/message/siteId,>,10000:/message/status,==,active")))
+        b.iter(|| {
+            parse_filter(black_box(
+                "AND:/message/siteId,>,10000:/message/status,==,active",
+            ))
+        })
     });
 
     c.bench_function("parser/regex_filter", |b| {
@@ -137,26 +141,37 @@ fn bench_filter_throughput(c: &mut Criterion) {
     for msg_count in [100, 1000, 10000].iter() {
         group.throughput(Throughput::Elements(*msg_count as u64));
 
-        group.bench_with_input(BenchmarkId::new("simple", msg_count), msg_count, |b, &count| {
-            let filter = JsonPathFilter::new("/message/siteId", ">", "10000").unwrap();
-            let msg = create_test_message();
-            b.iter(|| {
-                for _ in 0..count {
-                    black_box(filter.evaluate(black_box(&msg)).unwrap());
-                }
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("simple", msg_count),
+            msg_count,
+            |b, &count| {
+                let filter = JsonPathFilter::new("/message/siteId", ">", "10000").unwrap();
+                let msg = create_test_message();
+                b.iter(|| {
+                    for _ in 0..count {
+                        black_box(filter.evaluate(black_box(&msg)).unwrap());
+                    }
+                });
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("complex", msg_count), msg_count, |b, &count| {
-            // Complex filter: AND with 3 conditions
-            let filter = parse_filter("AND:/message/siteId,>,10000:/message/status,==,active:/message/userId,>,500").unwrap();
-            let msg = create_test_message();
-            b.iter(|| {
-                for _ in 0..count {
-                    black_box(filter.evaluate(black_box(&msg)).unwrap());
-                }
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("complex", msg_count),
+            msg_count,
+            |b, &count| {
+                // Complex filter: AND with 3 conditions
+                let filter = parse_filter(
+                    "AND:/message/siteId,>,10000:/message/status,==,active:/message/userId,>,500",
+                )
+                .unwrap();
+                let msg = create_test_message();
+                b.iter(|| {
+                    for _ in 0..count {
+                        black_box(filter.evaluate(black_box(&msg)).unwrap());
+                    }
+                });
+            },
+        );
     }
 
     group.finish();

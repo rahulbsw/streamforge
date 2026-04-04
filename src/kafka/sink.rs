@@ -123,9 +123,12 @@ impl KafkaSink {
     pub async fn send(&self, envelope: MessageEnvelope) -> Result<()> {
         // Determine partition (use key and value for partitioning decision)
         let key_for_partition = envelope.key.as_ref().unwrap_or(&Value::Null);
-        let partition = self
-            .partitioner
-            .partition(&self.target_topic, key_for_partition, &envelope.value, self.num_partitions);
+        let partition = self.partitioner.partition(
+            &self.target_topic,
+            key_for_partition,
+            &envelope.value,
+            self.num_partitions,
+        );
 
         debug!("Routing to partition {}/{}", partition, self.num_partitions);
 
@@ -136,10 +139,7 @@ impl KafkaSink {
         let mut value_bytes = serde_json::to_vec(&envelope.value)?;
 
         // Apply enveloped compression if configured
-        if matches!(
-            self.compressor.compression_type,
-            CompressionType::Enveloped
-        ) {
+        if matches!(self.compressor.compression_type, CompressionType::Enveloped) {
             value_bytes = self.compressor.compress(&value_bytes)?;
         }
 
@@ -236,7 +236,7 @@ impl MultiSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{CompressionConfig, CommitStrategyConfig, MirrorMakerConfig};
+    use crate::config::{CommitStrategyConfig, CompressionConfig, MirrorMakerConfig};
 
     fn create_test_config() -> MirrorMakerConfig {
         MirrorMakerConfig {

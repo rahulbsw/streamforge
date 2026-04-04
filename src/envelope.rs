@@ -214,10 +214,8 @@ mod tests {
 
     #[test]
     fn test_envelope_with_key() {
-        let envelope = MessageEnvelope::with_key(
-            Some(json!({"id": 123})),
-            json!({"test": "value"}),
-        );
+        let envelope =
+            MessageEnvelope::with_key(Some(json!({"id": 123})), json!({"test": "value"}));
         assert_eq!(envelope.key, Some(json!({"id": 123})));
         assert_eq!(envelope.value, json!({"test": "value"}));
     }
@@ -232,7 +230,10 @@ mod tests {
 
         assert_eq!(envelope.key, Some(json!({"id": 123})));
         assert_eq!(envelope.timestamp, Some(1234567890000));
-        assert_eq!(envelope.header_str("x-tenant"), Some("production".to_string()));
+        assert_eq!(
+            envelope.header_str("x-tenant"),
+            Some("production".to_string())
+        );
         assert_eq!(envelope.topic, Some("input-topic".to_string()));
         assert_eq!(envelope.partition, Some(0));
         assert_eq!(envelope.offset, Some(12345));
@@ -243,8 +244,12 @@ mod tests {
         let mut envelope = MessageEnvelope::new(json!({}));
 
         // Add headers
-        envelope.headers.insert("x-tenant".to_string(), b"prod".to_vec());
-        envelope.headers.insert("x-user".to_string(), b"user-123".to_vec());
+        envelope
+            .headers
+            .insert("x-tenant".to_string(), b"prod".to_vec());
+        envelope
+            .headers
+            .insert("x-user".to_string(), b"user-123".to_vec());
 
         // Check existence
         assert!(envelope.has_header("x-tenant"));
@@ -273,8 +278,7 @@ mod tests {
             .as_millis() as i64;
 
         // Message from 100 seconds ago
-        let old_envelope = MessageEnvelope::new(json!({}))
-            .timestamp(now - 100_000);
+        let old_envelope = MessageEnvelope::new(json!({})).timestamp(now - 100_000);
 
         assert!(old_envelope.is_older_than(50));
         assert!(!old_envelope.is_older_than(150));

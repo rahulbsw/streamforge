@@ -2,8 +2,8 @@ mod envelope_filter;
 mod envelope_transform;
 
 pub use envelope_filter::{
-    HeaderExistsFilter, HeaderFilter, KeyExistsFilter, KeyPrefixFilter, KeySuffixFilter,
-    KeyContainsFilter, KeyMatchesFilter, TimestampAgeFilter, TimestampAfterFilter,
+    HeaderExistsFilter, HeaderFilter, KeyContainsFilter, KeyExistsFilter, KeyMatchesFilter,
+    KeyPrefixFilter, KeySuffixFilter, TimestampAfterFilter, TimestampAgeFilter,
     TimestampBeforeFilter,
 };
 
@@ -100,7 +100,12 @@ impl JsonPathFilter {
             "<=" => ComparisonOp::Lte,
             "==" => ComparisonOp::Eq,
             "!=" => ComparisonOp::Ne,
-            _ => return Err(MirrorMakerError::Config(format!("Unknown operator: {}", operator))),
+            _ => {
+                return Err(MirrorMakerError::Config(format!(
+                    "Unknown operator: {}",
+                    operator
+                )))
+            }
         };
 
         // Parse value - try number first, then boolean, then string
@@ -146,12 +151,12 @@ impl JsonPathFilter {
             (ComparisonValue::Number(expected), ComparisonOp::Lte) => {
                 actual.as_f64().is_some_and(|v| v <= *expected)
             }
-            (ComparisonValue::Number(expected), ComparisonOp::Eq) => {
-                actual.as_f64().is_some_and(|v| (v - *expected).abs() < f64::EPSILON)
-            }
-            (ComparisonValue::Number(expected), ComparisonOp::Ne) => {
-                actual.as_f64().is_none_or(|v| (v - *expected).abs() >= f64::EPSILON)
-            }
+            (ComparisonValue::Number(expected), ComparisonOp::Eq) => actual
+                .as_f64()
+                .is_some_and(|v| (v - *expected).abs() < f64::EPSILON),
+            (ComparisonValue::Number(expected), ComparisonOp::Ne) => actual
+                .as_f64()
+                .is_none_or(|v| (v - *expected).abs() >= f64::EPSILON),
             (ComparisonValue::String(expected), ComparisonOp::Eq) => {
                 actual.as_str().is_some_and(|v| v == expected)
             }
@@ -501,8 +506,8 @@ pub struct ArrayFilter {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ArrayFilterMode {
-    All,  // All elements must match
-    Any,  // At least one element must match
+    All, // All elements must match
+    Any, // At least one element must match
 }
 
 impl ArrayFilter {
@@ -728,16 +733,20 @@ impl ArithmeticTransform {
 
 impl Transform for ArithmeticTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let left = self.extract_value(&value, &self.left_path)
-            .ok_or_else(|| {
-                MirrorMakerError::Processing(format!("Left operand not found or not a number: {}", self.left_path))
-            })?;
+        let left = self.extract_value(&value, &self.left_path).ok_or_else(|| {
+            MirrorMakerError::Processing(format!(
+                "Left operand not found or not a number: {}",
+                self.left_path
+            ))
+        })?;
 
         let right = match &self.right {
-            ArithmeticOperand::Path(path) => self.extract_value(&value, path)
-                .ok_or_else(|| {
-                    MirrorMakerError::Processing(format!("Right operand not found or not a number: {}", path))
-                })?,
+            ArithmeticOperand::Path(path) => self.extract_value(&value, path).ok_or_else(|| {
+                MirrorMakerError::Processing(format!(
+                    "Right operand not found or not a number: {}",
+                    path
+                ))
+            })?,
             ArithmeticOperand::Constant(c) => *c,
         };
 
@@ -791,7 +800,11 @@ impl HashTransform {
     /// * `path` - JSON path to the field to hash
     /// * `algorithm` - Hash algorithm to use
     /// * `output_field` - Name of the field to store hash in (preserves original)
-    pub fn new_with_output(path: &str, algorithm: HashAlgorithm, output_field: &str) -> Result<Self> {
+    pub fn new_with_output(
+        path: &str,
+        algorithm: HashAlgorithm,
+        output_field: &str,
+    ) -> Result<Self> {
         Ok(Self {
             path: path.to_string(),
             algorithm,
@@ -814,9 +827,9 @@ impl HashTransform {
 
 impl Transform for HashTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = self
-            .extract_value(&value)
-            .ok_or_else(|| MirrorMakerError::Processing(format!("Path not found: {}", self.path)))?;
+        let extracted = self.extract_value(&value).ok_or_else(|| {
+            MirrorMakerError::Processing(format!("Path not found: {}", self.path))
+        })?;
 
         let hash = hash_value(&extracted, self.algorithm)?;
 
@@ -941,7 +954,7 @@ impl Transform for CacheLookupTransform {
         // This is a limitation - in practice, you'd want to use an async transform trait
         // For now, this serves as a placeholder structure
         Err(MirrorMakerError::Processing(
-            "CacheLookupTransform requires async context - use AsyncTransform instead".to_string()
+            "CacheLookupTransform requires async context - use AsyncTransform instead".to_string(),
         ))
     }
 }
@@ -955,9 +968,9 @@ pub trait AsyncTransform: Send + Sync {
 #[async_trait::async_trait]
 impl AsyncTransform for CacheLookupTransform {
     async fn transform_async(&self, value: Value) -> Result<Value> {
-        let key = self
-            .extract_key(&value)
-            .ok_or_else(|| MirrorMakerError::Processing(format!("Key path not found: {}", self.key_path)))?;
+        let key = self.extract_key(&value).ok_or_else(|| {
+            MirrorMakerError::Processing(format!("Key path not found: {}", self.key_path))
+        })?;
 
         let cache_key = self.build_cache_key(&key);
 
@@ -965,14 +978,16 @@ impl AsyncTransform for CacheLookupTransform {
         if let Some(lookup_result) = self.cache.get(&cache_key).await {
             if self.merge_result {
                 // Merge lookup result into original value
-                if let (Value::Object(mut orig_obj), Value::Object(lookup_obj)) = (value, lookup_result) {
+                if let (Value::Object(mut orig_obj), Value::Object(lookup_obj)) =
+                    (value, lookup_result)
+                {
                     for (k, v) in lookup_obj {
                         orig_obj.insert(k, v);
                     }
                     Ok(Value::Object(orig_obj))
                 } else {
                     Err(MirrorMakerError::Processing(
-                        "Cannot merge: both values must be objects".to_string()
+                        "Cannot merge: both values must be objects".to_string(),
                     ))
                 }
             } else {

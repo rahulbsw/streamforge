@@ -165,7 +165,10 @@ impl CacheManager {
 
     /// Get all cache names
     pub fn cache_names(&self) -> Vec<String> {
-        self.caches.iter().map(|entry| entry.key().clone()).collect()
+        self.caches
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
     }
 
     /// Get statistics for all caches
@@ -255,9 +258,7 @@ mod tests {
 
         // First call should load the value
         let value = cache
-            .get_or_insert_with("key1".to_string(), || async {
-                Ok(json!({"loaded": true}))
-            })
+            .get_or_insert_with("key1".to_string(), || async { Ok(json!({"loaded": true})) })
             .await
             .unwrap();
         assert_eq!(value, json!({"loaded": true}));
@@ -342,7 +343,9 @@ mod tests {
             }
         });
 
-        cache.put("user:123".to_string(), complex_value.clone()).await;
+        cache
+            .put("user:123".to_string(), complex_value.clone())
+            .await;
 
         let retrieved = cache.get("user:123").await.unwrap();
         assert_eq!(retrieved, complex_value);

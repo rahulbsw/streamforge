@@ -1,4 +1,4 @@
-use crate::filter::{Filter, Transform, EnvelopeTransform, PassThroughFilter, IdentityTransform};
+use crate::filter::{EnvelopeTransform, Filter, IdentityTransform, PassThroughFilter, Transform};
 use crate::kafka::sink::KafkaSink;
 use crate::observability::{labels, METRICS};
 use crate::{MessageEnvelope, MirrorMakerError, Result};
@@ -69,7 +69,14 @@ impl DestinationProcessor {
 
         METRICS
             .filter_evaluations
-            .with_label_values(&[&self.name, if filter_passed { labels::FILTER_RESULT_PASS } else { labels::FILTER_RESULT_FAIL }])
+            .with_label_values(&[
+                &self.name,
+                if filter_passed {
+                    labels::FILTER_RESULT_PASS
+                } else {
+                    labels::FILTER_RESULT_FAIL
+                },
+            ])
             .inc();
 
         if !filter_passed {
@@ -123,10 +130,7 @@ pub struct MultiDestinationProcessor {
 }
 
 impl MultiDestinationProcessor {
-    pub fn new(
-        destinations: Vec<DestinationProcessor>,
-        routing_path: Option<String>,
-    ) -> Self {
+    pub fn new(destinations: Vec<DestinationProcessor>, routing_path: Option<String>) -> Self {
         Self {
             destinations,
             routing_path,

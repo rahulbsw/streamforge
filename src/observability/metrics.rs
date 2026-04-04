@@ -166,7 +166,10 @@ impl Metrics {
             .unwrap(),
 
             filter_errors: CounterVec::new(
-                Opts::new("streamforge_filter_errors_total", "Filter evaluation errors"),
+                Opts::new(
+                    "streamforge_filter_errors_total",
+                    "Filter evaluation errors",
+                ),
                 &["destination"],
             )
             .unwrap(),
@@ -262,10 +265,7 @@ impl Metrics {
                 .unwrap(),
 
             kafka_connections: GaugeVec::new(
-                Opts::new(
-                    "streamforge_kafka_connections",
-                    "Active Kafka connections",
-                ),
+                Opts::new("streamforge_kafka_connections", "Active Kafka connections"),
                 &["type"],
             )
             .unwrap(),
@@ -307,10 +307,10 @@ pub fn metrics_text() -> String {
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
     let mut buffer = Vec::new();
-    encoder.encode(&metric_families, &mut buffer)
+    encoder
+        .encode(&metric_families, &mut buffer)
         .expect("Prometheus text encoding failed");
-    String::from_utf8(buffer)
-        .expect("Prometheus output contained invalid UTF-8")
+    String::from_utf8(buffer).expect("Prometheus output contained invalid UTF-8")
 }
 
 #[cfg(test)]

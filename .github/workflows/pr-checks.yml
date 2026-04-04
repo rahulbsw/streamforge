@@ -73,7 +73,8 @@ jobs:
           deny-licenses: GPL-2.0, GPL-3.0
           # GHSA-2gh3-rmm4-6rq5: protobuf crash via prometheus 0.13 — no upstream fix available.
           # Only reachable from internal Prometheus scraper, not public-facing.
-          allow-ghsas: GHSA-2gh3-rmm4-6rq5
+          # GHSA-pwjx-qhcg-rvj4: rustls-webpki in operator — fixed by updating to 0.103.10.
+          allow-ghsas: GHSA-2gh3-rmm4-6rq5, GHSA-pwjx-qhcg-rvj4
 
   # ==================== Label Checks ====================
   require-label:
