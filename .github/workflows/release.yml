@@ -101,7 +101,7 @@ jobs:
 
       - name: Install cross (Linux aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo install cross --version 0.2.5 --locked
+        run: cargo install cross --git https://github.com/cross-rs/cross --locked
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
