@@ -65,7 +65,7 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset_name: streamforge-linux-x86_64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             asset_name: streamforge-linux-aarch64
           - os: macos-latest
@@ -91,7 +91,7 @@ jobs:
 
       - name: Install cross (Linux aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+        run: cargo install cross --version 0.2.5 --locked
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
