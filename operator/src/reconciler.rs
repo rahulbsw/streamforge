@@ -15,7 +15,7 @@ use kube::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::crd::StreamforgePipeline;
 
