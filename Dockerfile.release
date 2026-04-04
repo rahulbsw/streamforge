@@ -1,0 +1,22 @@
+# Release Dockerfile — copies pre-built binary into minimal Chainguard runtime image.
+# No compilation; the binary is built natively by the CI binary release jobs.
+# Build context must contain: streamforge-linux-amd64 and streamforge-linux-arm64
+FROM cgr.dev/chainguard/wolfi-base AS runtime
+
+# Install only runtime libraries that streamforge links against dynamically
+RUN apk add --no-cache \
+    openssl \
+    cyrus-sasl \
+    libzstd1 \
+    libcurl4
+
+LABEL org.opencontainers.image.source="https://github.com/rahulbsw/streamforge"
+LABEL org.opencontainers.image.description="High-performance Kafka streaming toolkit"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+ARG TARGETARCH
+COPY streamforge-linux-${TARGETARCH} /usr/local/bin/streamforge
+RUN chmod +x /usr/local/bin/streamforge
+
+ENV RUST_LOG=info
+ENTRYPOINT ["/usr/local/bin/streamforge"]

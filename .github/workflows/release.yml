@@ -65,14 +65,17 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset_name: streamforge-linux-x86_64
+            docker_arch: amd64
 
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             asset_name: streamforge-linux-aarch64
+            docker_arch: arm64
 
           - os: macos-latest
             target: aarch64-apple-darwin
             asset_name: streamforge-macos-aarch64
+            docker_arch: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -85,22 +88,8 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Install system dependencies (Linux x86_64)
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libsasl2-dev \
-            libssl-dev \
-            libzstd-dev \
-            libcurl4-openssl-dev \
-            cmake \
-            pkg-config \
-            clang \
-            libclang-dev
-
-      - name: Install system dependencies (Linux aarch64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -120,16 +109,11 @@ jobs:
           echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix cyrus-sasl)/lib/pkgconfig" >> $GITHUB_ENV
 
-      - name: Build (native — x86_64 and macOS)
-        if: matrix.target != 'aarch64-unknown-linux-gnu'
+      - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
-      - name: Build (Linux aarch64 — native ARM64 runner)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo build --release --locked --target ${{ matrix.target }}
-
-      - name: Strip binary (native only)
-        if: matrix.target != 'aarch64-unknown-linux-gnu'
+      - name: Strip binary (Linux only)
+        if: runner.os == 'Linux'
         run: strip target/${{ matrix.target }}/release/streamforge
 
       - name: Upload binary to release
@@ -140,8 +124,17 @@ jobs:
           cp target/${{ matrix.target }}/release/streamforge ${{ matrix.asset_name }}
           gh release upload "$TAG" ${{ matrix.asset_name }} --clobber
 
+      - name: Upload Linux binary as artifact for Docker (Linux only)
+        if: matrix.docker_arch != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamforge-linux-${{ matrix.docker_arch }}
+          path: ${{ matrix.asset_name }}
+          retention-days: 1
+
   build-docker-images:
     name: Build and Push Docker Images
+    needs: build-release-binaries
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
@@ -150,7 +143,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up QEMU (for multi-arch)
+      - name: Download amd64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: streamforge-linux-amd64
+
+      - name: Download arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: streamforge-linux-arm64
+
+      - name: Rename binaries for Dockerfile.release
+        run: |
+          mv streamforge-linux-x86_64 streamforge-linux-amd64
+          mv streamforge-linux-aarch64 streamforge-linux-arm64
+
+      - name: Set up QEMU (for multi-arch manifest only)
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -163,7 +171,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags and labels)
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -172,17 +180,15 @@ jobs:
             type=semver,pattern={{version}},value=${{ github.event.inputs.tag || github.ref_name }}
             type=raw,value=latest
 
-      - name: Build and push multi-arch Docker image
+      - name: Build and push multi-arch Docker image (pre-built binaries)
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
+          file: ./Dockerfile.release
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   build-operator-image:
     name: Build and Push Operator Image
@@ -194,7 +200,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up QEMU (for multi-arch)
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
