@@ -1,0 +1,228 @@
+# Kafka Message Envelope Features - Example Configuration
+#
+# This configuration demonstrates the new envelope transformation capabilities:
+# - Filtering on keys, headers, and timestamps
+# - Transforming message keys per destination
+# - Setting and manipulating headers
+# - Timestamp handling
+#
+# Use Case: Multi-tenant event routing with correlation tracking
+
+appid: envelope-demo
+bootstrap: localhost:9092
+target_broker: localhost:9093
+input: raw-events
+threads: 4
+
+routing:
+  routing_type: filter
+
+  destinations:
+    # ============================================================================
+    # Example 1: Premium User Events with Custom Key
+    # ============================================================================
+    - output: premium-user-events
+      description: "Route premium users with custom key for partitioning"
+
+      # Filter: Premium users AND active status
+      filter: "AND:KEY_PREFIX:premium-:/user/active,==,true"
+
+      # Extract user ID as key (for consistent partitioning)
+      key_transform: "/user/id"
+
+      # Add static headers for tracking
+      headers:
+        x-event-type: "premium-user"
+        x-processing-pipeline: "streamforge-envelope"
+        x-version: "1.0"
+
+      # Extract dynamic headers from message
+      header_transforms:
+        - header: x-user-id
+          operation: "FROM:/user/id"
+        - header: x-tenant-id
+          operation: "FROM:/tenant/id"
+
+      # Preserve original timestamp
+      timestamp: "PRESERVE"
+
+    # ============================================================================
+    # Example 2: Multi-Tenant Filtering by Header
+    # ============================================================================
+    - output: production-tenant-events
+      description: "Production tenant events only"
+
+      # Filter by header value
+      filter: "HEADER:x-tenant,==,production"
+
+      # Build composite key from tenant and user
+      key_transform: "CONSTRUCT:tenant=/tenant/id:user=/user/id"
+
+      headers:
+        x-environment: "production"
+        x-processed-by: "streamforge"
+
+      # Copy correlation ID from incoming header
+      header_transforms:
+        - header: x-correlation-id
+          operation: "COPY:x-request-id"
+        - header: x-trace-id
+          operation: "FROM:/trace/id"
+
+    - output: test-tenant-events
+      description: "Test tenant events"
+
+      filter: "HEADER:x-tenant,==,test"
+
+      key_transform: "/user/id"
+
+      headers:
+        x-environment: "test"
+
+      # Update timestamp to current time for test events
+      timestamp: "CURRENT"
+
+    # ============================================================================
+    # Example 3: Time-Based Routing
+    # ============================================================================
+    - output: recent-events
+      description: "Events from last 5 minutes"
+
+      # Filter messages less than 300 seconds old
+      filter: "TIMESTAMP_AGE:<,300"
+
+      # Use template for key
+      key_transform: "recent-{/event/type}-{/user/id}"
+
+      headers:
+        x-freshness: "recent"
+        x-max-age-seconds: "300"
+
+      timestamp: "PRESERVE"
+
+    - output: historical-events
+      description: "Older events for batch processing"
+
+      # Filter messages 300+ seconds old
+      filter: "TIMESTAMP_AGE:>=,300"
+
+      key_transform: "/event/id"
+
+      headers:
+        x-freshness: "historical"
+        x-processing-mode: "batch"
+
+      # Update to current time (resets event age)
+      timestamp: "CURRENT"
+
+    # ============================================================================
+    # Example 4: Key Pattern Matching
+    # ============================================================================
+    - output: user-events
+      description: "All user events (identified by key pattern)"
+
+      # Filter by key regex pattern
+      filter: "KEY_MATCHES:^user-[0-9]+"
+
+      # Hash the user ID for privacy
+      key_transform: "HASH:SHA256,/user/email"
+
+      headers:
+        x-key-type: "user"
+        x-privacy: "hashed"
+
+      # Remove sensitive headers
+      header_transforms:
+        - header: x-internal-token
+          operation: "REMOVE"
+        - header: x-user-email
+          operation: "FROM:/user/email"
+
+    # ============================================================================
+    # Example 5: Complex Filtering with Header Enrichment
+    # ============================================================================
+    - output: enriched-events
+      description: "All events with full enrichment"
+
+      # Catch-all filter (optional - could just omit filter)
+      filter: "KEY_EXISTS"
+
+      # Preserve original key
+      # (If key_transform is not specified, original key is preserved)
+
+      # Add comprehensive tracking headers
+      headers:
+        x-source-topic: "raw-events"
+        x-pipeline: "streamforge-envelope"
+        x-processed-at: "2026-04-03"  # In practice, use CURRENT_TIMESTAMP
+
+      # Dynamic headers from message
+      header_transforms:
+        - header: x-event-type
+          operation: "FROM:/event/type"
+        - header: x-event-id
+          operation: "FROM:/event/id"
+        - header: x-user-tier
+          operation: "FROM:/user/tier"
+        - header: x-correlation-id
+          operation: "COPY:x-request-id"
+
+      # Add 1 hour to timestamp (timezone adjustment example)
+      timestamp: "ADD:3600"
+
+    # ============================================================================
+    # Example 6: Header-Based Routing with Key Construction
+    # ============================================================================
+    - output: api-gateway-events
+      description: "Events from API gateway with structured keys"
+
+      # Filter by header existence and value
+      filter: "AND:HEADER_EXISTS:x-source:HEADER:x-source,==,api-gateway"
+
+      # Build structured JSON key for downstream processing
+      key_transform: "CONSTRUCT:source=/source:requestId=/requestId:timestamp=/timestamp"
+
+      headers:
+        x-gateway-version: "v2"
+        x-routing-strategy: "header-based"
+
+      timestamp: "FROM:/event/timestamp"
+
+    # ============================================================================
+    # Example 7: Time-Shifted Events
+    # ============================================================================
+    - output: time-adjusted-events
+      description: "Events with adjusted timestamps"
+
+      # Filter events with timestamp
+      filter: "TIMESTAMP_EXISTS"
+
+      key_transform: "/event/id"
+
+      headers:
+        x-time-adjustment: "minus-5-minutes"
+
+      # Subtract 5 minutes from timestamp (300 seconds)
+      timestamp: "SUBTRACT:300"
+
+    # ============================================================================
+    # Example 8: Dead Simple Key Extraction
+    # ============================================================================
+    - output: simple-keyed-events
+      description: "Simple key extraction from user ID"
+
+      # Just extract user ID as key - most common use case
+      key_transform: "/user/id"
+
+      # That's it! No headers, no timestamp manipulation needed.
+      # Original timestamp and headers are preserved automatically.
+
+# Security configuration (optional)
+security:
+  protocol: PLAINTEXT
+
+# Commit strategy
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 5000

@@ -107,11 +107,9 @@ fn bench_arithmetic_transform(c: &mut Criterion) {
     let msg = create_test_message();
 
     c.bench_function("transform/arithmetic_add", |b| {
-        let transform = ArithmeticTransform::new_with_paths(
-            ArithmeticOp::Add,
-            "/order/price",
-            "/order/tax"
-        ).unwrap();
+        let transform =
+            ArithmeticTransform::new_with_paths(ArithmeticOp::Add, "/order/price", "/order/tax")
+                .unwrap();
         b.iter(|| transform.transform(black_box(msg.clone())))
     });
 
@@ -119,26 +117,23 @@ fn bench_arithmetic_transform(c: &mut Criterion) {
         let transform = ArithmeticTransform::new_with_paths(
             ArithmeticOp::Sub,
             "/order/price",
-            "/order/discount"
-        ).unwrap();
+            "/order/discount",
+        )
+        .unwrap();
         b.iter(|| transform.transform(black_box(msg.clone())))
     });
 
     c.bench_function("transform/arithmetic_mul_constant", |b| {
-        let transform = ArithmeticTransform::new_with_constant(
-            ArithmeticOp::Mul,
-            "/order/price",
-            1.08
-        ).unwrap();
+        let transform =
+            ArithmeticTransform::new_with_constant(ArithmeticOp::Mul, "/order/price", 1.08)
+                .unwrap();
         b.iter(|| transform.transform(black_box(msg.clone())))
     });
 
     c.bench_function("transform/arithmetic_div", |b| {
-        let transform = ArithmeticTransform::new_with_paths(
-            ArithmeticOp::Div,
-            "/order/price",
-            "/order/items"
-        ).unwrap();
+        let transform =
+            ArithmeticTransform::new_with_paths(ArithmeticOp::Div, "/order/price", "/order/items")
+                .unwrap();
         b.iter(|| transform.transform(black_box(msg.clone())))
     });
 }
@@ -149,7 +144,11 @@ fn bench_transform_parser(c: &mut Criterion) {
     });
 
     c.bench_function("parser/construct_transform", |b| {
-        b.iter(|| parse_transform(black_box("CONSTRUCT:id=/message/confId:site=/message/siteId")))
+        b.iter(|| {
+            parse_transform(black_box(
+                "CONSTRUCT:id=/message/confId:site=/message/siteId",
+            ))
+        })
     });
 
     c.bench_function("parser/array_map_transform", |b| {
@@ -167,43 +166,53 @@ fn bench_transform_throughput(c: &mut Criterion) {
     for msg_count in [100, 1000, 10000].iter() {
         group.throughput(Throughput::Elements(*msg_count as u64));
 
-        group.bench_with_input(BenchmarkId::new("simple", msg_count), msg_count, |b, &count| {
-            let transform = JsonPathTransform::new("/message/confId").unwrap();
-            let msg = create_test_message();
-            b.iter(|| {
-                for _ in 0..count {
-                    black_box(transform.transform(black_box(msg.clone())).unwrap());
-                }
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("simple", msg_count),
+            msg_count,
+            |b, &count| {
+                let transform = JsonPathTransform::new("/message/confId").unwrap();
+                let msg = create_test_message();
+                b.iter(|| {
+                    for _ in 0..count {
+                        black_box(transform.transform(black_box(msg.clone())).unwrap());
+                    }
+                });
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("construct", msg_count), msg_count, |b, &count| {
-            let mut fields = HashMap::new();
-            fields.insert("id".to_string(), "/message/confId".to_string());
-            fields.insert("site".to_string(), "/message/siteId".to_string());
-            fields.insert("status".to_string(), "/message/status".to_string());
-            let transform = ObjectConstructTransform::new(fields).unwrap();
-            let msg = create_test_message();
-            b.iter(|| {
-                for _ in 0..count {
-                    black_box(transform.transform(black_box(msg.clone())).unwrap());
-                }
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("construct", msg_count),
+            msg_count,
+            |b, &count| {
+                let mut fields = HashMap::new();
+                fields.insert("id".to_string(), "/message/confId".to_string());
+                fields.insert("site".to_string(), "/message/siteId".to_string());
+                fields.insert("status".to_string(), "/message/status".to_string());
+                let transform = ObjectConstructTransform::new(fields).unwrap();
+                let msg = create_test_message();
+                b.iter(|| {
+                    for _ in 0..count {
+                        black_box(transform.transform(black_box(msg.clone())).unwrap());
+                    }
+                });
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("arithmetic", msg_count), msg_count, |b, &count| {
-            let transform = ArithmeticTransform::new_with_constant(
-                ArithmeticOp::Mul,
-                "/order/price",
-                1.08
-            ).unwrap();
-            let msg = create_test_message();
-            b.iter(|| {
-                for _ in 0..count {
-                    black_box(transform.transform(black_box(msg.clone())).unwrap());
-                }
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("arithmetic", msg_count),
+            msg_count,
+            |b, &count| {
+                let transform =
+                    ArithmeticTransform::new_with_constant(ArithmeticOp::Mul, "/order/price", 1.08)
+                        .unwrap();
+                let msg = create_test_message();
+                b.iter(|| {
+                    for _ in 0..count {
+                        black_box(transform.transform(black_box(msg.clone())).unwrap());
+                    }
+                });
+            },
+        );
     }
 
     group.finish();

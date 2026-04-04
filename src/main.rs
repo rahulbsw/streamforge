@@ -1,19 +1,26 @@
+use futures::stream::StreamExt;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
-use rdkafka::message::Message;
+use rdkafka::message::{Headers, Message};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::interval;
-use tracing::{error, info, warn};
-use tracing_subscriber;
-use futures::stream::StreamExt;
-use streamforge::filter::{Filter, Transform};
-use streamforge::filter_parser::{parse_filter, parse_transform};
+use streamforge::filter::{EnvelopeTransform, Filter, Transform};
+use streamforge::filter_parser::{
+    parse_filter, parse_header_transform, parse_key_transform, parse_static_headers,
+    parse_timestamp_transform, parse_transform,
+};
 use streamforge::kafka::KafkaSink;
 use streamforge::metrics::{Stats, StatsReporter};
-use streamforge::processor::{MessageProcessor, MultiDestinationProcessor, SingleDestinationProcessor, DestinationProcessor};
-use streamforge::{MirrorMakerConfig, MirrorMakerError, Result};
+use streamforge::observability::{
+    labels, register_metrics, start_lag_monitor, start_metrics_server, METRICS,
+};
+use streamforge::processor::{
+    DestinationProcessor, MessageProcessor, MultiDestinationProcessor, SingleDestinationProcessor,
+};
+use streamforge::{MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result};
+use tokio::time::interval;
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,6 +37,32 @@ async fn main() -> Result<()> {
     // Load configuration (from file or environment)
     let config = load_config()?;
     info!("Loaded configuration: appid={}", config.appid);
+
+    // Initialize observability (metrics)
+    if config.observability.metrics_enabled {
+        register_metrics()
+            .map_err(|e| MirrorMakerError::Config(format!("Failed to register metrics: {}", e)))?;
+        info!("✅ Metrics registered successfully");
+
+        // Start metrics HTTP server
+        let metrics_port = config.observability.metrics_port;
+        tokio::spawn(async move {
+            start_metrics_server(metrics_port).await;
+        });
+    } else {
+        info!("⏭️  Metrics disabled in configuration");
+    }
+
+    // Record service start time for uptime metric
+    let start_time = std::time::Instant::now();
+    METRICS
+        .kafka_connections
+        .with_label_values(&[labels::CONNECTION_TYPE_CONSUMER])
+        .set(1.0);
+    METRICS
+        .kafka_connections
+        .with_label_values(&[labels::CONNECTION_TYPE_PRODUCER])
+        .set(1.0);
 
     // Create statistics
     let stats = Arc::new(Stats::new());
@@ -51,6 +84,26 @@ async fn main() -> Result<()> {
     consumer.subscribe(&topics)?;
     info!("Subscribed to topics: {:?}", topics);
 
+    // Wrap consumer in Arc for sharing
+    let consumer = Arc::new(consumer);
+
+    // Start consumer lag monitoring
+    if config.observability.lag_monitoring_enabled {
+        let consumer_for_lag = consumer.clone();
+        let lag_interval = config.observability.lag_monitoring_interval_secs;
+
+        tokio::spawn(async move {
+            start_lag_monitor(consumer_for_lag, lag_interval).await;
+        });
+
+        info!(
+            "✅ Consumer lag monitoring started (interval: {}s)",
+            lag_interval
+        );
+    } else {
+        info!("⏭️  Consumer lag monitoring disabled");
+    }
+
     // Start statistics reporter
     let stats_clone = stats.clone();
     tokio::spawn(async move {
@@ -59,6 +112,17 @@ async fn main() -> Result<()> {
         loop {
             ticker.tick().await;
             reporter.report();
+        }
+    });
+
+    // Start uptime tracker
+    let start_time_clone = start_time;
+    tokio::spawn(async move {
+        let mut ticker = interval(Duration::from_secs(10));
+        loop {
+            ticker.tick().await;
+            let uptime = start_time_clone.elapsed().as_secs();
+            METRICS.uptime_seconds.set(uptime as f64);
         }
     });
 
@@ -88,10 +152,16 @@ async fn main() -> Result<()> {
         streamforge::config::CommitMode::Sync => rdkafka::consumer::CommitMode::Sync,
     };
 
-    info!("Starting concurrent message processing (parallelism: {}, batch_size: {})", parallelism, BATCH_SIZE);
+    info!(
+        "Starting concurrent message processing (parallelism: {}, batch_size: {})",
+        parallelism, BATCH_SIZE
+    );
 
     if manual_commit {
-        info!("Using batch-level commits for at-least-once delivery (mode: {:?})", commit_mode);
+        info!(
+            "Using batch-level commits for at-least-once delivery (mode: {:?})",
+            commit_mode
+        );
     }
 
     let mut message_stream = consumer.stream();
@@ -122,7 +192,12 @@ async fn main() -> Result<()> {
             continue;
         }
 
+        // Track batch size
+        let batch_size = batch.len();
+        METRICS.messages_in_flight.add(batch_size as f64);
+
         // Process batch concurrently
+        let batch_timer = METRICS.batch_processing_duration.start_timer();
         let stream = futures::stream::iter(batch.into_iter())
             .map(|msg_result| {
                 let processor = processor.clone();
@@ -132,6 +207,7 @@ async fn main() -> Result<()> {
                     match msg_result {
                         Ok(msg) => {
                             stats.processed();
+                            METRICS.messages_consumed.inc();
 
                             let key = parse_message_key(msg.key());
                             let value = match parse_message_value(msg.payload()) {
@@ -146,12 +222,35 @@ async fn main() -> Result<()> {
                                         msg.key().map(|k| String::from_utf8_lossy(k).to_string())
                                     );
                                     stats.error();
+                                    METRICS.processing_errors.with_label_values(&[labels::ERROR_TYPE_PARSE]).inc();
                                     return Err(e);
                                 }
                             };
 
+                            // Extract full message envelope
+                            let key_opt = if key.is_null() { None } else { Some(key) };
+                            let mut envelope = MessageEnvelope::with_key(key_opt, value);
+
+                            // Extract headers
+                            if let Some(headers) = msg.headers() {
+                                for header in headers.iter() {
+                                    envelope.headers.insert(
+                                        header.key.to_string(),
+                                        header.value.map(|v| v.to_vec()).unwrap_or_default()
+                                    );
+                                }
+                            }
+
+                            // Extract timestamp
+                            envelope.timestamp = msg.timestamp().to_millis();
+
+                            // Set source metadata
+                            envelope.topic = Some(msg.topic().to_string());
+                            envelope.partition = Some(msg.partition());
+                            envelope.offset = Some(msg.offset());
+
                             // Process message
-                            match processor.process(key, value).await {
+                            match processor.process(envelope).await {
                                 Ok(_) => {
                                     stats.completed();
                                     Ok(())
@@ -162,6 +261,7 @@ async fn main() -> Result<()> {
                                         e, msg.topic(), msg.partition(), msg.offset()
                                     );
                                     stats.error();
+                                    METRICS.processing_errors.with_label_values(&[labels::ERROR_TYPE_PROCESSING]).inc();
                                     Err(e)
                                 }
                             }
@@ -169,6 +269,7 @@ async fn main() -> Result<()> {
                         Err(e) => {
                             error!("Kafka consumer error: {}", e);
                             stats.error();
+                            METRICS.processing_errors.with_label_values(&[labels::ERROR_TYPE_KAFKA]).inc();
                             Err(MirrorMakerError::Kafka(e))
                         }
                     }
@@ -180,6 +281,8 @@ async fn main() -> Result<()> {
         if manual_commit {
             // Collect results to check success before committing
             let results: Vec<_> = stream.collect().await;
+            batch_timer.observe_duration();
+            METRICS.messages_in_flight.sub(batch_size as f64);
             let error_count = results.iter().filter(|r| r.is_err()).count();
 
             if error_count == 0 {
@@ -196,8 +299,12 @@ async fn main() -> Result<()> {
                             break;
                         }
                         Err(e) => {
-                            error!("Failed to commit offsets (attempt {}/{}): {}",
-                                   retry_count + 1, MAX_COMMIT_RETRIES, e);
+                            error!(
+                                "Failed to commit offsets (attempt {}/{}): {}",
+                                retry_count + 1,
+                                MAX_COMMIT_RETRIES,
+                                e
+                            );
                             stats.error();
 
                             retry_count += 1;
@@ -217,31 +324,46 @@ async fn main() -> Result<()> {
                 }
             } else {
                 // Batch has errors - halt processing to prevent skipping failed messages
-                error!("CRITICAL: Batch processing failed with {} errors out of {} messages. \
-                        Halting to prevent data loss.", error_count, results.len());
-                error!("Failed messages will be reprocessed on restart. \
-                        Note: Successfully processed messages in this batch may create duplicates.");
-                return Err(MirrorMakerError::Processing(
-                    format!("Batch processing failed: {} errors", error_count)
-                ));
+                METRICS.messages_in_flight.sub(batch_size as f64);
+                error!(
+                    "CRITICAL: Batch processing failed with {} errors out of {} messages. \
+                        Halting to prevent data loss.",
+                    error_count,
+                    results.len()
+                );
+                error!(
+                    "Failed messages will be reprocessed on restart. \
+                        Note: Successfully processed messages in this batch may create duplicates."
+                );
+                return Err(MirrorMakerError::Processing(format!(
+                    "Batch processing failed: {} errors",
+                    error_count
+                )));
             }
         } else {
             // Auto-commit mode: collect results to count errors
             let results: Vec<_> = stream.collect().await;
+            batch_timer.observe_duration();
+            METRICS.messages_in_flight.sub(batch_size as f64);
             let error_count = results.iter().filter(|r| r.is_err()).count();
 
             // Log each error
             for result in results.iter() {
                 if let Err(e) = result {
-                    error!("Message processing failed in auto-commit mode (data loss): {}", e);
+                    error!(
+                        "Message processing failed in auto-commit mode (data loss): {}",
+                        e
+                    );
                 }
             }
 
             if error_count > 0 {
-                warn!("Batch completed with {} errors in auto-commit mode. \
+                warn!(
+                    "Batch completed with {} errors in auto-commit mode. \
                        Failed messages will NOT be reprocessed (data loss). \
                        Consider enabling manual_commit for at-least-once delivery guarantees.",
-                       error_count);
+                    error_count
+                );
             }
         }
     }
@@ -279,6 +401,7 @@ fn create_default_config() -> MirrorMakerConfig {
         security: None,
         commit_strategy: Default::default(),
         cache: None,
+        observability: Default::default(),
     }
 }
 
@@ -346,18 +469,54 @@ async fn build_multi_destination_processor(
             None
         };
 
-        // Create transform if specified
-        let transform: Option<Arc<dyn Transform>> = if let Some(ref transform_expr) = dest.transform {
-            info!("  Transform: {}", transform_expr);
+        // Parse envelope transforms
+        let mut envelope_transforms: Vec<Arc<dyn EnvelopeTransform>> = Vec::new();
+
+        // Parse key transform if specified
+        if let Some(ref key_transform_expr) = dest.key_transform {
+            info!("  Key transform: {}", key_transform_expr);
+            envelope_transforms.push(parse_key_transform(key_transform_expr)?);
+        }
+
+        // Parse static headers if specified
+        if let Some(ref headers) = dest.headers {
+            info!("  Static headers: {} header(s)", headers.len());
+            envelope_transforms.extend(parse_static_headers(headers));
+        }
+
+        // Parse header transforms if specified
+        if let Some(ref header_transforms) = dest.header_transforms {
+            info!(
+                "  Dynamic header transforms: {} operation(s)",
+                header_transforms.len()
+            );
+            for header_config in header_transforms {
+                let transform =
+                    parse_header_transform(&header_config.header, &header_config.operation)?;
+                envelope_transforms.push(transform);
+            }
+        }
+
+        // Parse timestamp transform if specified
+        if let Some(ref timestamp_expr) = dest.timestamp {
+            info!("  Timestamp transform: {}", timestamp_expr);
+            envelope_transforms.push(parse_timestamp_transform(timestamp_expr)?);
+        }
+
+        // Create value transform if specified (backward compatible)
+        let transform: Option<Arc<dyn Transform>> = if let Some(ref transform_expr) = dest.transform
+        {
+            info!("  Value transform: {}", transform_expr);
             Some(parse_transform(transform_expr)?)
         } else {
             None
         };
 
-        // Create destination processor
+        // Create destination processor with envelope transforms
         let dest_processor = DestinationProcessor::new(
             Arc::new(sink),
             filter,
+            envelope_transforms,
             transform,
             dest.output.clone(),
         );
@@ -542,16 +701,25 @@ mod tests {
 
         #[test]
         fn test_load_config_missing_file_uses_default() {
-            // Set env var to non-existent file
-            std::env::set_var("CONFIG_FILE", "/tmp/nonexistent-test-config-12345.json");
+            // SAFETY: set_var/remove_var are unsound in multithreaded contexts.
+            // This test is acceptable because Rust tests with `-- --test-threads=1`
+            // or because no other test reads CONFIG_FILE concurrently.
+            unsafe {
+                std::env::set_var("CONFIG_FILE", "/tmp/nonexistent-test-config-12345.json");
+            }
 
             let result = load_config();
-            assert!(result.is_ok(), "Should return default config when file missing");
+            assert!(
+                result.is_ok(),
+                "Should return default config when file missing"
+            );
 
             let config = result.unwrap();
             assert_eq!(config.appid, "streamforge", "Should use default appid");
 
-            std::env::remove_var("CONFIG_FILE");
+            unsafe {
+                std::env::remove_var("CONFIG_FILE");
+            }
         }
 
         #[test]
@@ -613,12 +781,18 @@ mod tests {
             // Manual commit disabled = auto commit enabled
             config.commit_strategy.manual_commit = false;
             let auto_commit = !config.commit_strategy.manual_commit;
-            assert!(auto_commit, "auto_commit should be true when manual_commit is false");
+            assert!(
+                auto_commit,
+                "auto_commit should be true when manual_commit is false"
+            );
 
             // Manual commit enabled = auto commit disabled
             config.commit_strategy.manual_commit = true;
             let auto_commit = !config.commit_strategy.manual_commit;
-            assert!(!auto_commit, "auto_commit should be false when manual_commit is true");
+            assert!(
+                !auto_commit,
+                "auto_commit should be false when manual_commit is true"
+            );
         }
     }
 
@@ -629,7 +803,9 @@ mod tests {
         fn test_none_value_returns_error() {
             let result = parse_message_value(None);
             assert!(result.is_err());
-            assert!(matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Empty payload")));
+            assert!(
+                matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Empty payload"))
+            );
         }
 
         #[test]
@@ -658,7 +834,9 @@ mod tests {
             let value = b"not-json";
             let result = parse_message_value(Some(value));
             assert!(result.is_err());
-            assert!(matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON")));
+            assert!(
+                matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON"))
+            );
         }
 
         #[test]
@@ -674,7 +852,9 @@ mod tests {
             let value = b"";
             let result = parse_message_value(Some(value));
             assert!(result.is_err());
-            assert!(matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON")));
+            assert!(
+                matches!(result.unwrap_err(), MirrorMakerError::Processing(msg) if msg.contains("Invalid JSON"))
+            );
         }
 
         #[test]

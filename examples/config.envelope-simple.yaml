@@ -1,0 +1,46 @@
+# Simple Envelope Feature Examples
+#
+# This shows the most common envelope transformation patterns in a concise format.
+
+appid: envelope-simple
+bootstrap: localhost:9092
+target_broker: localhost:9093
+input: events
+threads: 4
+
+routing:
+  routing_type: filter
+  destinations:
+    # Pattern 1: Extract key from message for partitioning
+    - output: user-events
+      key_transform: "/user/id"
+
+    # Pattern 2: Filter by key prefix + add tracking headers
+    - output: premium-events
+      filter: "KEY_PREFIX:premium-"
+      headers:
+        x-tier: "premium"
+        x-processed-by: "streamforge"
+
+    # Pattern 3: Multi-tenant filtering by header
+    - output: prod-events
+      filter: "HEADER:x-tenant,==,production"
+      key_transform: "/user/id"
+
+    # Pattern 4: Recent events only (last 5 minutes)
+    - output: recent-events
+      filter: "TIMESTAMP_AGE:<,300"
+      timestamp: "PRESERVE"
+
+    # Pattern 5: Build composite key for multi-tenant routing
+    - output: tenant-partitioned
+      key_transform: "CONSTRUCT:tenant=/tenant:user=/user/id"
+      header_transforms:
+        - header: x-correlation-id
+          operation: "COPY:x-request-id"
+
+    # Pattern 6: Hash sensitive fields for privacy
+    - output: anonymized-events
+      key_transform: "HASH:SHA256,/user/email"
+      headers:
+        x-anonymized: "true"

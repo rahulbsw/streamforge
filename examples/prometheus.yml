@@ -1,0 +1,50 @@
+# Prometheus configuration for Streamforge metrics
+#
+# Usage:
+#   docker run -d \
+#     -p 9091:9090 \
+#     -v $(pwd)/examples/prometheus.yml:/etc/prometheus/prometheus.yml \
+#     prom/prometheus
+#
+#   Then access Prometheus UI at: http://localhost:9091
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+# Alertmanager configuration (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - localhost:9093
+
+# Load rules once and periodically evaluate them
+# rule_files:
+#   - "streamforge_alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Streamforge metrics
+  - job_name: 'streamforge'
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+        labels:
+          service: 'streamforge'
+          environment: 'local'
+
+    # Scrape every 15 seconds
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+    # Metrics path (default is /metrics)
+    metrics_path: /metrics
+
+    # Honor timestamps from the target
+    honor_timestamps: true
+
+  # Optional: Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

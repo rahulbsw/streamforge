@@ -1,6 +1,6 @@
 [package]
 name = "streamforge"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Rahul Jain <rahul.oracle.db@gmail.com>"]
 description = "High-performance Kafka streaming toolkit with advanced filtering and transformation"
@@ -60,8 +60,16 @@ redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], opt
 # Retry logic
 tokio-retry = "0.3"
 
+# Observability - Prometheus metrics
+prometheus = { version = "0.13", features = ["process"] }
+lazy_static = "1.4"
+
+# HTTP server for metrics endpoint
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace"] }
+
 [dev-dependencies]
-testcontainers = "0.23"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bin]]

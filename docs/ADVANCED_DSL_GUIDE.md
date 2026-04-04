@@ -9,6 +9,13 @@ This guide covers advanced filtering and transformation capabilities including a
   - [Array Transforms](#array-transforms)
 - [Regular Expressions](#regular-expressions)
 - [Arithmetic Operations](#arithmetic-operations)
+- [Envelope Operations](#envelope-operations)
+  - [Key Filters](#key-filters)
+  - [Key Transforms](#key-transforms)
+  - [Header Filters](#header-filters)
+  - [Header Transforms](#header-transforms)
+  - [Timestamp Filters](#timestamp-filters)
+  - [Timestamp Transforms](#timestamp-transforms)
 - [Complex Examples](#complex-examples)
 
 ## Array Operations
@@ -538,6 +545,720 @@ Combine multiple advanced features.
   ]
 }
 ```
+
+## Envelope Operations
+
+Streamforge supports filtering and transforming the complete Kafka message envelope, not just the payload. The envelope includes:
+- **Key**: Message routing key
+- **Value**: Message payload (the main content)
+- **Headers**: Metadata key-value pairs
+- **Timestamp**: Message timestamp in milliseconds
+
+This enables advanced routing scenarios like multi-tenant filtering, correlation tracking, and time-based routing.
+
+### Key Filters
+
+Filter messages based on the Kafka message key (not the value/payload).
+
+#### KEY_EXISTS
+
+Check if the message has a key (non-null).
+
+**Syntax:** `KEY_EXISTS`
+
+**Example:**
+```yaml
+- output: keyed-messages
+  filter: "KEY_EXISTS"
+```
+
+#### KEY_PREFIX
+
+Match keys that start with a specific prefix.
+
+**Syntax:** `KEY_PREFIX:prefix`
+
+**Examples:**
+```yaml
+# Premium users
+- output: premium-events
+  filter: "KEY_PREFIX:premium-"
+
+# Production environment
+- output: prod-events
+  filter: "KEY_PREFIX:prod:"
+```
+
+#### KEY_SUFFIX
+
+Match keys that end with a specific suffix.
+
+**Syntax:** `KEY_SUFFIX:suffix`
+
+**Examples:**
+```yaml
+# Test users
+- output: test-events
+  filter: "KEY_SUFFIX:-test"
+```
+
+#### KEY_CONTAINS
+
+Match keys that contain a substring.
+
+**Syntax:** `KEY_CONTAINS:substring`
+
+**Examples:**
+```yaml
+# VIP users
+- output: vip-events
+  filter: "KEY_CONTAINS:vip"
+```
+
+#### KEY_MATCHES
+
+Match keys against a regular expression pattern.
+
+**Syntax:** `KEY_MATCHES:pattern`
+
+**Examples:**
+```yaml
+# User IDs (user-123)
+- output: user-events
+  filter: "KEY_MATCHES:^user-[0-9]+$"
+
+# Email addresses
+- output: email-events
+  filter: "KEY_MATCHES:^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$"
+```
+
+**Example: Combining key and value filters**
+```yaml
+- output: premium-active-users
+  filter: "AND:KEY_PREFIX:premium-:/user/active,==,true"
+  # Must have premium key AND be active in payload
+```
+
+### Key Transforms
+
+Transform the message key per destination. Keys are used for:
+- **Partitioning**: Determining which partition receives the message
+- **Compaction**: In compacted topics, latest value per key is retained
+- **Routing**: Downstream systems use keys for lookups and joins
+
+#### Extract Key from Value
+
+Extract a field from the message payload and use it as the key.
+
+**Syntax:** `key_transform: "/path/to/field"`
+
+**Examples:**
+```yaml
+# Use user ID as key
+- output: user-events
+  key_transform: "/user/id"
+
+# Use nested field
+- output: order-events
+  key_transform: "/order/customerId"
+```
+
+**Transformation:**
+```json
+// Input (key=null, value={...})
+{
+  "user": {
+    "id": "user-123",
+    "name": "Alice"
+  }
+}
+
+// Output (key="user-123", value={...})
+```
+
+#### Construct Composite Key
+
+Build a JSON key from multiple fields.
+
+**Syntax:** `key_transform: "CONSTRUCT:field1=/path1:field2=/path2:..."`
+
+**Examples:**
+```yaml
+# Multi-tenant key
+- output: tenant-events
+  key_transform: "CONSTRUCT:tenant=/tenant/id:user=/user/id"
+
+# Composite routing key
+- output: routed-events
+  key_transform: "CONSTRUCT:region=/region:customerId=/customer/id:timestamp=/event/ts"
+```
+
+**Transformation:**
+```json
+// Input
+{
+  "tenant": {"id": "acme"},
+  "user": {"id": "user-123"}
+}
+
+// Output key
+{
+  "tenant": "acme",
+  "user": "user-123"
+}
+```
+
+#### Template-Based Key
+
+Build a string key using template placeholders.
+
+**Syntax:** `key_transform: "template-{/path1}-{/path2}"`
+
+**Examples:**
+```yaml
+# Simple template
+- output: formatted-events
+  key_transform: "user-{/user/id}"
+
+# Multi-field template
+- output: tenant-partitioned
+  key_transform: "{/tenant}-{/region}-{/user/id}"
+```
+
+**Transformation:**
+```json
+// Input
+{
+  "tenant": "acme",
+  "user": {"id": "123"}
+}
+
+// Output key (string)
+"acme-123"
+```
+
+#### Hash Key for Privacy
+
+Hash a field from the payload for privacy/anonymization.
+
+**Syntax:** `key_transform: "HASH:algorithm,/path"`
+
+**Algorithms:** `MD5`, `SHA256`, `SHA512`, `MURMUR64`, `MURMUR128`
+
+**Examples:**
+```yaml
+# Hash email for privacy
+- output: anonymized-events
+  key_transform: "HASH:SHA256,/user/email"
+  headers:
+    x-anonymized: "true"
+
+# Fast hashing for partitioning
+- output: partitioned-events
+  key_transform: "HASH:MURMUR128,/user/id"
+```
+
+#### Constant Key
+
+Set a static key for all messages to a destination.
+
+**Syntax:** `key_transform: "constant-value"`
+
+**Examples:**
+```yaml
+# All messages get same key (useful for compacted topics with single value)
+- output: config-topic
+  key_transform: "app-config"
+```
+
+### Header Filters
+
+Filter messages based on Kafka headers (metadata).
+
+#### HEADER_EXISTS
+
+Check if a specific header exists.
+
+**Syntax:** `HEADER_EXISTS:header-name`
+
+**Examples:**
+```yaml
+# Messages with correlation ID
+- output: correlated-events
+  filter: "HEADER_EXISTS:x-correlation-id"
+
+# Messages with tenant ID
+- output: tenant-events
+  filter: "HEADER_EXISTS:x-tenant-id"
+```
+
+#### HEADER
+
+Filter by header value with comparison.
+
+**Syntax:** `HEADER:header-name,operator,value`
+
+**Operators:** `==`, `!=`, `>`, `>=`, `<`, `<=`
+
+**Examples:**
+```yaml
+# Production tenant only
+- output: prod-events
+  filter: "HEADER:x-tenant,==,production"
+
+# High priority messages
+- output: priority-events
+  filter: "HEADER:x-priority,>=,8"
+
+# Exclude test environment
+- output: non-test-events
+  filter: "NOT:HEADER:x-environment,==,test"
+```
+
+**Multi-tenant routing example:**
+```yaml
+routing:
+  routing_type: filter
+  destinations:
+    - output: prod-tenant
+      filter: "HEADER:x-tenant,==,production"
+    
+    - output: staging-tenant
+      filter: "HEADER:x-tenant,==,staging"
+    
+    - output: test-tenant
+      filter: "HEADER:x-tenant,==,test"
+```
+
+### Header Transforms
+
+Add, modify, or remove message headers per destination.
+
+#### Static Headers
+
+Add fixed headers to all messages.
+
+**Syntax:**
+```yaml
+headers:
+  header-name: "value"
+  another-header: "another-value"
+```
+
+**Examples:**
+```yaml
+- output: tracked-events
+  headers:
+    x-processing-pipeline: "streamforge"
+    x-version: "1.0"
+    x-environment: "production"
+```
+
+#### Dynamic Header from Value
+
+Extract a field from the payload and set it as a header.
+
+**Syntax:** `operation: "FROM:/path/to/field"`
+
+**Examples:**
+```yaml
+- output: enriched-events
+  header_transforms:
+    # Extract user ID to header
+    - header: x-user-id
+      operation: "FROM:/user/id"
+    
+    # Extract tenant ID to header
+    - header: x-tenant-id
+      operation: "FROM:/tenant/id"
+    
+    # Extract nested field
+    - header: x-trace-id
+      operation: "FROM:/metadata/tracing/traceId"
+```
+
+**Transformation:**
+```json
+// Input (no headers)
+{
+  "user": {"id": "user-123"},
+  "event": "login"
+}
+
+// Output (headers added)
+Headers: {
+  "x-user-id": "user-123"
+}
+```
+
+#### Copy Header
+
+Copy value from one header to another.
+
+**Syntax:** `operation: "COPY:source-header"`
+
+**Examples:**
+```yaml
+- output: correlated-events
+  header_transforms:
+    # Copy request ID to correlation ID
+    - header: x-correlation-id
+      operation: "COPY:x-request-id"
+    
+    # Duplicate trace ID
+    - header: x-parent-trace-id
+      operation: "COPY:x-trace-id"
+```
+
+**Useful for:**
+- Correlation tracking between systems
+- Header normalization (different systems use different header names)
+- Maintaining tracing context
+
+#### Remove Header
+
+Remove sensitive or unnecessary headers.
+
+**Syntax:** `operation: "REMOVE"`
+
+**Examples:**
+```yaml
+- output: public-events
+  header_transforms:
+    # Remove internal authentication token
+    - header: x-internal-token
+      operation: "REMOVE"
+    
+    # Remove sensitive user info
+    - header: x-user-email
+      operation: "REMOVE"
+```
+
+**Full example with multiple header operations:**
+```yaml
+- output: enriched-and-cleaned-events
+  # Add static headers
+  headers:
+    x-pipeline: "streamforge"
+    x-version: "2.0"
+  
+  # Dynamic header operations
+  header_transforms:
+    # Extract from payload
+    - header: x-user-id
+      operation: "FROM:/user/id"
+    
+    # Copy for correlation
+    - header: x-correlation-id
+      operation: "COPY:x-request-id"
+    
+    # Remove sensitive data
+    - header: x-internal-auth
+      operation: "REMOVE"
+```
+
+### Timestamp Filters
+
+Filter messages based on Kafka message timestamp.
+
+#### TIMESTAMP_AGE
+
+Filter by message age in seconds.
+
+**Syntax:** `TIMESTAMP_AGE:operator,seconds`
+
+**Operators:** `>`, `>=`, `<`, `<=`, `==`, `!=`
+
+**Examples:**
+```yaml
+# Recent messages (last 5 minutes)
+- output: recent-events
+  filter: "TIMESTAMP_AGE:<,300"
+
+# Old messages (older than 1 hour)
+- output: historical-events
+  filter: "TIMESTAMP_AGE:>=,3600"
+
+# Messages exactly 10 seconds old (rarely useful)
+- output: exactly-timed-events
+  filter: "TIMESTAMP_AGE:==,10"
+```
+
+**Use cases:**
+- Real-time vs batch processing routing
+- Late-arriving data handling
+- Time-sensitive event routing
+
+#### TIMESTAMP_AFTER
+
+Filter messages after a specific timestamp (epoch milliseconds).
+
+**Syntax:** `TIMESTAMP_AFTER:epoch_ms`
+
+**Examples:**
+```yaml
+# After January 1, 2024
+- output: new-events
+  filter: "TIMESTAMP_AFTER:1704067200000"
+
+# Use for reprocessing from specific point
+- output: reprocess-events
+  filter: "TIMESTAMP_AFTER:1720000000000"
+```
+
+#### TIMESTAMP_BEFORE
+
+Filter messages before a specific timestamp.
+
+**Syntax:** `TIMESTAMP_BEFORE:epoch_ms`
+
+**Examples:**
+```yaml
+# Before January 1, 2024
+- output: old-events
+  filter: "TIMESTAMP_BEFORE:1704067200000"
+```
+
+**Example: Time-based routing**
+```yaml
+destinations:
+  # Real-time processing (last 5 minutes)
+  - output: realtime-topic
+    filter: "TIMESTAMP_AGE:<,300"
+  
+  # Batch processing (older than 5 minutes)
+  - output: batch-topic
+    filter: "TIMESTAMP_AGE:>=,300"
+```
+
+### Timestamp Transforms
+
+Modify message timestamps per destination.
+
+#### PRESERVE
+
+Keep the original message timestamp (default behavior if not specified).
+
+**Syntax:** `timestamp: "PRESERVE"`
+
+**Example:**
+```yaml
+- output: preserved-timestamp-events
+  timestamp: "PRESERVE"
+```
+
+#### CURRENT
+
+Set timestamp to current time when producing to destination.
+
+**Syntax:** `timestamp: "CURRENT"`
+
+**Examples:**
+```yaml
+# Reset timestamp for reprocessed data
+- output: reprocessed-events
+  timestamp: "CURRENT"
+
+# Update timestamp for test events
+- output: test-events
+  filter: "HEADER:x-environment,==,test"
+  timestamp: "CURRENT"
+```
+
+**Use cases:**
+- Reprocessing old data (reset event age)
+- Test message generation
+- Timestamp normalization
+
+#### FROM
+
+Extract timestamp from a field in the payload.
+
+**Syntax:** `timestamp: "FROM:/path/to/timestamp"`
+
+**Examples:**
+```yaml
+# Use event timestamp from payload
+- output: event-time-routed
+  timestamp: "FROM:/event/timestamp"
+
+# Use custom timestamp field
+- output: custom-timestamp-events
+  timestamp: "FROM:/metadata/processedAt"
+```
+
+**Input:**
+```json
+{
+  "event": {
+    "timestamp": 1704067200000,
+    "type": "order"
+  }
+}
+```
+
+**Result:** Message written with timestamp `1704067200000` (from payload)
+
+#### ADD
+
+Add seconds to the current timestamp.
+
+**Syntax:** `timestamp: "ADD:seconds"`
+
+**Examples:**
+```yaml
+# Add 1 hour (for timezone adjustment)
+- output: timezone-adjusted-events
+  timestamp: "ADD:3600"
+
+# Add 1 day
+- output: future-scheduled-events
+  timestamp: "ADD:86400"
+```
+
+#### SUBTRACT
+
+Subtract seconds from the current timestamp.
+
+**Syntax:** `timestamp: "SUBTRACT:seconds"`
+
+**Examples:**
+```yaml
+# Subtract 5 minutes
+- output: backdated-events
+  timestamp: "SUBTRACT:300"
+
+# Subtract 1 hour
+- output: past-events
+  timestamp: "SUBTRACT:3600"
+```
+
+**Full timestamp manipulation example:**
+```yaml
+destinations:
+  # Preserve original for audit trail
+  - output: audit-events
+    timestamp: "PRESERVE"
+  
+  # Reset for reprocessing
+  - output: reprocess-events
+    timestamp: "CURRENT"
+  
+  # Use event time from payload
+  - output: event-time-events
+    timestamp: "FROM:/event/occurredAt"
+  
+  # Timezone adjustment (UTC+1)
+  - output: europe-events
+    timestamp: "ADD:3600"
+```
+
+### Complete Envelope Example
+
+**Multi-tenant event routing with full envelope features:**
+
+```yaml
+appid: multi-tenant-router
+bootstrap: localhost:9092
+target_broker: localhost:9093
+input: raw-events
+threads: 4
+
+routing:
+  routing_type: filter
+  destinations:
+    # Production tenant with enrichment
+    - output: prod-tenant-events
+      description: "Production tenant events with tracking"
+      
+      # Filter: Production tenant AND recent (last 10 min)
+      filter: "AND:HEADER:x-tenant,==,production:TIMESTAMP_AGE:<,600"
+      
+      # Key: Composite key for partitioning
+      key_transform: "CONSTRUCT:tenant=/tenant/id:user=/user/id"
+      
+      # Static headers: Add tracking metadata
+      headers:
+        x-environment: "production"
+        x-pipeline: "streamforge"
+        x-version: "2.0"
+      
+      # Dynamic headers: Extract from payload
+      header_transforms:
+        - header: x-user-id
+          operation: "FROM:/user/id"
+        - header: x-correlation-id
+          operation: "COPY:x-request-id"
+      
+      # Timestamp: Preserve original
+      timestamp: "PRESERVE"
+    
+    # Test tenant with anonymization
+    - output: test-tenant-events
+      filter: "HEADER:x-tenant,==,test"
+      
+      # Key: Hash email for privacy
+      key_transform: "HASH:SHA256,/user/email"
+      
+      headers:
+        x-environment: "test"
+        x-anonymized: "true"
+      
+      # Timestamp: Reset to current
+      timestamp: "CURRENT"
+    
+    # Premium users with age-based routing
+    - output: premium-recent-events
+      filter: "AND:KEY_PREFIX:premium-:TIMESTAMP_AGE:<,300"
+      
+      key_transform: "/user/id"
+      
+      headers:
+        x-tier: "premium"
+        x-freshness: "recent"
+      
+      timestamp: "PRESERVE"
+    
+    # Historical data (older than 1 hour)
+    - output: historical-events
+      filter: "TIMESTAMP_AGE:>=,3600"
+      
+      key_transform: "/event/id"
+      
+      headers:
+        x-processing-mode: "batch"
+        x-freshness: "historical"
+      
+      # Update timestamp to current (reset age)
+      timestamp: "CURRENT"
+```
+
+### Envelope Best Practices
+
+1. **Key Design**
+   - Use composite keys for multi-tenant systems: `CONSTRUCT:tenant=/tenant:user=/user`
+   - Hash sensitive fields: `HASH:SHA256,/user/email`
+   - Keep keys small (< 100 bytes) for performance
+
+2. **Header Management**
+   - Remove sensitive headers before external routing
+   - Use correlation IDs for tracing: `COPY:x-request-id`
+   - Add pipeline metadata for debugging
+
+3. **Timestamp Handling**
+   - Use `PRESERVE` for audit trails
+   - Use `CURRENT` for reprocessing/replays
+   - Use `FROM:/field` for event-time processing
+
+4. **Filtering Strategy**
+   - Combine envelope and value filters: `AND:HEADER:x-tenant,==,prod:/user/active,==,true`
+   - Filter on headers first (faster than payload parsing)
+   - Use timestamp filters for time-based routing
+
+5. **Performance**
+   - Envelope operations add ~5-10% overhead vs value-only
+   - Header operations are very fast (no JSON parsing)
+   - Key hashing is fast (< 100μs per message)
 
 ## Performance Considerations
 

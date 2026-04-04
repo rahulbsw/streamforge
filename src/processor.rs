@@ -1,15 +1,16 @@
-use crate::filter::{Filter, Transform, PassThroughFilter, IdentityTransform};
+use crate::filter::{EnvelopeTransform, Filter, IdentityTransform, PassThroughFilter, Transform};
 use crate::kafka::sink::KafkaSink;
-use crate::{MirrorMakerError, Result};
+use crate::observability::{labels, METRICS};
+use crate::{MessageEnvelope, MirrorMakerError, Result};
 use serde_json::Value;
 use std::sync::Arc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 /// Message processor trait
 #[async_trait::async_trait]
 pub trait MessageProcessor: Send + Sync {
-    /// Process a message
-    async fn process(&self, key: Value, value: Value) -> Result<()>;
+    /// Process a message envelope
+    async fn process(&self, envelope: MessageEnvelope) -> Result<()>;
 }
 
 /// Single-destination processor
@@ -25,8 +26,8 @@ impl SingleDestinationProcessor {
 
 #[async_trait::async_trait]
 impl MessageProcessor for SingleDestinationProcessor {
-    async fn process(&self, key: Value, value: Value) -> Result<()> {
-        self.sink.send(key, value).await
+    async fn process(&self, envelope: MessageEnvelope) -> Result<()> {
+        self.sink.send(envelope).await
     }
 }
 
@@ -34,6 +35,7 @@ impl MessageProcessor for SingleDestinationProcessor {
 pub struct DestinationProcessor {
     sink: Arc<KafkaSink>,
     filter: Arc<dyn Filter>,
+    envelope_transforms: Vec<Arc<dyn EnvelopeTransform>>,
     transform: Arc<dyn Transform>,
     name: String,
 }
@@ -42,29 +44,80 @@ impl DestinationProcessor {
     pub fn new(
         sink: Arc<KafkaSink>,
         filter: Option<Arc<dyn Filter>>,
+        envelope_transforms: Vec<Arc<dyn EnvelopeTransform>>,
         transform: Option<Arc<dyn Transform>>,
         name: String,
     ) -> Self {
         Self {
             sink,
             filter: filter.unwrap_or_else(|| Arc::new(PassThroughFilter)),
+            envelope_transforms,
             transform: transform.unwrap_or_else(|| Arc::new(IdentityTransform)),
             name,
         }
     }
 
-    pub async fn process(&self, key: Value, value: Value) -> Result<bool> {
-        // Apply filter
-        if !self.filter.evaluate(&value)? {
+    pub async fn process(&self, envelope: MessageEnvelope) -> Result<bool> {
+        // Track processing duration
+        let timer = METRICS
+            .processing_duration
+            .with_label_values(&[&self.name])
+            .start_timer();
+
+        // Apply envelope filter (works for both value-only and envelope-aware filters)
+        let filter_passed = self.filter.evaluate_envelope(&envelope)?;
+
+        METRICS
+            .filter_evaluations
+            .with_label_values(&[
+                &self.name,
+                if filter_passed {
+                    labels::FILTER_RESULT_PASS
+                } else {
+                    labels::FILTER_RESULT_FAIL
+                },
+            ])
+            .inc();
+
+        if !filter_passed {
             debug!("Message filtered out by destination: {}", self.name);
+            METRICS
+                .messages_filtered
+                .with_label_values(&[&self.name, labels::FILTER_REASON_FAILED])
+                .inc();
             return Ok(false);
         }
 
-        // Apply transform
-        let transformed = self.transform.transform(value)?;
+        // Apply envelope transforms (key, headers, timestamp)
+        let mut envelope = envelope;
+        for transform in &self.envelope_transforms {
+            METRICS
+                .transform_operations
+                .with_label_values(&[&self.name, labels::TRANSFORM_TYPE_ENVELOPE])
+                .inc();
+
+            envelope = transform.transform_envelope(envelope)?;
+        }
+
+        // Apply value transform (always done, backward compatible)
+        METRICS
+            .transform_operations
+            .with_label_values(&[&self.name, labels::TRANSFORM_TYPE_VALUE])
+            .inc();
+
+        let transformed_value = self.transform.transform(envelope.value)?;
+        envelope.value = transformed_value;
 
         // Send to sink
-        self.sink.send(key, transformed).await?;
+        self.sink.send(envelope).await?;
+
+        // Track successful message production
+        METRICS
+            .messages_produced
+            .with_label_values(&[&self.name])
+            .inc();
+
+        timer.observe_duration();
         Ok(true)
     }
 }
@@ -72,14 +125,12 @@ impl DestinationProcessor {
 /// Multi-destination router processor
 pub struct MultiDestinationProcessor {
     destinations: Vec<DestinationProcessor>,
+    #[allow(dead_code)] // Reserved for future content-based routing
     routing_path: Option<String>,
 }
 
 impl MultiDestinationProcessor {
-    pub fn new(
-        destinations: Vec<DestinationProcessor>,
-        routing_path: Option<String>,
-    ) -> Self {
+    pub fn new(destinations: Vec<DestinationProcessor>, routing_path: Option<String>) -> Self {
         Self {
             destinations,
             routing_path,
@@ -87,6 +138,7 @@ impl MultiDestinationProcessor {
     }
 
     /// Extract routing value from JSON path
+    #[allow(dead_code)] // Reserved for future content-based routing
     fn extract_routing_value(&self, value: &Value) -> Option<String> {
         let path = self.routing_path.as_ref()?;
         let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
@@ -102,18 +154,34 @@ impl MultiDestinationProcessor {
 
 #[async_trait::async_trait]
 impl MessageProcessor for MultiDestinationProcessor {
-    async fn process(&self, key: Value, value: Value) -> Result<()> {
+    async fn process(&self, envelope: MessageEnvelope) -> Result<()> {
         let mut processed = false;
         let mut errors = Vec::new();
 
         // Process through each destination
-        for dest in &self.destinations {
-            match dest.process(key.clone(), value.clone()).await {
+        // Optimize: clone for all but the last destination to reduce allocations
+        let dest_count = self.destinations.len();
+
+        // Process all destinations except the last (with cloning)
+        for dest in self.destinations.iter().take(dest_count.saturating_sub(1)) {
+            match dest.process(envelope.clone()).await {
                 Ok(true) => processed = true,
                 Ok(false) => {} // Filtered out, that's ok
                 Err(e) => {
                     error!("Error processing destination {}: {}", dest.name, e);
                     errors.push(format!("{}: {}", dest.name, e));
+                }
+            }
+        }
+
+        // Process the last destination (no clone, move envelope)
+        if let Some(last_dest) = self.destinations.last() {
+            match last_dest.process(envelope).await {
+                Ok(true) => processed = true,
+                Ok(false) => {} // Filtered out, that's ok
+                Err(e) => {
+                    error!("Error processing destination {}: {}", last_dest.name, e);
+                    errors.push(format!("{}: {}", last_dest.name, e));
                 }
             }
         }

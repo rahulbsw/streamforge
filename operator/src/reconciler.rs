@@ -15,17 +15,17 @@ use kube::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::crd::StreamforgePipeline;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Kubernetes error: {0}")]
-    KubeError(#[from] kube::Error),
+    Kube(#[from] kube::Error),
 
     #[error("Serialization error: {0}")]
-    SerializationError(#[from] serde_json::Error),
+    Serialization(#[from] serde_json::Error),
 
     #[error("Invalid spec: {0}")]
     InvalidSpec(String),
@@ -66,7 +66,10 @@ impl PipelineReconciler {
 
     fn get_labels(&self, pipeline: &StreamforgePipeline) -> BTreeMap<String, String> {
         let mut labels = BTreeMap::new();
-        labels.insert("app.kubernetes.io/name".to_string(), "streamforge".to_string());
+        labels.insert(
+            "app.kubernetes.io/name".to_string(),
+            "streamforge".to_string(),
+        );
         labels.insert(
             "app.kubernetes.io/instance".to_string(),
             pipeline.name_any(),
@@ -374,9 +377,8 @@ impl PipelineReconciler {
         // Note: Compression is configured via producer_properties in streamforge config
         // The simple compression field in CRD is not used for now
 
-        serde_yaml::to_string(&config).map_err(|e| {
-            Error::InvalidSpec(format!("Failed to serialize config: {}", e))
-        })
+        serde_yaml::to_string(&config)
+            .map_err(|e| Error::InvalidSpec(format!("Failed to serialize config: {}", e)))
     }
 
     async fn update_status(

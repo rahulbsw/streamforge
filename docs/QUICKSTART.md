@@ -17,7 +17,8 @@ brew install cmake pkg-config openssl
 
 ```bash
 # Clone and navigate to project
-cd /Users/rajain5/dev/tools/cisco-git/wap-mirrormaker-rust
+git clone https://github.com/rahulbsw/streamforge.git
+cd streamforge
 
 # Build
 cargo build --release

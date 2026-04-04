@@ -1,4 +1,4 @@
-use streamforge::config::{MirrorMakerConfig, SecurityProtocol, SaslMechanism};
+use streamforge::config::{MirrorMakerConfig, SaslMechanism, SecurityProtocol};
 
 #[test]
 fn test_ssl_config_parsing() {
@@ -27,10 +27,16 @@ security:
 
     let ssl = security.ssl.unwrap();
     assert_eq!(ssl.ca_location, Some("/path/to/ca.pem".to_string()));
-    assert_eq!(ssl.certificate_location, Some("/path/to/cert.pem".to_string()));
+    assert_eq!(
+        ssl.certificate_location,
+        Some("/path/to/cert.pem".to_string())
+    );
     assert_eq!(ssl.key_location, Some("/path/to/key.pem".to_string()));
     assert_eq!(ssl.key_password, Some("password123".to_string()));
-    assert_eq!(ssl.endpoint_identification_algorithm, Some("https".to_string()));
+    assert_eq!(
+        ssl.endpoint_identification_algorithm,
+        Some("https".to_string())
+    );
 }
 
 #[test]

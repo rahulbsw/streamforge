@@ -1,10 +1,10 @@
 # Documentation Index
 
-Complete guide to all documentation for WAP MirrorMaker Rust implementation.
+Complete guide to all Streamforge documentation.
 
-## 📚 Quick Navigation
+## Quick Navigation
 
-### New to WAP MirrorMaker?
+### New to Streamforge?
 1. [README.md](../README.md) - Project overview
 2. [QUICKSTART.md](QUICKSTART.md) - Get started in 5 minutes
 3. [USAGE.md](USAGE.md) - Pick a use case
@@ -76,6 +76,9 @@ See [examples/README.md](../examples/README.md) for comprehensive configuration 
 - [config.example.yaml](../examples/config.example.yaml) - Simple single-destination
 - [config.multidest.yaml](../examples/config.multidest.yaml) - Multi-destination with comments
 - [config.advanced.yaml](../examples/config.advanced.yaml) - 17 production examples
+- 🆕 [config.envelope-simple.yaml](../examples/config.envelope-simple.yaml) - 6 envelope patterns (concise)
+- 🆕 [config.envelope-features.yaml](../examples/config.envelope-features.yaml) - 8 envelope examples (comprehensive)
+- 🆕 [config.with-observability.yaml](../examples/config.with-observability.yaml) - Observability with metrics
 
 **JSON Format (Backward Compatible):**
 - [config.example.json](../examples/config.example.json) - Simple single-destination
@@ -87,14 +90,34 @@ See [examples/README.md](../examples/README.md) for comprehensive configuration 
 ### 🎯 Features & DSL
 
 #### [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md)
-**Complete DSL reference (400+ lines)**
+**Complete DSL reference (1000+ lines)**
 - Array operations (ARRAY_ALL, ARRAY_ANY, ARRAY_MAP)
 - Regular expressions with examples
 - Arithmetic operations (ADD/SUB/MUL/DIV)
+- 🆕 **Envelope operations** (keys, headers, timestamps)
 - Complex real-world examples
 - Performance characteristics
 - Error handling
 - **Most comprehensive DSL guide**
+
+#### [ENVELOPE_MIGRATION_GUIDE.md](ENVELOPE_MIGRATION_GUIDE.md) 🆕
+**Envelope features migration guide (600+ lines)**
+- What's new in envelope operations
+- Backward compatibility assurance
+- Migration scenarios (5 real-world examples)
+- Performance impact analysis
+- Common pitfalls and solutions
+- Testing and validation
+- **Essential for upgrading to envelope features**
+
+#### [ENVELOPE_FEATURE_DESIGN.md](ENVELOPE_FEATURE_DESIGN.md)
+**Envelope feature design document (450+ lines)**
+- Complete design and architecture
+- DSL syntax specifications
+- Implementation strategy
+- Performance considerations
+- Security considerations
+- **Technical deep-dive for contributors**
 
 #### [DSL_FEATURES.md](DSL_FEATURES.md)
 **Feature summary and reference**
@@ -152,6 +175,29 @@ See [examples/README.md](../examples/README.md) for comprehensive configuration 
 - Troubleshooting performance issues
 - Advanced optimization techniques
 - **Essential for production deployments**
+
+#### [OBSERVABILITY_QUICKSTART.md](OBSERVABILITY_QUICKSTART.md) 🆕
+**Get metrics running in 5 minutes (400+ lines)**
+- Quick start configuration
+- Prometheus setup
+- Common queries (throughput, errors, lag, latency)
+- Grafana dashboard examples
+- Alerting rules
+- Testing locally
+- Troubleshooting
+- **Essential for production monitoring**
+
+#### [OBSERVABILITY_METRICS_DESIGN.md](OBSERVABILITY_METRICS_DESIGN.md) 🆕
+**Complete metrics design document (2000+ lines)**
+- 60+ Prometheus metrics definitions
+- Per-destination metrics (throughput, latency, errors)
+- Kafka consumer lag monitoring
+- Filter and transform operation tracking
+- Prometheus queries and dashboards
+- Grafana dashboard JSON
+- Alerting rules and runbooks
+- Performance impact analysis (< 2% overhead)
+- **Complete observability reference**
 
 #### [SCALING.md](SCALING.md)
 **Horizontal and vertical scaling guide (600+ lines)**
@@ -236,8 +282,17 @@ See [examples/README.md](../examples/README.md) for comprehensive configuration 
 #### Learn the DSL
 → Read [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) (20 min)
 
+#### Use Envelope Features (Keys, Headers, Timestamps)
+→ Read [ENVELOPE_MIGRATION_GUIDE.md](ENVELOPE_MIGRATION_GUIDE.md) (15 min)  
+→ See [config.envelope-simple.yaml](../examples/config.envelope-simple.yaml) for quick patterns
+
 #### Optimize Performance
 → Read [PERFORMANCE.md](PERFORMANCE.md) (20 min)
+
+#### Monitor with Prometheus Metrics
+→ Read [OBSERVABILITY_QUICKSTART.md](OBSERVABILITY_QUICKSTART.md) (10 min)  
+→ See [config.with-observability.yaml](../examples/config.with-observability.yaml) for setup  
+→ Use [test_metrics.sh](../scripts/test_metrics.sh) to verify metrics
 
 #### Scale to High Throughput
 → Read [SCALING.md](SCALING.md) (20 min)
@@ -264,11 +319,16 @@ See [examples/README.md](../examples/README.md) for comprehensive configuration 
 | QUICKSTART.md | ~200 | Getting Started | New Users |
 | USAGE.md | 700+ | Use Cases | Operators |
 | YAML_CONFIGURATION.md | 400+ | Configuration | Everyone |
-| ADVANCED_DSL_GUIDE.md | 400+ | DSL Reference | Developers |
+| ADVANCED_DSL_GUIDE.md | 1000+ | DSL Reference | Developers |
+| ENVELOPE_MIGRATION_GUIDE.md | 600+ | Migration | Operators |
+| ENVELOPE_FEATURE_DESIGN.md | 450+ | Design | Contributors |
 | DSL_FEATURES.md | 400+ | Feature Summary | Developers |
 | ADVANCED_FILTERS.md | 300+ | Boolean Logic | Developers |
+| OBSERVABILITY_QUICKSTART.md | 400+ | Metrics Setup | Operators/DevOps |
+| OBSERVABILITY_METRICS_DESIGN.md | 2000+ | Observability | Operators/DevOps |
 | PERFORMANCE.md | 400+ | Optimization | Operators |
 | SCALING.md | 600+ | Scaling | Operators/DevOps |
+| SECURITY_CONFIGURATION.md | 600+ | Security | DevOps |
 | CONTRIBUTING.md | 500+ | Development | Contributors |
 | DOCKER.md | 480+ | Deployment | DevOps |
 | QUICK_REFERENCE.md | 200+ | Quick Ref | Everyone |
@@ -277,7 +337,7 @@ See [examples/README.md](../examples/README.md) for comprehensive configuration 
 | CHANGELOG.md | 200+ | History | Everyone |
 | docs/index.md | 600+ | Overview | External Users |
 
-**Total**: ~5,700+ lines of documentation
+**Total**: ~10,000+ lines of documentation
 
 ---
 
@@ -292,9 +352,10 @@ See [examples/README.md](../examples/README.md) for comprehensive configuration 
 5. **[USAGE.md](USAGE.md)** - Pick a use case (15 min)
 6. **[ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md)** - Learn DSL (20 min)
 7. **[PERFORMANCE.md](PERFORMANCE.md)** - Tune for production (15 min)
-8. **[SCALING.md](SCALING.md)** - Scale if needed (20 min)
+8. **[OBSERVABILITY_QUICKSTART.md](OBSERVABILITY_QUICKSTART.md)** - Enable metrics (10 min)
+9. **[SCALING.md](SCALING.md)** - Scale if needed (20 min)
 
-**Total**: ~100 minutes to go from zero to production-ready at scale
+**Total**: ~120 minutes to go from zero to production-ready at scale with full observability
 
 ---
 
@@ -524,6 +585,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ---
 
-**Last Updated**: 2025-01-XX
-**Documentation Version**: 2.0 (Added YAML support, removed deprecated files)
-**Project Version**: 0.2.0
+**Last Updated**: 2026-04-03
+**Documentation Version**: 2.1 (Added Envelope Operations - keys, headers, timestamps)
+**Project Version**: 0.3.0

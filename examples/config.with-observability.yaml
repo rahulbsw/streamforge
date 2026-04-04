@@ -1,0 +1,115 @@
+# Streamforge Configuration with Observability Enabled
+#
+# This example demonstrates how to enable and configure Prometheus metrics
+# and Kafka consumer lag monitoring.
+
+appid: streamforge-with-metrics
+bootstrap: localhost:9092
+target_broker: localhost:9093
+input: input-topic
+threads: 4
+
+# ============================================================================
+# Observability Configuration
+# ============================================================================
+observability:
+  # Enable Prometheus metrics endpoint
+  metrics_enabled: true
+
+  # Port for metrics HTTP server (default: 9090)
+  metrics_port: 9090
+
+  # Path for metrics endpoint (default: /metrics)
+  metrics_path: "/metrics"
+
+  # Enable Kafka consumer lag monitoring
+  lag_monitoring_enabled: true
+
+  # How often to check lag in seconds (default: 30)
+  lag_monitoring_interval_secs: 30
+
+# ============================================================================
+# Multi-destination routing with per-destination metrics
+# ============================================================================
+routing:
+  routing_type: filter
+  destinations:
+    # Destination 1: Premium users
+    - output: premium-events
+      filter: "KEY_PREFIX:premium-"
+      key_transform: "/user/id"
+      headers:
+        x-tier: "premium"
+
+    # Destination 2: Standard users
+    - output: standard-events
+      filter: "NOT:KEY_PREFIX:premium-"
+      key_transform: "/user/id"
+      headers:
+        x-tier: "standard"
+
+# ============================================================================
+# Metrics Available
+# ============================================================================
+#
+# Once started, metrics will be available at:
+#   http://localhost:9090/metrics
+#   http://localhost:9090/health
+#
+# Key Metrics:
+#
+# Message Processing:
+#   - streamforge_messages_consumed_total
+#   - streamforge_messages_produced_total{destination="..."}
+#   - streamforge_messages_filtered_total{destination="...", reason="..."}
+#   - streamforge_processing_errors_total{type="..."}
+#   - streamforge_processing_duration_seconds{destination="..."}
+#
+# Consumer Lag:
+#   - streamforge_consumer_lag{topic="...", partition="..."}
+#   - streamforge_consumer_offset{topic="...", partition="..."}
+#   - streamforge_consumer_high_watermark{topic="...", partition="..."}
+#
+# Filters & Transforms:
+#   - streamforge_filter_evaluations_total{destination="...", result="pass|fail"}
+#   - streamforge_transform_operations_total{destination="...", transform_type="..."}
+#
+# System:
+#   - streamforge_uptime_seconds
+#   - streamforge_kafka_connections{type="consumer|producer"}
+#   - streamforge_messages_in_flight
+#
+# ============================================================================
+# Prometheus Scrape Configuration
+# ============================================================================
+#
+# Add this to your prometheus.yml:
+#
+# scrape_configs:
+#   - job_name: 'streamforge'
+#     static_configs:
+#       - targets: ['localhost:9090']
+#     scrape_interval: 15s
+#
+# ============================================================================
+# Grafana Dashboard Queries
+# ============================================================================
+#
+# Throughput:
+#   rate(streamforge_messages_consumed_total[5m])
+#   sum(rate(streamforge_messages_produced_total[5m])) by (destination)
+#
+# Error Rate:
+#   rate(streamforge_processing_errors_total[5m])
+#   rate(streamforge_processing_errors_total[5m]) / rate(streamforge_messages_consumed_total[5m]) * 100
+#
+# Consumer Lag:
+#   sum(streamforge_consumer_lag)
+#   max(streamforge_consumer_lag) by (partition)
+#
+# Latency (P99):
+#   histogram_quantile(0.99, rate(streamforge_processing_duration_seconds_bucket[5m]))
+#
+# Filter Effectiveness:
+#   rate(streamforge_filter_evaluations_total{result="pass"}[5m]) /
+#   rate(streamforge_filter_evaluations_total[5m]) * 100

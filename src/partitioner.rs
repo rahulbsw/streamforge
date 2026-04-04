@@ -86,7 +86,7 @@ mod tests {
         let value = json!({"message": "test"});
 
         let partition = partitioner.partition("test-topic", &key, &value, 10);
-        assert!(partition >= 0 && partition < 10);
+        assert!((0..10).contains(&partition));
     }
 
     #[test]
