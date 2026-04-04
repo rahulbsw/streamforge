@@ -39,14 +39,52 @@ Benchmark results and performance analysis:
 
 ## Running Benchmarks
 
+### 🆕 Throughput Testing (Recommended for Production Validation)
+
+Run proper throughput tests with valid JSON data:
+
+```bash
+cd benchmarks
+
+# Quick test with 200K messages
+./run_throughput_test.sh
+
+# Custom test: 500K messages at 50K msg/s target
+./run_throughput_test.sh 500000 50000
+```
+
+See [THROUGHPUT_TESTING.md](THROUGHPUT_TESTING.md) for complete guide with:
+- ✅ Valid JSON test data generation
+- ✅ Automated throughput testing
+- ✅ Real-time progress monitoring
+- ✅ Comprehensive performance reports
+- ✅ Bottleneck analysis
+
+### Observability Performance Test
+
+Run performance test with real-time Prometheus metrics monitoring:
+
+```bash
+# Quick start
+cd benchmarks
+./run_observability_test.sh
+```
+
+See [OBSERVABILITY_TEST_GUIDE.md](OBSERVABILITY_TEST_GUIDE.md) for complete guide with:
+- ✅ Real-time metrics dashboard
+- ✅ Prometheus endpoint monitoring  
+- ✅ Consumer lag tracking
+- ✅ Stepped load testing
+- ✅ Performance reports
+
 ### Prerequisites
 ```bash
 # Start Kafka (Docker Compose)
-docker-compose up -d
+docker-compose -f docker-compose.benchmark.yml up -d
 
 # Create test topics
-kafka-topics --create --topic test-8p-input --partitions 8 --replication-factor 1 --bootstrap-server localhost:9092
-kafka-topics --create --topic test-8p-output --partitions 8 --replication-factor 1 --bootstrap-server localhost:9092
+kafka-topics --create --topic test-8p-input --partitions 8 --replication-factor 1 --bootstrap-server localhost:9092 || echo "exists"
+kafka-topics --create --topic test-8p-output --partitions 8 --replication-factor 1 --bootstrap-server localhost:9092 || echo "exists"
 ```
 
 ### Run with Config

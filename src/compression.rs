@@ -1,6 +1,5 @@
 use crate::config::{CompressionAlgo, CompressionType};
 use crate::error::{MirrorMakerError, Result};
-use bytes::Bytes;
 use flate2::write::{GzDecoder, GzEncoder};
 use flate2::Compression;
 use std::io::Write;

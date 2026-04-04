@@ -1,10 +1,14 @@
 /target
-Cargo.lock
 *.swp
 *.swo
 *~
 .DS_Store
 config.json
+config.yaml
 *.log
 test-values.yaml
 operator/target
+# Generated test data
+benchmarks/*.jsonl
+benchmarks/results/live_test_*/
+benchmarks/test_data_*.jsonl

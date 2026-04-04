@@ -1,98 +1,65 @@
 # Streamforge
 
-**High-performance Kafka streaming toolkit in Rust**
+**High-performance Kafka message mirroring and transformation toolkit built in Rust.**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
-Streamforge is a modern Kafka message mirroring and transformation service built in Rust, designed for high performance, reliability, and ease of use. It provides cross-cluster message mirroring with advanced filtering, transformation, and routing capabilities.
+---
 
-## ⚡ Why Streamforge?
+## What Is Streamforge?
 
-- 🚀 **Ultra-Fast DSL Processing**: 46ns filtering and 817ns transformation operations (measured with cargo bench)
-- 💾 **Minimal Memory Footprint**: Operates efficiently with ~50MB RAM for DSL operations
-- ⚡ **High DSL Throughput**: 21.7M filter ops/sec and 1.2M transform ops/sec (measured micro-benchmarks)
-- 🚀 **Production Throughput**: 25,000-30,000 msg/s sustained, 34,500 msg/s peak (8 threads, verified ✅)
-- 📈 **Linear Scaling**: 2x throughput from 4 threads to 8 threads with at-least-once guarantees
-- 🔒 **Enterprise Security**: Zero CVEs with Chainguard base images and full SSL/TLS, SASL support
-- 📦 **Lightweight Deployment**: Minimal 20MB Docker image (measured)
-- 🎯 **Zero External Dependencies**: Custom DSL implementation with no third-party transformation engines
+Streamforge is a Kafka-to-Kafka streaming service that mirrors, filters, transforms, and routes messages between clusters. It reads from one or more source topics, applies user-defined rules via a custom DSL, and writes the results to one or more destination topics -- potentially on a completely different Kafka cluster.
 
-> ⚠️ **Note**: Micro-benchmark results are measured. End-to-end throughput testing with Kafka cluster is pending. See [BENCHMARK_STATUS.md](BENCHMARK_STATUS.md) for details.
+**Core capabilities:**
 
-## Features
+- **Cross-cluster mirroring** -- replicate messages between independent Kafka clusters.
+- **Content-based filtering** -- evaluate JSON payloads, message keys, headers, and timestamps against filter expressions.
+- **Message transformation** -- reshape payloads, extract fields, construct new objects, perform arithmetic, hash sensitive fields.
+- **Multi-destination routing** -- route messages to different topics based on their content.
+- **Envelope operations** -- filter and transform keys, headers, and timestamps, not just payloads.
+- **Observability** -- Prometheus metrics endpoint with per-destination throughput, latency, error rates, and consumer lag.
 
-### Core Capabilities
+## Use Cases
 
-- **Cross-Cluster Mirroring**: Mirror messages between different Kafka clusters
-- **Advanced Filtering & Transforms**: Custom DSL with JSON path, boolean logic, regex, arrays, and arithmetic
-- **Custom Partitioning**: Field-based or hash-based partitioning strategies
-- **Native Compression**: Support for Gzip, Snappy, Zstd, and LZ4
-- **Multi-Destination Routing**: Route messages to multiple topics based on content
-- **Secure Connections**: Full support for SSL/TLS, SASL (PLAIN/SCRAM/GSSAPI), and Kerberos
-- **High Performance**: Async/await with Tokio for efficient I/O
-- **Metrics & Monitoring**: Built-in statistics and performance metrics
+| Scenario | Description |
+|---|---|
+| **Cross-cluster replication** | Mirror production data to analytics or disaster-recovery clusters. |
+| **Event routing** | Route events to topic-per-type (e.g., `meetings`, `calls`, `quality`) based on payload fields. |
+| **Data redaction** | Hash or remove PII fields before forwarding to less-trusted environments. |
+| **Header-based tenancy** | Filter messages by tenant header without parsing the payload. |
+| **Schema slimming** | Extract only the fields downstream consumers need, reducing bandwidth. |
+| **Time-window routing** | Route recent messages to real-time pipelines and older messages to batch pipelines. |
+| **Key repartitioning** | Change message keys for different partitioning strategies per destination. |
 
-### Key Components
+## Quick Start
 
-#### 1. KafkaSink (`src/kafka/sink.rs`)
+### Prerequisites
 
-The core component that handles writing to Kafka. Equivalent to Java's CustomKafkaSink.
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-```rust
-let sink = KafkaSink::new(&config, "output-topic", None).await?;
-sink.send(key, value).await?;
+# macOS dependencies
+brew install cmake pkg-config openssl
+
+# Linux (Debian/Ubuntu)
+# apt-get install cmake pkg-config libssl-dev libsasl2-dev
 ```
 
-**Features:**
-- Separate producer for target cluster
-- Custom partitioning support
-- Native Kafka compression
-- Automatic partition discovery
+### Build
 
-#### 2. Partitioner (`src/partitioner.rs`)
-
-Determines which partition a message should go to:
-
-- **DefaultPartitioner**: Hash-based partitioning on key
-- **FieldPartitioner**: Extract field from JSON and use for partitioning
-
-```rust
-// Partition by confId field
-let partitioner = FieldPartitioner::new("/message/confId".to_string());
+```bash
+cargo build --release
+cargo test
 ```
 
-#### 3. Compression (`src/compression.rs`)
+### Minimal Configuration
 
-Handles message compression with multiple algorithms:
-
-```rust
-let compressor = Compressor::new(CompressionType::Raw, CompressionAlgo::Gzip);
-let compressed = compressor.compress(data)?;
-```
-
-#### 4. Multi-Destination Routing (`src/kafka/sink.rs`)
-
-Route messages to multiple topics:
-
-```rust
-let mut multi_sink = MultiSink::new();
-multi_sink.add_sink("topic1".to_string(), sink1).await;
-multi_sink.add_sink("topic2".to_string(), sink2).await;
-multi_sink.send_to("topic1", key, value).await?;
-```
-
-## Configuration
-
-Supports both **JSON** and **YAML** formats. YAML is recommended for complex configurations with multiple filters and transformations.
-
-See the [examples/](examples/) directory for comprehensive configuration examples.
-
-### Quick Configuration Example
+Create `config.yaml`:
 
 ```yaml
-appid: streamforge
+appid: my-mirror
 bootstrap: source-kafka:9092
 target_broker: target-kafka:9092
 input: source-topic
@@ -101,298 +68,319 @@ offset: latest
 threads: 4
 ```
 
-**Format is auto-detected** based on file extension (`.yaml`, `.yml`, `.json`)
+### Run
 
-For detailed configuration options and examples, see:
-- [examples/README.md](examples/README.md) - Configuration examples and patterns
-- [docs/YAML_CONFIGURATION.md](docs/YAML_CONFIGURATION.md) - Complete YAML vs JSON guide
+```bash
+CONFIG_FILE=config.yaml ./target/release/streamforge
+```
 
-## Delivery Semantics
+Format is auto-detected by file extension (`.yaml`, `.yml`, `.json`).
 
-Streamforge supports both **at-least-once** and **at-most-once** delivery semantics:
+## Configuration
 
-### At-Least-Once (Recommended)
+### Single Destination
 
-Guarantees no message loss with minimal performance overhead (~5%):
+```yaml
+appid: streamforge
+bootstrap: source-kafka:9092
+target_broker: target-kafka:9092
+input: events
+output: events-copy
+offset: latest
+threads: 4
+```
+
+### Multi-Destination Routing
+
+```yaml
+appid: streamforge
+bootstrap: source-kafka:9092
+target_broker: target-kafka:9092
+input: raw-events
+
+routing:
+  routing_type: filter
+  destinations:
+    - output: meetings
+      filter: "/eventType,==,meeting.started"
+      transform: "/data"
+      description: "Meeting events"
+
+    - output: quality-reports
+      filter: "AND:/eventType,==,quality.report:/data/score,<,80"
+      description: "Low-quality reports"
+
+    - output: all-events
+      description: "Catch-all"
+```
+
+### Envelope Operations
+
+Filter and transform the full Kafka message envelope (key, headers, timestamp), not just the payload:
+
+```yaml
+routing:
+  routing_type: filter
+  destinations:
+    - output: user-events
+      filter: "KEY_PREFIX:user-"
+      key_transform: "/user/id"
+      headers:
+        x-pipeline: "streamforge"
+      header_transforms:
+        - header: x-user-id
+          operation: "FROM:/user/id"
+      timestamp: "PRESERVE"
+
+    - output: recent-events
+      filter: "TIMESTAMP_AGE:<,300"
+      timestamp: "CURRENT"
+```
+
+### Delivery Semantics
+
+**At-least-once** (recommended):
 
 ```yaml
 commit_strategy:
   manual_commit: true
-  commit_mode: async  # or 'sync' for stronger guarantees
-
-consumer_properties:
-  enable.auto.commit: "false"
+  commit_mode: async
 ```
 
-**Throughput**: 11,000-15,000 msg/s (verified with real Kafka cluster)  
-**Use cases**: Business events, user actions, any data that can't be lost
-
-### At-Most-Once (Maximum Speed)
-
-Highest throughput, but messages may be lost on failure:
+**At-most-once** (default, highest throughput):
 
 ```yaml
-# No commit_strategy needed - uses auto-commit by default
+# No commit_strategy needed -- uses auto-commit
 ```
 
-**Throughput**: 11,500 msg/s peak  
-**Use cases**: Logs, metrics, non-critical event processing
+> Streamforge supports at-least-once and at-most-once delivery. Exactly-once is not currently supported.
 
-**Note**: Streamforge automatically warns when using at-most-once mode to prevent accidental data loss.
+### Observability
 
-See [DELIVERY_SEMANTICS_IMPLEMENTATION.md](DELIVERY_SEMANTICS_IMPLEMENTATION.md) for complete details.
-
-## Building
-
-```bash
-# Build
-cargo build --release
-
-# Run tests
-cargo test
-
-# Run benchmarks
-cargo bench
-
-# Run with logs
-RUST_LOG=info cargo run
+```yaml
+observability:
+  metrics_enabled: true
+  metrics_port: 9090
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30
 ```
 
-## Performance Benchmarks
+Exposes a Prometheus-compatible `/metrics` endpoint and a `/health` endpoint.
 
-### DSL Micro-Benchmarks (Measured)
+### Security
 
-Run performance benchmarks to measure filter and transform operations:
+Full SSL/TLS, SASL (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, GSSAPI/Kerberos, OAUTHBEARER) support:
 
-```bash
-# Run all benchmarks
-cargo bench
-
-# Run specific benchmark
-cargo bench filter_benchmarks
-cargo bench transform_benchmarks
-
-# Results are saved to target/criterion/
+```yaml
+security:
+  protocol: SASL_SSL
+  ssl:
+    ca_location: /path/to/ca.pem
+  sasl:
+    mechanism: SCRAM-SHA-256
+    username: ${KAFKA_USER}
+    password: ${KAFKA_PASS}
 ```
 
-**Measured Results (cargo bench on Apple M-series, March 10, 2026):**
-- Simple filter: 43-50ns per evaluation (21.7M ops/sec)
-- Boolean logic (AND/OR): 47-145ns (6.9-21.3M ops/sec)
-- Regular expressions: 47-59ns (17-21M ops/sec)
-- Array operations: 57-101ns (9.9-17.5M ops/sec)
-- Object construction: 908-1,414ns (707K-1.1M ops/sec)
-- Arithmetic: 816-864ns (1.16-1.23M ops/sec)
+See [docs/SECURITY_CONFIGURATION.md](docs/SECURITY_CONFIGURATION.md) for full details.
 
-See [benchmarks/results/BENCHMARK_RESULTS.md](benchmarks/results/BENCHMARK_RESULTS.md) for complete measured micro-benchmark data.
+## DSL Reference
 
-### End-to-End Performance Results
+### Filters
 
-✅ **Concurrent processing implementation complete with production validation:**
-- **25,000-30,000 msg/s sustained** with 8 threads (34,517 msg/s peak)
-- **10,933 msg/s sustained** with 4 threads  
-- **Perfect linear scaling**: 2.0x throughput increase from 4 to 8 threads
-- **At-least-once delivery** with ~5% performance overhead
+| Syntax | Description |
+|---|---|
+| `/path,op,value` | Compare JSON field (`>`, `>=`, `<`, `<=`, `==`, `!=`) |
+| `AND:cond1:cond2` | All conditions must pass |
+| `OR:cond1:cond2` | At least one condition must pass |
+| `NOT:cond` | Invert a condition |
+| `REGEX:/path,pattern` | Match field against regular expression |
+| `ARRAY_ALL:/path,filter` | All array elements must match |
+| `ARRAY_ANY:/path,filter` | At least one element must match |
+| `KEY_PREFIX:prefix` | Message key starts with prefix |
+| `KEY_SUFFIX:suffix` | Message key ends with suffix |
+| `KEY_CONTAINS:sub` | Message key contains substring |
+| `KEY_MATCHES:regex` | Message key matches regex |
+| `KEY_EXISTS` | Message has a non-null key |
+| `HEADER:name,op,value` | Compare header value (`==`, `!=`) |
+| `HEADER_EXISTS:name` | Header exists |
+| `TIMESTAMP_AGE:op,secs` | Message age in seconds (`<`, `<=`, `>`, `>=`) |
+| `TIMESTAMP_AFTER:epoch_ms` | Timestamp after threshold |
+| `TIMESTAMP_BEFORE:epoch_ms` | Timestamp before threshold |
 
-See [benchmarks/results/](benchmarks/results/) for detailed performance analysis and scaling validation.
+### Transforms
 
-For performance tuning guide, see [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+| Syntax | Description |
+|---|---|
+| `/path` | Extract field or nested object |
+| `CONSTRUCT:f1=/p1:f2=/p2` | Build new object from multiple paths |
+| `ARRAY_MAP:/path,/element` | Map over array elements |
+| `ARITHMETIC:op,left,right` | Arithmetic (`ADD`, `SUB`, `MUL`, `DIV`) |
+| `HASH:algo,/path` | Hash field (`MD5`, `SHA256`, `SHA512`, `MURMUR64`, `MURMUR128`) |
+| `HASH:algo,/path,out` | Hash field, store in `out`, preserve original |
 
-## Running
+### Key Transforms
 
-```bash
-# With config file
-CONFIG_FILE=config.json ./target/release/streamforge
+| Syntax | Description |
+|---|---|
+| `/path` | Extract key from payload field |
+| `CONSTRUCT:f1=/p1:f2=/p2` | Build JSON key from multiple fields |
+| `HASH:algo,/path` | Hash a field as the key |
+| `template-{/path}` | Template-based key construction |
+| `CONSTANT:value` | Set a constant key |
 
-# With environment variable
-export CONFIG_FILE=/path/to/config.json
-./target/release/streamforge
-```
+### Header Transforms
 
-## What Does Streamforge Do?
+| Syntax | Description |
+|---|---|
+| `FROM:/path` | Set header from payload field |
+| `COPY:source-header` | Copy from another header |
+| `REMOVE` | Remove the header |
 
-Streamforge is a **Kafka message mirroring and transformation toolkit** that:
+### Timestamp Transforms
 
-1. **Mirrors Messages**: Reliably replicates Kafka messages between clusters with exactly-once semantics
-2. **Filters Content**: Evaluates complex filter expressions in real-time (50ns per evaluation) to route only relevant messages
-3. **Transforms Data**: Modifies message structure and content using a powerful DSL with sub-microsecond performance
-4. **Routes Intelligently**: Distributes messages to multiple destinations based on content-based routing rules
-5. **Ensures Security**: Provides enterprise-grade encryption and authentication for secure data pipelines
+| Syntax | Description |
+|---|---|
+| `PRESERVE` | Keep original timestamp (default) |
+| `CURRENT` | Set to current time |
+| `FROM:/path` | Extract from payload field |
+| `ADD:seconds` | Add seconds to original |
+| `SUBTRACT:seconds` | Subtract seconds from original |
 
-## Why Streamforge is Better
-
-### Performance Excellence
-- **Production Throughput**: 25,000-30,000 msg/s sustained, **34,500 msg/s peak** (8 threads, verified ✅)
-- **Linear Scaling**: 2.0x throughput scaling from 4 to 8 threads with delivery guarantees
-- **Concurrent Processing**: 80 parallel operations (8 threads × 10 parallelism)
-- **Blazing Fast Filters**: 44-50ns evaluation time (21M filter operations/second, measured)
-- **Efficient Transforms**: 810-1,633ns transformation time (1.2M ops/second, measured)
-- **Minimal Commit Overhead**: ~5% performance cost for at-least-once delivery guarantees
-
-### Resource Efficiency
-- **Small Memory Footprint**: ~25-55MB RAM usage means lower infrastructure costs
-- **CPU Efficient**: Processes 11,000+ msg/s with proper CPU utilization across cores
-- **Tiny Container Images**: 20MB Docker images reduce storage and network costs
-- **Fast Startup**: Sub-second startup time enables rapid scaling and recovery
-
-### Advanced Features
-- **Rich DSL**: Boolean logic (AND/OR/NOT), regex, arrays, arithmetic operations
-- **Flexible Configuration**: YAML and JSON support with auto-detection
-- **Multi-Destination Routing**: Content-based routing to multiple topics
-- **Comprehensive Security**: SSL/TLS, SASL (PLAIN/SCRAM/GSSAPI), Kerberos
-
-### Operational Benefits
-- **Built with Rust**: Memory safety, zero garbage collection pauses, fearless concurrency
-- **Async/Await**: Tokio runtime provides efficient non-blocking I/O
-- **Production Ready**: Comprehensive metrics, error handling, and monitoring
-- **Cloud Native**: Kubernetes-ready with HPA support and minimal attack surface
+See [docs/ADVANCED_DSL_GUIDE.md](docs/ADVANCED_DSL_GUIDE.md) for comprehensive examples.
 
 ## Architecture
 
 ```
-┌─────────────┐
-│   Consumer  │  (Read from source Kafka)
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  Processor  │  (Filter, Transform, Route)
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  KafkaSink  │  (Write to target Kafka)
-└─────────────┘
+Source Kafka          Streamforge              Target Kafka
+┌──────────┐    ┌──────────────────────┐    ┌──────────┐
+│  topic-a  ├───►  Consumer            │    │ topic-x  │
+│  topic-b  │    │    │                │    │ topic-y  │
+└──────────┘    │    ▼                │    │ topic-z  │
+                │  Processor           │    └──────────┘
+                │  ├─ Filter (DSL)     │         ▲
+                │  ├─ Envelope Ops     │         │
+                │  └─ Transform (DSL)  │         │
+                │    │                │         │
+                │    ▼                │         │
+                │  KafkaSink(s) ──────┼─────────┘
+                └──────────────────────┘
 ```
 
-## Performance Tuning
+- **Consumer**: Reads from source Kafka using `rdkafka` `StreamConsumer`. Supports batch collection with configurable size and timeout.
+- **Processor**: Applies per-destination filter, envelope transforms, and value transforms. Each destination has its own `DestinationProcessor`.
+- **KafkaSink**: Writes to target Kafka via `FutureProducer`. Supports custom partitioning, compression (Gzip, Snappy, Zstd), and full header/timestamp propagation.
 
-### Consumer Settings
+## Performance
 
-```json
-"consumer_properties": {
-  "fetch.min.bytes": "1048576",
-  "fetch.wait.max.ms": "500"
-}
+### DSL Micro-Benchmarks (Measured)
+
+```bash
+cargo bench
 ```
 
-### Producer Settings
+Results on Apple M-series (March 2026):
 
-```json
-"producer_properties": {
-  "batch.size": "65536",
-  "linger.ms": "10",
-  "compression.type": "gzip"
-}
-```
+| Operation | Latency | Throughput |
+|---|---|---|
+| Simple filter | 43-50 ns | ~21M ops/s |
+| Boolean logic (AND/OR) | 47-145 ns | 7-21M ops/s |
+| Regex filter | 47-59 ns | 17-21M ops/s |
+| Array operations | 57-101 ns | 10-18M ops/s |
+| Object construction | 908-1,414 ns | 0.7-1.1M ops/s |
+| Arithmetic | 816-864 ns | 1.2M ops/s |
+
+See [benchmarks/results/BENCHMARK_RESULTS.md](benchmarks/results/BENCHMARK_RESULTS.md) for full data.
+
+### End-to-End Throughput (Measured)
+
+| Configuration | Sustained | Peak |
+|---|---|---|
+| 4 threads, at-least-once | ~11,000 msg/s | -- |
+| 8 threads, at-least-once | 25,000-30,000 msg/s | 34,500 msg/s |
+
+See [benchmarks/results/](benchmarks/results/) for detailed analysis.
+
+### Compression Support
+
+| Algorithm | Native Kafka | Enveloped | Status |
+|---|---|---|---|
+| Gzip | Yes | Yes | Implemented |
+| Snappy | Yes | Yes | Implemented |
+| Zstd | Yes | Yes | Implemented |
+| LZ4 | Yes (via Kafka) | No | Native only |
+
+> **Note**: LZ4 is supported as native Kafka producer compression (handled by librdkafka). Application-level (enveloped) LZ4 compression is not yet implemented.
 
 ## Metrics
 
-The application reports metrics every 10 seconds:
+### Console Stats
+
+Reported every 10 seconds:
 
 ```
 Stats: processed=10000 (1000.0/s), filtered=100 (10.0/s),
        completed=9900 (990.0/s), errors=0 (0.0/s)
 ```
 
+### Prometheus Metrics
+
+When `metrics_enabled: true`, available at `http://localhost:9090/metrics`:
+
+```promql
+rate(streamforge_messages_consumed_total[5m])
+sum(rate(streamforge_messages_produced_total[5m])) by (destination)
+streamforge_consumer_lag{topic="...", partition="..."}
+histogram_quantile(0.99, rate(streamforge_processing_duration_seconds_bucket[5m]))
+rate(streamforge_processing_errors_total[5m])
+```
+
+See [docs/OBSERVABILITY_QUICKSTART.md](docs/OBSERVABILITY_QUICKSTART.md) for Prometheus + Grafana setup.
+
 ## Documentation
 
-### 📖 Getting Started
-- [docs/QUICKSTART.md](docs/QUICKSTART.md) - Get started in 5 minutes
-- [docs/USAGE.md](docs/USAGE.md) - 8 real-world use cases
-- [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) - Quick reference card
+| Document | Description |
+|---|---|
+| [QUICKSTART.md](docs/QUICKSTART.md) | Get running in 5 minutes |
+| [USAGE.md](docs/USAGE.md) | 8 real-world use cases |
+| [ADVANCED_DSL_GUIDE.md](docs/ADVANCED_DSL_GUIDE.md) | Complete DSL reference |
+| [ADVANCED_FILTERS.md](docs/ADVANCED_FILTERS.md) | Boolean logic (AND/OR/NOT) |
+| [ENVELOPE_MIGRATION_GUIDE.md](docs/ENVELOPE_MIGRATION_GUIDE.md) | Envelope features migration |
+| [YAML_CONFIGURATION.md](docs/YAML_CONFIGURATION.md) | YAML vs JSON configuration |
+| [SECURITY_CONFIGURATION.md](docs/SECURITY_CONFIGURATION.md) | SSL/TLS, SASL, Kerberos |
+| [OBSERVABILITY_QUICKSTART.md](docs/OBSERVABILITY_QUICKSTART.md) | Metrics setup (Prometheus + Grafana) |
+| [OBSERVABILITY_METRICS_DESIGN.md](docs/OBSERVABILITY_METRICS_DESIGN.md) | Complete metrics reference |
+| [DOCKER.md](docs/DOCKER.md) | Docker and Kubernetes deployment |
+| [PERFORMANCE.md](docs/PERFORMANCE.md) | Performance tuning |
+| [SCALING.md](docs/SCALING.md) | Horizontal and vertical scaling |
+| [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development setup and guidelines |
+| [DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) | Full documentation index |
 
-### ⚙️ Configuration
-- [examples/README.md](examples/README.md) - **Configuration examples and patterns**
-- [docs/YAML_CONFIGURATION.md](docs/YAML_CONFIGURATION.md) - YAML vs JSON guide
-- [examples/config.advanced.yaml](examples/config.advanced.yaml) - 17 production examples in YAML
+### Examples
 
-### 🎯 Features & DSL
-- [docs/ADVANCED_DSL_GUIDE.md](docs/ADVANCED_DSL_GUIDE.md) - Complete DSL reference
-- [docs/DSL_FEATURES.md](docs/DSL_FEATURES.md) - Feature summary with benchmarks
-- [docs/ADVANCED_FILTERS.md](docs/ADVANCED_FILTERS.md) - Boolean logic (AND/OR/NOT)
-
-### 🚀 Operations & Deployment
-- [docs/DOCKER.md](docs/DOCKER.md) - Docker & Kubernetes deployment
-- [docs/SECURITY_CONFIGURATION.md](docs/SECURITY_CONFIGURATION.md) - Security configuration (SSL/TLS, SASL, Kerberos)
-- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) - Performance tuning guide
-- [docs/SCALING.md](docs/SCALING.md) - Horizontal & vertical scaling
-
-### 💻 Development
-- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) - Development setup & guidelines
-- [docs/IMPLEMENTATION_NOTES.md](docs/IMPLEMENTATION_NOTES.md) - Architecture details
-- [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) - Feature tracking
-- [docs/CHANGELOG.md](docs/CHANGELOG.md) - Version history
-- [docs/TEST_COVERAGE.md](docs/TEST_COVERAGE.md) - Unit test coverage (24 tests)
-- [docs/CRITICAL_FIXES_SUMMARY.md](docs/CRITICAL_FIXES_SUMMARY.md) - Critical bug fixes
-
-### ⚡ Performance & Benchmarks
-- [benchmarks/README.md](benchmarks/README.md) - Benchmarks overview
-- [benchmarks/results/CONCURRENT_PROCESSING_RESULTS.md](benchmarks/results/CONCURRENT_PROCESSING_RESULTS.md) - 132x throughput improvement
-- [benchmarks/results/SCALING_TEST_RESULTS.md](benchmarks/results/SCALING_TEST_RESULTS.md) - Linear scaling validation
-- [benchmarks/results/BENCHMARKS.md](benchmarks/results/BENCHMARKS.md) - Comprehensive benchmark analysis
-- [benchmarks/configs/](benchmarks/configs/) - Test configurations
-
-### 📋 Complete Index
-- [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) - Complete documentation index
-- [docs/index.md](docs/index.md) - Documentation homepage
-
-## DSL Capabilities
-
-The custom filtering and transformation DSL supports:
-
-- **JSON Path Navigation**: `/message/field/nested`
-- **Comparison Operators**: `>`, `>=`, `<`, `<=`, `==`, `!=`
-- **Boolean Logic**: `AND`, `OR`, `NOT`
-- **Regular Expressions**: `REGEX:/path,pattern`
-- **Array Operations**: `ARRAY_ALL`, `ARRAY_ANY`, `ARRAY_MAP`
-- **Arithmetic**: `ARITHMETIC:ADD|SUB|MUL|DIV,operand1,operand2`
-- **Object Construction**: `CONSTRUCT:field=/path:field2=/path2`
-
-**Performance**: Measured performance of 46ns for simple filters and 817ns for transformations (see [benchmarks/results/BENCHMARK_RESULTS.md](benchmarks/results/BENCHMARK_RESULTS.md)).
-
-See [docs/ADVANCED_DSL_GUIDE.md](docs/ADVANCED_DSL_GUIDE.md) for detailed examples.
+See [examples/](examples/) for configuration files covering single-destination, multi-destination, envelope operations, observability, and Kubernetes deployment.
 
 ## Future Enhancements
 
-- [ ] Avro serialization
-- [ ] Schema registry integration
-- [ ] Dead letter queue
-- [ ] Prometheus metrics exporter
-- [ ] Health check endpoint
+- [ ] Avro serialization and Schema Registry integration
+- [ ] Dead letter queue for failed messages
+- [ ] Application-level LZ4 compression
 - [ ] Nested transform composition
 
 ## Contributing
 
-We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
-
 ```bash
-# Clone and build
-git clone https://github.com/rahulbsw/streamforge
+git clone https://github.com/rahulbsw/streamforge.git
 cd streamforge
 cargo build
-
-# Run tests
 cargo test
-
-# Run benchmarks
 cargo bench
 ```
 
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
+
 ## License
 
-Apache License 2.0 - See [LICENSE](LICENSE) for details.
+Apache License 2.0 -- see [LICENSE](LICENSE) for details.
 
 Copyright 2025 Rahul Jain
-
-## Acknowledgments
-
-Built with:
-- [Rust](https://www.rust-lang.org/) - Systems programming language
-- [Tokio](https://tokio.rs/) - Async runtime
-- [rdkafka](https://github.com/fede1024/rust-rdkafka) - Kafka client
-- [serde](https://serde.rs/) - Serialization framework
-- [Criterion](https://github.com/bheisler/criterion.rs) - Benchmarking
-
----
-
-**Ready to get started?** Head to [docs/QUICKSTART.md](docs/QUICKSTART.md) and run your first mirror in 5 minutes!

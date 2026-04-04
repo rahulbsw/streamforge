@@ -1,8 +1,10 @@
 use crate::compression::Compressor;
 use crate::config::{CompressionAlgo, CompressionType, MirrorMakerConfig};
+use crate::envelope::MessageEnvelope;
 use crate::partitioner::{DefaultPartitioner, FieldPartitioner, Partitioner};
 use crate::Result;
 use rdkafka::config::ClientConfig;
+use rdkafka::message::OwnedHeaders;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
 use serde_json::Value;
@@ -88,7 +90,7 @@ impl KafkaSink {
             .topics()
             .iter()
             .find(|t| t.name() == target_topic)
-            .and_then(|t| Some(t.partitions().len() as i32))
+            .map(|t| t.partitions().len() as i32)
             .unwrap_or(1);
 
         info!(
@@ -117,18 +119,21 @@ impl KafkaSink {
         })
     }
 
-    /// Send a message to the target Kafka topic
-    pub async fn send(&self, key: Value, value: Value) -> Result<()> {
-        // Determine partition
+    /// Send a message envelope to the target Kafka topic
+    pub async fn send(&self, envelope: MessageEnvelope) -> Result<()> {
+        // Determine partition (use key and value for partitioning decision)
+        let key_for_partition = envelope.key.as_ref().unwrap_or(&Value::Null);
         let partition = self
             .partitioner
-            .partition(&self.target_topic, &key, &value, self.num_partitions);
+            .partition(&self.target_topic, key_for_partition, &envelope.value, self.num_partitions);
 
         debug!("Routing to partition {}/{}", partition, self.num_partitions);
 
-        // Serialize key and value
-        let key_bytes = serde_json::to_vec(&key)?;
-        let mut value_bytes = serde_json::to_vec(&value)?;
+        // Serialize key (if present)
+        let key_bytes = envelope.key.as_ref().map(|k| serde_json::to_vec(k)).transpose()?;
+
+        // Serialize value
+        let mut value_bytes = serde_json::to_vec(&envelope.value)?;
 
         // Apply enveloped compression if configured
         if matches!(
@@ -138,12 +143,32 @@ impl KafkaSink {
             value_bytes = self.compressor.compress(&value_bytes)?;
         }
 
-        // Create and send record
-        let record = FutureRecord::to(&self.target_topic)
-            .partition(partition)
-            .key(&key_bytes)
-            .payload(&value_bytes);
+        // Build headers from envelope
+        let mut headers = OwnedHeaders::new();
+        for (name, value) in &envelope.headers {
+            headers = headers.insert(rdkafka::message::Header {
+                key: name,
+                value: Some(value),
+            });
+        }
 
+        // Create record with all envelope components
+        let mut record = FutureRecord::to(&self.target_topic)
+            .partition(partition)
+            .payload(&value_bytes)
+            .headers(headers);
+
+        // Add key if present
+        if let Some(ref kb) = key_bytes {
+            record = record.key(kb);
+        }
+
+        // Add timestamp if present
+        if let Some(ts) = envelope.timestamp {
+            record = record.timestamp(ts);
+        }
+
+        // Send record
         match self
             .producer
             .send(record, Timeout::After(Duration::from_secs(10)))
@@ -162,8 +187,7 @@ impl KafkaSink {
 
     /// Flush all pending messages
     pub async fn flush(&self) -> Result<()> {
-        use rdkafka::producer::Producer;
-        self.producer.flush(Timeout::After(Duration::from_secs(30)));
+        let _ = self.producer.flush(Timeout::After(Duration::from_secs(30)));
         Ok(())
     }
 }
@@ -185,9 +209,9 @@ impl MultiSink {
         info!("Added sink for topic: {}", topic);
     }
 
-    pub async fn send_to(&self, topic: &str, key: Value, value: Value) -> Result<()> {
+    pub async fn send_to(&self, topic: &str, envelope: MessageEnvelope) -> Result<()> {
         if let Some(sink) = self.sinks.get(topic) {
-            sink.send(key, value).await
+            sink.send(envelope).await
         } else {
             warn!("No sink configured for topic: {}", topic);
             Ok(())
@@ -224,6 +248,7 @@ mod tests {
             security: None,
             commit_strategy: CommitStrategyConfig::default(),
             cache: None,
+            observability: Default::default(),
         }
     }
 
