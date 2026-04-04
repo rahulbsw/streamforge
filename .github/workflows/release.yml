@@ -6,6 +6,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g. v0.4.0)'
+        required: true
+        default: 'v0.4.0'
 
 permissions:
   contents: write
@@ -117,13 +123,13 @@ jobs:
         run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
       - name: Upload binary to release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-          asset_name: ${{ matrix.asset_name }}
-          tag: ${{ github.ref }}
-          overwrite: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${{ github.event.inputs.tag || github.ref_name }}
+          gh release upload "$TAG" \
+            target/${{ matrix.target }}/release/${{ matrix.artifact_name }}#${{ matrix.asset_name }} \
+            --clobber
 
   build-docker-images:
     name: Build and Push Docker Images
