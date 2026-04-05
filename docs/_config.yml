@@ -1,7 +1,7 @@
 title: Streamforge Documentation
 description: High-performance Kafka streaming toolkit built in Rust
 theme: minima
-url: "https://rahulbsw.github.io"
+url: "https://github.datasierra.com"
 baseurl: "/streamforge"
 
 # Disable Liquid rendering in Markdown to avoid conflicts with
