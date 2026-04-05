@@ -1,0 +1,17 @@
+title: Streamforge Documentation
+description: High-performance Kafka streaming toolkit built in Rust
+theme: minima
+url: "https://rahulbsw.github.io"
+baseurl: "/streamforge"
+
+# Disable Liquid rendering in Markdown to avoid conflicts with
+# Prometheus query syntax {{ $value }}, Go template {{ .Field }},
+# and Helm/Kubernetes template syntax.
+render_with_liquid: false
+
+# Exclude non-documentation files
+exclude:
+  - "*.sh"
+  - "development/internal"
+  - Gemfile
+  - Gemfile.lock
