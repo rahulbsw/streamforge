@@ -5,7 +5,90 @@ nav_order: 13
 
 # Changelog
 
-## [0.2.0] - 2025-01-XX - Advanced DSL Release
+All notable changes to StreamForge are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+---
+
+## [0.4.0] - 2026-04-03 - Observability, Envelopes & Release Pipeline
+
+### Added
+
+#### Prometheus Observability
+- Prometheus metrics exporter on `/metrics` HTTP endpoint
+- Grafana dashboard templates (`examples/streamforge_alerts.yml`)
+- Per-destination throughput, latency, and error counters
+- JVM-style process metrics (CPU, memory, file descriptors)
+- `docs/OBSERVABILITY_QUICKSTART.md` and `docs/OBSERVABILITY_METRICS_DESIGN.md`
+
+#### Envelope Transforms
+- `ENVELOPE:wrap` — wraps the full message payload into a named field
+- `ENVELOPE:unwrap` — extracts an inner field as the new root
+- `ENVELOPE:add_metadata` — injects topic, partition, offset, timestamp headers
+- Migration guide: `docs/ENVELOPE_MIGRATION_GUIDE.md`
+- Design reference: `docs/ENVELOPE_FEATURE_DESIGN.md`
+- Example configs: `examples/config.envelope-simple.yaml`, `examples/config.envelope-features.yaml`
+
+#### Multi-Architecture Release Pipeline
+- Automated GitHub Actions release workflow (`release.yml`)
+- Pre-built binaries for `linux-x86_64`, `linux-aarch64`, `macos-x86_64`, `macos-aarch64`
+- Docker images published to GHCR (`ghcr.io/rahulbsw/streamforge`)
+- Chainguard distroless base images for minimal attack surface
+- Native ARM64 runner eliminates QEMU cross-compilation overhead
+
+### Fixed
+- All clippy warnings resolved across main crate and operator
+- Operator reconciler unused import removed
+- 17 npm security vulnerabilities in UI dependencies resolved
+
+---
+
+## [0.3.0] - 2026-04-01 - Concurrent Processing, Hash & Cache
+
+### Added
+
+#### Concurrent Processing
+- Multi-threaded pipeline with configurable thread count (`threads: N`)
+- Lock-free work queue for message dispatch
+- Linear scaling validated: 8 threads → 25,000–34,500 msg/s
+- Concurrent consumer/producer architecture with Tokio
+
+#### Hash Transforms
+- 5 hash algorithms: `MD5`, `SHA256`, `SHA512`, `MURMUR64`, `MURMUR128`
+- DSL syntax: `HASH:algorithm,/path[,outputField]`
+- Use cases: PII anonymization, deduplication, consistent partitioning
+- Throughput: up to 10M ops/s (Murmur), 2M ops/s (SHA256)
+
+#### Cache Backends
+- **Local cache** (Moka): TTL/TTI eviction, 50ns lookup, async-first
+- **Redis cache**: connection pooling, key prefixes, auto-expiration
+- **Kafka-backed cache**: compacted topic as distributed cache, warmup on start
+- **Multi-level cache**: L1 (local) + L2 (Redis), automatic promotion
+- DSL syntax: `CACHE_LOOKUP:/keyPath,cacheName,/outputField`
+- Feature flags: `local-cache` (default), `redis-cache`, `all-caches`
+
+#### At-Least-Once Delivery
+- Manual commit mode with async or sync commit options
+- Configurable commit interval (batching)
+- Dead Letter Queue (DLQ) with configurable topic
+- Exponential backoff retry (initial 100ms → max 30s, multiplier 2.0)
+- Backward compatible — auto-commit remains the default
+
+#### Kubernetes & Helm
+- Kubernetes Operator (`operator/`) for CRD-based pipeline management
+- Helm chart (`helm/streamforge-operator/`) for operator deployment
+- Kubernetes secret support for secure Kafka connections
+- Web UI for operator pipeline management (`ui/`)
+
+### Performance
+- 25,000–34,500 msg/s at 8 threads (linear scaling)
+- Memory: ~50MB (vs ~500MB Java MirrorMaker)
+- Hash operations: 50ns–1µs depending on algorithm
+- Local cache lookup: 50ns p50, 100ns p99
+
+---
+
+## [0.2.0] - 2026-03-10 - Advanced DSL & YAML Support
 
 ### Added
 
@@ -103,7 +186,7 @@ routing:
 
 ---
 
-## [0.1.0] - 2025-01-XX - Initial Release
+## [0.1.0] - 2026-03-10 - Initial Release
 
 ### Added
 
@@ -168,26 +251,17 @@ routing:
 
 ## Roadmap
 
-### Version 0.3.0 (Planned)
-- [ ] Nested transform composition
-- [ ] String manipulation operations
-- [ ] Date/time operations
-- [ ] Math functions (abs, round, ceil, floor)
-- [ ] Conditional transforms (if-then-else)
-
-### Version 0.4.0 (Planned)
-- [ ] Prometheus metrics exporter
-- [ ] Grafana dashboard templates
-- [ ] Health check HTTP endpoint
-- [ ] Dead letter queue support
-
 ### Version 0.5.0 (Planned)
 - [ ] Avro serialization support
 - [ ] Schema registry integration
 - [ ] Schema evolution handling
+- [ ] String manipulation operations (`UPPER`, `LOWER`, `TRIM`, `SUBSTRING`)
+- [ ] Date/time operations and format transforms
+- [ ] Conditional transforms (`IF:condition,thenTransform,elseTransform`)
 
 ### Version 1.0.0 (Planned)
-- [ ] Production hardening
-- [ ] Performance tuning
-- [ ] Comprehensive benchmarks
-- [ ] Production case studies
+- [ ] Exactly-once semantics (idempotent producer + transactional consumer)
+- [ ] UDF support via WASM or Lua
+- [ ] State management with RocksDB
+- [ ] Production hardening and SLA documentation
+- [ ] Comprehensive production case studies
