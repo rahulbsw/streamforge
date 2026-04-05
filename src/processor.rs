@@ -61,7 +61,7 @@ impl DestinationProcessor {
         // Track processing duration
         let timer = METRICS
             .processing_duration
-            .with_label_values(&[&self.name])
+            .with_label_values(&[self.name.as_str()])
             .start_timer();
 
         // Apply envelope filter (works for both value-only and envelope-aware filters)
@@ -70,7 +70,7 @@ impl DestinationProcessor {
         METRICS
             .filter_evaluations
             .with_label_values(&[
-                &self.name,
+                self.name.as_str(),
                 if filter_passed {
                     labels::FILTER_RESULT_PASS
                 } else {
@@ -83,7 +83,7 @@ impl DestinationProcessor {
             debug!("Message filtered out by destination: {}", self.name);
             METRICS
                 .messages_filtered
-                .with_label_values(&[&self.name, labels::FILTER_REASON_FAILED])
+                .with_label_values(&[self.name.as_str(), labels::FILTER_REASON_FAILED])
                 .inc();
             return Ok(false);
         }
@@ -93,7 +93,7 @@ impl DestinationProcessor {
         for transform in &self.envelope_transforms {
             METRICS
                 .transform_operations
-                .with_label_values(&[&self.name, labels::TRANSFORM_TYPE_ENVELOPE])
+                .with_label_values(&[self.name.as_str(), labels::TRANSFORM_TYPE_ENVELOPE])
                 .inc();
 
             envelope = transform.transform_envelope(envelope)?;
@@ -102,7 +102,7 @@ impl DestinationProcessor {
         // Apply value transform (always done, backward compatible)
         METRICS
             .transform_operations
-            .with_label_values(&[&self.name, labels::TRANSFORM_TYPE_VALUE])
+            .with_label_values(&[self.name.as_str(), labels::TRANSFORM_TYPE_VALUE])
             .inc();
 
         let transformed_value = self.transform.transform(envelope.value)?;
@@ -114,7 +114,7 @@ impl DestinationProcessor {
         // Track successful message production
         METRICS
             .messages_produced
-            .with_label_values(&[&self.name])
+            .with_label_values(&[self.name.as_str()])
             .inc();
 
         timer.observe_duration();

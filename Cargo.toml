@@ -61,7 +61,7 @@ redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], opt
 tokio-retry = "0.3"
 
 # Observability - Prometheus metrics
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 lazy_static = "1.4"
 
 # HTTP server for metrics endpoint
