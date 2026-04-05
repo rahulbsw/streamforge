@@ -1,4 +1,4 @@
-# WAP MirrorMaker - Project Summary
+# StreamForge - Project Summary
 
 ## Overview
 
@@ -97,7 +97,7 @@ High-performance Kafka message mirroring service written in Rust with advanced f
 - Complex filter (AND+3): 150.79ns/op → 6.6M ops/sec  
 - Simple transform: 816.73ns/op → 1.22M ops/sec
 
-📊 **See [BENCHMARK_RESULTS.md](../BENCHMARK_RESULTS.md) for complete statistical analysis**
+📊 **See [BENCHMARK_RESULTS.md](../benchmarks/results/BENCHMARK_RESULTS.md) for complete statistical analysis**
 
 ### End-to-End System Performance
 
@@ -150,7 +150,7 @@ High-performance Kafka message mirroring service written in Rust with advanced f
 ## Documentation
 
 ### Essential Reading (New Users)
-1. [README.md](README.md) - Overview (5 min)
+1. [README.md](../README.md) - Overview (5 min)
 2. [QUICKSTART.md](QUICKSTART.md) - Get started (10 min)
 3. [YAML_CONFIGURATION.md](YAML_CONFIGURATION.md) - Config format (15 min)
 4. [USAGE.md](USAGE.md) - Use cases (20 min)
@@ -334,7 +334,7 @@ Event-driven communication between services.
 ```yaml
 services:
   mirrormaker:
-    image: wap-mirrormaker-rust:latest
+    image: streamforge:latest
     deploy:
       replicas: 5
     volumes:
@@ -347,14 +347,14 @@ services:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: wap-mirrormaker
+  name: streamforge
 spec:
   replicas: 5
   template:
     spec:
       containers:
       - name: mirrormaker
-        image: wap-mirrormaker-rust:latest
+        image: streamforge:latest
         resources:
           limits:
             cpu: "2000m"
@@ -371,7 +371,7 @@ metadata:
 spec:
   scaleTargetRef:
     kind: Deployment
-    name: wap-mirrormaker
+    name: streamforge
   minReplicas: 3
   maxReplicas: 10
   metrics:

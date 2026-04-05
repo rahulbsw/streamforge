@@ -1,6 +1,12 @@
+---
+title: Performance
+nav_order: 9
+parent: Deployment
+---
+
 # Performance Guide
 
-Comprehensive guide for optimizing WAP MirrorMaker performance.
+Comprehensive guide for optimizing StreamForge performance.
 
 ## Table of Contents
 
@@ -388,7 +394,7 @@ docker run -d \
   --cpus="4" \
   --memory="512m" \
   --memory-reservation="256m" \
-  wap-mirrormaker:latest
+  streamforge:latest
 ```
 
 **Kubernetes Resource Limits:**
@@ -429,19 +435,19 @@ Stats: processed=10000 (1000.0/s), filtered=100 (10.0/s),
 **CPU:**
 ```bash
 # Overall CPU
-top -p $(pgrep wap-mirrormaker)
+top -p $(pgrep streamforge)
 
 # Per-thread CPU
-ps -eLo pid,tid,pcpu,comm | grep wap-mirrormaker
+ps -eLo pid,tid,pcpu,comm | grep streamforge
 ```
 
 **Memory:**
 ```bash
 # Memory usage
-ps aux | grep wap-mirrormaker
+ps aux | grep streamforge
 
 # Detailed memory
-pmap $(pgrep wap-mirrormaker)
+pmap $(pgrep streamforge)
 ```
 
 **Network:**
@@ -459,7 +465,7 @@ nethogs
 ```bash
 kafka-consumer-groups.sh \
   --bootstrap-server kafka:9092 \
-  --group wap-mirrormaker \
+  --group streamforge \
   --describe
 ```
 
@@ -512,7 +518,7 @@ RUST_LOG=debug
 **Diagnosis:**
 ```bash
 # CPU profiling
-perf record -p $(pgrep wap-mirrormaker)
+perf record -p $(pgrep streamforge)
 perf report
 
 # Check filter complexity
@@ -535,7 +541,7 @@ perf report
 **Diagnosis:**
 ```bash
 # Memory profiling
-valgrind --tool=massif ./wap-mirrormaker-rust
+valgrind --tool=massif ./streamforge
 
 # Check message sizes
 # Review batch sizes
@@ -576,10 +582,10 @@ kafka-run-class.sh kafka.tools.JmxTool
 
 ```bash
 # Pin to specific CPUs
-taskset -c 0-3 ./wap-mirrormaker-rust
+taskset -c 0-3 ./streamforge
 
 # Docker with CPU affinity
-docker run --cpuset-cpus="0-3" wap-mirrormaker:latest
+docker run --cpuset-cpus="0-3" streamforge:latest
 ```
 
 ### Huge Pages
@@ -589,7 +595,7 @@ docker run --cpuset-cpus="0-3" wap-mirrormaker:latest
 echo 512 > /proc/sys/vm/nr_hugepages
 
 # Run with huge pages
-MALLOC_MMAP_THRESHOLD_=131072 ./wap-mirrormaker-rust
+MALLOC_MMAP_THRESHOLD_=131072 ./streamforge
 ```
 
 ### Network Optimization
@@ -611,7 +617,7 @@ sysctl -w net.ipv4.tcp_wmem="4096 65536 16777216"
 ```bash
 # Install perf
 # Start profiling
-perf record -g -p $(pgrep wap-mirrormaker)
+perf record -g -p $(pgrep streamforge)
 
 # Generate flamegraph
 perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
@@ -620,7 +626,7 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
 **Memory Profiling:**
 ```bash
 # Using valgrind
-valgrind --tool=massif --massif-out-file=massif.out ./wap-mirrormaker-rust
+valgrind --tool=massif --massif-out-file=massif.out ./streamforge
 
 # Analyze
 ms_print massif.out

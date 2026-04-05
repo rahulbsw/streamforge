@@ -2,7 +2,7 @@
 
 ## Overview
 
-The WAP MirrorMaker Rust implementation includes a custom, high-performance filtering and transformation DSL (Domain-Specific Language) designed specifically for Kafka message processing.
+The StreamForge implementation includes a custom, high-performance filtering and transformation DSL (Domain-Specific Language) designed specifically for Kafka message processing.
 
 **Performance**: 40x faster than Java JSLT implementation through direct JSON value manipulation.
 

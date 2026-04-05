@@ -390,31 +390,31 @@ all-caches = ["local-cache", "redis-cache"]
 
 ### Created Documents
 
-1. **[docs/HASH_AND_CACHE.md](docs/HASH_AND_CACHE.md)** (8,000+ words)
+1. **[docs/HASH_AND_CACHE.md](../../HASH_AND_CACHE.md)** (8,000+ words)
    - Hash algorithm comparison
    - Cache usage patterns
    - Performance benchmarks
    - Best practices
    - Troubleshooting
 
-2. **[docs/AT_LEAST_ONCE_AND_CACHE_BACKENDS.md](docs/AT_LEAST_ONCE_AND_CACHE_BACKENDS.md)** (6,000+ words)
+2. **[docs/AT_LEAST_ONCE_AND_CACHE_BACKENDS.md](../../AT_LEAST_ONCE_AND_CACHE_BACKENDS.md)** (6,000+ words)
    - At-least-once delivery guide
    - Redis backend configuration
    - Kafka-backed cache setup
    - Multi-level cache patterns
    - How to populate Moka cache
 
-3. **[examples/config.hash-and-cache.yaml](examples/config.hash-and-cache.yaml)**
+3. **[examples/config.hash-and-cache.yaml](../../../examples/config.hash-and-cache.yaml)**
    - 10+ hash function examples
    - All algorithms demonstrated
    - Performance tips
 
-4. **[examples/config.at-least-once.yaml](examples/config.at-least-once.yaml)**
+4. **[examples/config.at-least-once.yaml](../../../examples/config.at-least-once.yaml)**
    - 10+ commit strategy examples
    - DLQ configuration
    - Retry patterns
 
-5. **[examples/config.cache-backends.yaml](examples/config.cache-backends.yaml)**
+5. **[examples/config.cache-backends.yaml](../../../examples/config.cache-backends.yaml)**
    - Local, Redis, Kafka cache examples
    - Multi-level cache
    - How to populate cache (5 methods)
@@ -423,11 +423,6 @@ all-caches = ["local-cache", "redis-cache"]
    - Quick start guide
    - Common patterns
    - API reference
-
-7. **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)**
-   - Technical summary
-   - Architecture details
-   - Performance characteristics
 
 ---
 
@@ -638,10 +633,10 @@ consumer_properties:
 
 ## 📚 See Also
 
-- [Full Hash & Cache Documentation](docs/HASH_AND_CACHE.md)
-- [At-Least-Once & Backends Guide](docs/AT_LEAST_ONCE_AND_CACHE_BACKENDS.md)
+- [Full Hash & Cache Documentation](../../HASH_AND_CACHE.md)
+- [At-Least-Once & Backends Guide](../../AT_LEAST_ONCE_AND_CACHE_BACKENDS.md)
 - [Quick Reference](QUICK_REFERENCE_HASH_CACHE.md)
-- [Configuration Examples](examples/)
+- [Configuration Examples](../../../examples/)
 
 ---
 

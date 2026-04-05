@@ -1,3 +1,9 @@
+---
+title: Kubernetes
+nav_order: 7
+parent: Deployment
+---
+
 # Streamforge on Kubernetes
 
 Complete guide for deploying and managing Streamforge pipelines on Kubernetes using the Operator pattern.
@@ -540,7 +546,7 @@ spec:
 
 ### Secure with SSL/SASL
 
-See [examples/k8s/pipelines/03-secure-transform.yaml](../examples/k8s/pipelines/03-secure-transform.yaml)
+See [examples/pipelines/03-secure-transform.yaml](../examples/pipelines/03-secure-transform.yaml)
 
 ---
 
@@ -741,7 +747,7 @@ kafka-consumer-groups.sh --bootstrap-server kafka:9092 \
 
 ## Contributing
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md)
+See [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## License
 

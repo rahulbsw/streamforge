@@ -1,3 +1,8 @@
+---
+title: Changelog
+nav_order: 13
+---
+
 # Changelog
 
 ## [0.2.0] - 2025-01-XX - Advanced DSL Release

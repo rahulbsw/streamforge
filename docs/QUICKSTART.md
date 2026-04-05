@@ -1,3 +1,8 @@
+---
+title: Quickstart
+nav_order: 2
+---
+
 # Quick Start Guide
 
 ## Prerequisites
@@ -85,7 +90,7 @@ Create `config.json`:
 
 ```json
 {
-  "appid": "wap-mirrormaker-local",
+  "appid": "streamforge-local",
   "bootstrap": "localhost:9092",
   "input": "input-topic",
   "output": "output-topic",
@@ -102,7 +107,7 @@ Create `config.json`:
 
 ```bash
 RUST_LOG=info CONFIG_FILE=config.json \
-  ./target/release/wap-mirrormaker-rust
+  ./target/release/streamforge
 ```
 
 ### 5. Send Test Messages
@@ -160,7 +165,7 @@ Create `config-routing.json`:
 
 ```json
 {
-  "appid": "wap-mirrormaker-routing",
+  "appid": "streamforge-routing",
   "bootstrap": "localhost:9092",
   "input": "events",
   "offset": "latest",
@@ -188,7 +193,7 @@ Create `config-routing.json`:
 
 ```bash
 RUST_LOG=info CONFIG_FILE=config-routing.json \
-  ./target/release/wap-mirrormaker-rust
+  ./target/release/streamforge
 ```
 
 ### 4. Send Different Event Types
@@ -300,22 +305,22 @@ services:
 
 ```bash
 # All modules
-RUST_LOG=debug ./target/release/wap-mirrormaker-rust
+RUST_LOG=debug ./target/release/streamforge
 
 # Specific module
-RUST_LOG=wap_mirrormaker_rust::kafka::sink=trace \
-  ./target/release/wap-mirrormaker-rust
+RUST_LOG=streamforge::kafka::sink=trace \
+  ./target/release/streamforge
 
 # Multiple modules
-RUST_LOG=wap_mirrormaker_rust::kafka=debug,wap_mirrormaker_rust::processor=info \
-  ./target/release/wap-mirrormaker-rust
+RUST_LOG=streamforge::kafka=debug,streamforge::processor=info \
+  ./target/release/streamforge
 ```
 
 ### Metrics
 
 Watch metrics output:
 ```
-[2024-03-09T10:15:30Z INFO  wap_mirrormaker_rust] Stats: processed=1000 (100.0/s),
+[2024-03-09T10:15:30Z INFO  streamforge] Stats: processed=1000 (100.0/s),
 filtered=0 (0.0/s), transformed=0 (0.0/s), completed=1000 (100.0/s), errors=0 (0.0/s)
 ```
 
@@ -353,7 +358,7 @@ docker exec -it $(docker ps -qf "name=kafka") \
 docker exec -it $(docker ps -qf "name=kafka") \
   kafka-consumer-groups \
   --bootstrap-server localhost:9092 \
-  --group wap-mirrormaker-rust \
+  --group streamforge \
   --describe
 ```
 
@@ -408,22 +413,21 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/wap-mirrormaker-rust /usr/local/bin/
-CMD ["wap-mirrormaker-rust"]
+COPY --from=builder /app/target/release/streamforge /usr/local/bin/
+CMD ["streamforge"]
 ```
 
 Build and run:
 
 ```bash
-docker build -t wap-mirrormaker-rust .
+docker build -t streamforge .
 docker run -e CONFIG_FILE=/config/config.json \
   -v $(pwd)/config.json:/config/config.json \
-  wap-mirrormaker-rust
+  streamforge
 ```
 
 ## Next Steps
 
 1. Review [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) for architecture details
-2. Check [README.md](README.md) for feature documentation
-3. Compare with Java implementation at `/Users/rajain5/IdeaProjects/wap-mirrormaker/`
-4. Run side-by-side with Java for validation
+2. Check [README.md](../README.md) for feature documentation
+3. Run side-by-side with Java for validation

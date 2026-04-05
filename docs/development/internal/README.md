@@ -14,14 +14,9 @@ These documents are **not user-facing documentation**. They track:
 
 ### Development Status & Tracking
 - **[CI_IMPROVEMENTS.md](CI_IMPROVEMENTS.md)** - CI/CD pipeline improvements and enhancements
-- **[CRITICAL_FIXES_SUMMARY.md](CRITICAL_FIXES_SUMMARY.md)** - Critical bug fixes record with before/after analysis
-- **[DIRECTORY_CLEANUP.md](DIRECTORY_CLEANUP.md)** - Project structure reorganization notes
-- **[DOCUMENTATION_CLEANUP.md](DOCUMENTATION_CLEANUP.md)** - Documentation cleanup and standardization
-- **[REMAINING_WORK_COMPLETION.md](REMAINING_WORK_COMPLETION.md)** - Task completion tracking and status updates
 
 ### Feature Implementation Records
 - **[FEATURE_SUMMARY.md](FEATURE_SUMMARY.md)** - Hash, Cache, and At-Least-Once features implementation summary
-- **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Detailed implementation notes for hash functions and caching
 - **[QUICK_REFERENCE_HASH_CACHE.md](QUICK_REFERENCE_HASH_CACHE.md)** - Quick reference for hash and cache features
 
 ## Usage

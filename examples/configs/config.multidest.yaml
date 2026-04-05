@@ -1,4 +1,4 @@
-# WAP MirrorMaker Configuration - Multi-Destination Routing
+# StreamForge Configuration - Multi-Destination Routing
 # YAML format makes complex filters and transforms much more readable!
 
 appid: streamforge-multidest

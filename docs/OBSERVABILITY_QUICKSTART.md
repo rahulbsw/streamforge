@@ -1,3 +1,9 @@
+---
+title: Observability
+nav_order: 11
+parent: Deployment
+---
+
 # Observability Quickstart
 
 Get Prometheus metrics and Kafka lag monitoring running in 5 minutes.

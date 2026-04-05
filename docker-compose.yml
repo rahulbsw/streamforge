@@ -6,8 +6,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: wap-mirrormaker-rust:latest
-    container_name: wap-mirrormaker
+    image: streamforge:latest
+    container_name: streamforge
     environment:
       - CONFIG_FILE=/app/config/config.json
       - RUST_LOG=info
@@ -32,7 +32,7 @@ services:
     network_mode: bridge
     # Health check
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "wap-mirrormaker-rust"]
+      test: ["CMD", "pgrep", "-f", "streamforge"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -43,8 +43,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.static
-    image: wap-mirrormaker-rust:static
-    container_name: wap-mirrormaker-static
+    image: streamforge:static
+    container_name: streamforge-static
     environment:
       - CONFIG_FILE=/app/config/config.json
       - RUST_LOG=info

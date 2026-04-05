@@ -1,6 +1,11 @@
+---
+title: Usage Guide
+nav_order: 3
+---
+
 # Usage Guide
 
-Complete guide covering various use cases for WAP MirrorMaker Rust implementation.
+Complete guide covering various use cases for StreamForge implementation.
 
 ## Table of Contents
 
@@ -24,40 +29,40 @@ Complete guide covering various use cases for WAP MirrorMaker Rust implementatio
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd wap-mirrormaker-rust
+cd streamforge
 
 # Build the application
 cargo build --release
 
 # Binary location
-./target/release/wap-mirrormaker-rust
+./target/release/streamforge
 ```
 
 ### Running
 
 ```bash
 # Using default config location
-CONFIG_FILE=config.json ./target/release/wap-mirrormaker-rust
+CONFIG_FILE=config.json ./target/release/streamforge
 
 # With logging
-RUST_LOG=info CONFIG_FILE=config.json ./target/release/wap-mirrormaker-rust
+RUST_LOG=info CONFIG_FILE=config.json ./target/release/streamforge
 
 # With debug logging
-RUST_LOG=debug CONFIG_FILE=config.json ./target/release/wap-mirrormaker-rust
+RUST_LOG=debug CONFIG_FILE=config.json ./target/release/streamforge
 ```
 
 ### Docker
 
 ```bash
 # Build image
-docker build -t wap-mirrormaker:latest .
+docker build -t streamforge:latest .
 
 # Run with config
 docker run -d \
   --name mirrormaker \
   -v $(pwd)/config.json:/app/config/config.json:ro \
   -e RUST_LOG=info \
-  wap-mirrormaker:latest
+  streamforge:latest
 ```
 
 ## Use Cases
@@ -567,7 +572,7 @@ Progressive filtering:
 **Check:**
 ```bash
 # Enable debug logging
-RUST_LOG=debug CONFIG_FILE=config.json ./wap-mirrormaker-rust
+RUST_LOG=debug CONFIG_FILE=config.json ./streamforge
 ```
 
 **Common Causes:**

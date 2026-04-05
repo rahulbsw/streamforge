@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is a Rust rewrite of the Java WAP MirrorMaker's Kafka sink functionality, focusing on:
+This is a Rust rewrite of the Java StreamForge's Kafka sink functionality, focusing on:
 - **Cross-cluster mirroring** (CustomKafkaSink equivalent)
 - **High performance** with async/await
 - **Memory safety** with Rust's ownership system
@@ -104,7 +104,7 @@ let partitioner = FieldPartitioner::new("/message/confId".to_string());
 
 ```json
 {
-  "appid": "wap-mirrormaker-rust",
+  "appid": "streamforge",
   "bootstrap": "source-kafka:9092",
   "input": "source-topic",
   "output": "destination-topic",
@@ -120,7 +120,7 @@ let partitioner = FieldPartitioner::new("/message/confId".to_string());
 
 ```json
 {
-  "appid": "wap-mirrormaker-multi",
+  "appid": "streamforge-multi",
   "bootstrap": "kafka:9092",
   "input": "events",
   "routing": {
@@ -259,7 +259,7 @@ cargo test test_kafka_sink_creation -- --ignored
 cargo build --release
 
 # Run
-CONFIG_FILE=config.json ./target/release/wap-mirrormaker-rust
+CONFIG_FILE=config.json ./target/release/streamforge
 ```
 
 ## Monitoring
@@ -268,13 +268,13 @@ CONFIG_FILE=config.json ./target/release/wap-mirrormaker-rust
 
 ```bash
 # Info level
-RUST_LOG=info ./target/release/wap-mirrormaker-rust
+RUST_LOG=info ./target/release/streamforge
 
 # Debug level
-RUST_LOG=debug ./target/release/wap-mirrormaker-rust
+RUST_LOG=debug ./target/release/streamforge
 
 # Module-specific
-RUST_LOG=wap_mirrormaker_rust::kafka::sink=debug ./target/release/wap-mirrormaker-rust
+RUST_LOG=streamforge::kafka::sink=debug ./target/release/streamforge
 ```
 
 ### Metrics Output
@@ -314,6 +314,6 @@ When adding features, maintain:
 ## Questions?
 
 See:
-- Java source: `/Users/rajain5/IdeaProjects/wap-mirrormaker/`
-- Rust impl: `/Users/rajain5/dev/tools/cisco-git/wap-mirrormaker-rust/`
+- Java source: `/Users/rajain5/IdeaProjects/streamforge/`
+- Rust impl: `/Users/rajain5/dev/tools/cisco-git/streamforge/`
 - Main sink logic: `src/kafka/sink.rs` (lines 22-165)

@@ -1,3 +1,9 @@
+---
+title: Security
+nav_order: 10
+parent: Deployment
+---
+
 # Security Configuration Guide
 
 Complete guide for securing Kafka connections with SSL/TLS encryption and SASL authentication.
@@ -16,7 +22,7 @@ Complete guide for securing Kafka connections with SSL/TLS encryption and SASL a
 
 ## Overview
 
-WAP MirrorMaker supports all standard Kafka security features:
+StreamForge supports all standard Kafka security features:
 
 | Feature | Support | Use Case |
 |---------|---------|----------|
@@ -496,10 +502,10 @@ CONFIG_FILE=examples/config.security-sasl-scram.yaml cargo run
 
 All security examples are in the `examples/` folder:
 
-- **[config.security-ssl.yaml](../examples/config.security-ssl.yaml)** - SSL/TLS encryption
-- **[config.security-sasl-plain.yaml](../examples/config.security-sasl-plain.yaml)** - SASL/PLAIN authentication
-- **[config.security-sasl-scram.yaml](../examples/config.security-sasl-scram.yaml)** - SASL/SCRAM authentication
-- **[config.security-kerberos.yaml](../examples/config.security-kerberos.yaml)** - Kerberos authentication
+- **[config.security-ssl.yaml](../examples/configs/config.security-ssl.yaml)** - SSL/TLS encryption
+- **[config.security-sasl-plain.yaml](../examples/configs/config.security-sasl-plain.yaml)** - SASL/PLAIN authentication
+- **[config.security-sasl-scram.yaml](../examples/configs/config.security-sasl-scram.yaml)** - SASL/SCRAM authentication
+- **[config.security-kerberos.yaml](../examples/configs/config.security-kerberos.yaml)** - Kerberos authentication
 
 ---
 
@@ -554,4 +560,4 @@ security:
 
 ---
 
-**Need Help?** See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or open an issue on GitHub.
+**Need Help?** Open an issue on GitHub.

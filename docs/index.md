@@ -1,3 +1,8 @@
+---
+title: Home
+nav_order: 1
+---
+
 # Streamforge Documentation
 
 **High-performance Kafka streaming toolkit built in Rust**
@@ -17,7 +22,7 @@
 
 ## Overview
 
-WAP MirrorMaker is a Rust rewrite of the Kafka MirrorMaker service, designed for high performance, reliability, and ease of use. It provides cross-cluster message mirroring with advanced filtering, transformation, and routing capabilities.
+StreamForge is a Rust rewrite of the Kafka MirrorMaker service, designed for high performance, reliability, and ease of use. It provides cross-cluster message mirroring with advanced filtering, transformation, and routing capabilities.
 
 ### Key Highlights
 
@@ -35,13 +40,13 @@ WAP MirrorMaker is a Rust rewrite of the Kafka MirrorMaker service, designed for
 ```bash
 # Clone repository
 git clone <repository-url>
-cd wap-mirrormaker-rust
+cd streamforge
 
 # Build
 cargo build --release
 
 # Or use Docker
-docker pull wap-mirrormaker-rust:latest
+docker pull streamforge:latest
 ```
 
 ### Basic Configuration
@@ -62,12 +67,12 @@ docker pull wap-mirrormaker-rust:latest
 
 ```bash
 # Direct execution
-CONFIG_FILE=config.json ./target/release/wap-mirrormaker-rust
+CONFIG_FILE=config.json ./target/release/streamforge
 
 # Docker
 docker run -d \
   -v $(pwd)/config.json:/app/config/config.json:ro \
-  wap-mirrormaker-rust:latest
+  streamforge:latest
 ```
 
 See [QUICKSTART.md](QUICKSTART.md) for detailed instructions.
@@ -244,8 +249,8 @@ See [USAGE.md](USAGE.md) for 8 comprehensive use cases with examples.
 
 - **[examples/README.md](../examples/README.md)** - Configuration examples and patterns
 - **[YAML_CONFIGURATION.md](YAML_CONFIGURATION.md)** - YAML vs JSON guide (recommended!)
-- **[config.advanced.yaml](../examples/config.advanced.yaml)** - 17 production YAML examples
-- **[config.advanced.example.json](../examples/config.advanced.example.json)** - JSON examples
+- **[config.advanced.yaml](../examples/configs/config.advanced.yaml)** - 17 production YAML examples
+- **[config.advanced.example.json](../examples/configs/config.advanced.example.json)** - JSON examples
 
 ### Features & DSL
 
@@ -373,7 +378,7 @@ routing:
 }
 ```
 
-See [config.advanced.example.json](../examples/config.advanced.example.json) for 17 production-ready examples.
+See [config.advanced.example.json](../examples/configs/config.advanced.example.json) for 17 production-ready examples.
 
 ## Contributing
 
@@ -384,7 +389,7 @@ We welcome contributions! Here's how to get started:
 ```bash
 # Clone and build
 git clone <repository-url>
-cd wap-mirrormaker-rust
+cd streamforge
 cargo build
 
 # Run tests
@@ -415,7 +420,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ### Feature Comparison
 
-| Feature | Java MirrorMaker | Rust MirrorMaker |
+| Feature | Java MirrorMaker | StreamForge |
 |---------|------------------|------------------|
 | Cross-cluster mirroring | ✅ | ✅ |
 | Multi-destination routing | ✅ | ✅ |
@@ -448,13 +453,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ```bash
 # Build
-docker build -t wap-mirrormaker:latest .
+docker build -t streamforge:latest .
 
 # Run
 docker run -d \
   --name mirrormaker \
   -v $(pwd)/config.json:/app/config/config.json:ro \
-  wap-mirrormaker:latest
+  streamforge:latest
 ```
 
 ### Docker Compose
@@ -469,14 +474,14 @@ docker-compose up -d
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: wap-mirrormaker
+  name: streamforge
 spec:
   replicas: 3
   template:
     spec:
       containers:
       - name: mirrormaker
-        image: wap-mirrormaker-rust:latest
+        image: streamforge:latest
         resources:
           limits:
             memory: 512Mi
@@ -489,7 +494,7 @@ See [DOCKER.md](DOCKER.md) for complete deployment guide.
 
 ### Q: How does it compare to Kafka Connect?
 
-A: WAP MirrorMaker is simpler and more focused. It excels at high-performance mirroring with advanced filtering/transformation. Kafka Connect is better for complex integrations with many connectors.
+A: StreamForge is simpler and more focused. It excels at high-performance mirroring with advanced filtering/transformation. Kafka Connect is better for complex integrations with many connectors.
 
 ### Q: Can I use it with Confluent Cloud?
 

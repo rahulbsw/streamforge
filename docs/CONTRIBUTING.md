@@ -1,6 +1,11 @@
+---
+title: Contributing
+nav_order: 12
+---
+
 # Contributing Guide
 
-Thank you for considering contributing to WAP MirrorMaker! This guide will help you get started.
+Thank you for considering contributing to StreamForge! This guide will help you get started.
 
 ## Table of Contents
 
@@ -33,7 +38,7 @@ Thank you for considering contributing to WAP MirrorMaker! This guide will help 
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd wap-mirrormaker-rust
+cd streamforge
 
 # Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -84,7 +89,7 @@ cargo install rust-analyzer
 ```bash
 # Clone repository
 git clone <repository-url>
-cd wap-mirrormaker-rust
+cd streamforge
 
 # Build debug version
 cargo build
@@ -93,8 +98,8 @@ cargo build
 cargo build --release
 
 # Binary locations
-./target/debug/wap-mirrormaker-rust      # Debug
-./target/release/wap-mirrormaker-rust    # Release
+./target/debug/streamforge      # Debug
+./target/release/streamforge    # Release
 ```
 
 ### IDE Setup
@@ -124,9 +129,9 @@ cargo build --release
       "request": "launch",
       "name": "Debug",
       "cargo": {
-        "args": ["build", "--bin=wap-mirrormaker-rust"],
+        "args": ["build", "--bin=streamforge"],
         "filter": {
-          "name": "wap-mirrormaker-rust",
+          "name": "streamforge",
           "kind": "bin"
         }
       },
@@ -199,7 +204,7 @@ bin/kafka-console-producer.sh \
 ## Project Structure
 
 ```
-wap-mirrormaker-rust/
+streamforge/
 ├── src/
 │   ├── main.rs              # Application entry point
 │   ├── lib.rs               # Library root
@@ -360,7 +365,7 @@ Create file in `tests/`:
 
 ```rust
 // tests/integration_test.rs
-use wap_mirrormaker_rust::filter::*;
+use streamforge::filter::*;
 use serde_json::json;
 
 #[test]
@@ -400,7 +405,7 @@ Example benchmark:
 
 ```rust
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use wap_mirrormaker_rust::filter::*;
+use streamforge::filter::*;
 use serde_json::json;
 
 fn filter_benchmark(c: &mut Criterion) {
@@ -737,7 +742,7 @@ git push origin --delete feature/my-feature
 RUST_LOG=debug cargo run
 
 # Specific module
-RUST_LOG=wap_mirrormaker_rust::filter=trace cargo run
+RUST_LOG=streamforge::filter=trace cargo run
 
 # With debugger (VS Code)
 # Set breakpoints and press F5
@@ -752,7 +757,7 @@ RUST_LOG=wap_mirrormaker_rust::filter=trace cargo run
 
 # Profile
 cargo build --release
-perf record --call-graph dwarf ./target/release/wap-mirrormaker-rust
+perf record --call-graph dwarf ./target/release/streamforge
 
 # Generate flamegraph
 perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg

@@ -1,6 +1,6 @@
 title: Streamforge Documentation
 description: High-performance Kafka streaming toolkit built in Rust
-theme: minima
+remote_theme: just-the-docs/just-the-docs
 url: "https://github.datasierra.com"
 baseurl: "/streamforge"
 
@@ -15,3 +15,47 @@ exclude:
   - "development/internal"
   - Gemfile
   - Gemfile.lock
+
+# just-the-docs configuration
+color_scheme: dark   # options: default (light), dark
+
+# Navigation
+nav_sort: case_insensitive
+
+# Search
+search_enabled: true
+search_tokenizer_separator: /[\s/]+/
+
+# Footer
+footer_content: "StreamForge — High-performance Kafka streaming toolkit. Apache 2.0 Licensed."
+
+# Callouts (for notes/warnings in docs)
+callouts_level: quiet
+callouts:
+  highlight:
+    title: Note
+    color: blue
+  important:
+    title: Important
+    color: yellow
+  new:
+    title: New
+    color: green
+  warning:
+    title: Warning
+    color: red
+
+# Aux nav links
+aux_links:
+  "GitHub":
+    - "https://github.com/rahulbsw/streamforge"
+  "crates.io":
+    - "https://crates.io/crates/streamforge"
+aux_links_new_tab: true
+
+# Back to top
+back_to_top: true
+back_to_top_text: "Back to top"
+
+# Last edit timestamp
+last_edit_time_format: "%b %e %Y at %I:%M %p"

@@ -1,3 +1,9 @@
+---
+title: Docker
+nav_order: 6
+parent: Deployment
+---
+
 # Docker Deployment Guide
 
 ## Overview
@@ -29,12 +35,12 @@ Two Dockerfile options are provided:
 
 **Dynamic version (recommended):**
 ```bash
-docker build -t wap-mirrormaker-rust:latest .
+docker build -t streamforge:latest .
 ```
 
 **Static version:**
 ```bash
-docker build -f Dockerfile.static -t wap-mirrormaker-rust:static .
+docker build -f Dockerfile.static -t streamforge:static .
 ```
 
 ### 2. Create Configuration
@@ -51,17 +57,17 @@ vim config.json
 
 ```bash
 docker run -d \
-  --name wap-mirrormaker \
+  --name streamforge \
   -v $(pwd)/config.json:/app/config/config.json:ro \
   -e RUST_LOG=info \
   --restart unless-stopped \
-  wap-mirrormaker-rust:latest
+  streamforge:latest
 ```
 
 ### 4. Check Logs
 
 ```bash
-docker logs -f wap-mirrormaker
+docker logs -f streamforge
 ```
 
 ## Docker Compose
@@ -109,10 +115,10 @@ docker-compose --profile static up -d mirrormaker-static
 
 ```bash
 docker run -d \
-  --name wap-mirrormaker \
+  --name streamforge \
   -v $(pwd)/config.json:/app/config/config.json:ro \  # Config (read-only)
   -v $(pwd)/logs:/app/logs \                          # Logs (optional)
-  wap-mirrormaker-rust:latest
+  streamforge:latest
 ```
 
 ### Network Modes
@@ -139,12 +145,12 @@ docker run --network kafka-network ...
 
 ```bash
 docker run -d \
-  --name wap-mirrormaker \
+  --name streamforge \
   --cpus="2" \
   --memory="512m" \
   --memory-reservation="256m" \
   -v $(pwd)/config.json:/app/config/config.json:ro \
-  wap-mirrormaker-rust:latest
+  streamforge:latest
 ```
 
 ### In docker-compose.yml
@@ -168,13 +174,13 @@ The Dockerfile includes a health check:
 
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep -f wap-mirrormaker-rust || exit 1
+    CMD pgrep -f streamforge || exit 1
 ```
 
 ### Check Health Status
 
 ```bash
-docker inspect --format='{{json .State.Health}}' wap-mirrormaker | jq
+docker inspect --format='{{json .State.Health}}' streamforge | jq
 ```
 
 ## Logging
@@ -183,13 +189,13 @@ docker inspect --format='{{json .State.Health}}' wap-mirrormaker | jq
 
 ```bash
 # Follow logs
-docker logs -f wap-mirrormaker
+docker logs -f streamforge
 
 # Last 100 lines
-docker logs --tail 100 wap-mirrormaker
+docker logs --tail 100 streamforge
 
 # With timestamps
-docker logs -f --timestamps wap-mirrormaker
+docker logs -f --timestamps streamforge
 ```
 
 ### Structured Logging
@@ -204,7 +210,7 @@ docker run -e RUST_LOG=info ...
 docker run -e RUST_LOG=debug ...
 
 # Module-specific
-docker run -e RUST_LOG=wap_mirrormaker_rust::kafka=debug,wap_mirrormaker_rust::processor=trace ...
+docker run -e RUST_LOG=streamforge::kafka=debug,streamforge::processor=trace ...
 ```
 
 ## Image Size Comparison
@@ -222,7 +228,7 @@ docker run -e RUST_LOG=wap_mirrormaker_rust::kafka=debug,wap_mirrormaker_rust::p
 ```bash
 docker buildx build \
   --platform linux/arm64 \
-  -t wap-mirrormaker-rust:arm64 \
+  -t streamforge:arm64 \
   .
 ```
 
@@ -231,7 +237,7 @@ docker buildx build \
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t wap-mirrormaker-rust:latest \
+  -t streamforge:latest \
   --push \
   .
 ```
@@ -244,7 +250,7 @@ Both Dockerfiles use non-root user by default.
 
 ```bash
 # Verify
-docker run --rm wap-mirrormaker-rust:latest id
+docker run --rm streamforge:latest id
 # Should show: uid=65532(nonroot) gid=65532(nonroot)
 ```
 
@@ -255,7 +261,7 @@ docker run -d \
   --read-only \
   --tmpfs /tmp \
   -v $(pwd)/config.json:/app/config/config.json:ro \
-  wap-mirrormaker-rust:latest
+  streamforge:latest
 ```
 
 ### 3. Drop Capabilities
@@ -264,14 +270,14 @@ docker run -d \
 docker run -d \
   --cap-drop=ALL \
   --security-opt=no-new-privileges:true \
-  wap-mirrormaker-rust:latest
+  streamforge:latest
 ```
 
 ### 4. Complete Secure Configuration
 
 ```bash
 docker run -d \
-  --name wap-mirrormaker-secure \
+  --name streamforge-secure \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=10m \
   --cap-drop=ALL \
@@ -280,7 +286,7 @@ docker run -d \
   --memory="512m" \
   --pids-limit=100 \
   -v $(pwd)/config.json:/app/config/config.json:ro \
-  wap-mirrormaker-rust:latest
+  streamforge:latest
 ```
 
 ## Kubernetes Deployment
@@ -291,16 +297,16 @@ docker run -d \
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: wap-mirrormaker
+  name: streamforge
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: wap-mirrormaker
+      app: streamforge
   template:
     metadata:
       labels:
-        app: wap-mirrormaker
+        app: streamforge
     spec:
       securityContext:
         runAsNonRoot: true
@@ -308,7 +314,7 @@ spec:
         fsGroup: 65532
       containers:
       - name: mirrormaker
-        image: wap-mirrormaker-rust:latest
+        image: streamforge:latest
         imagePullPolicy: Always
         env:
         - name: CONFIG_FILE
@@ -348,7 +354,7 @@ metadata:
 data:
   config.json: |
     {
-      "appid": "wap-mirrormaker",
+      "appid": "streamforge",
       "bootstrap": "kafka-broker:9092",
       "input": "source-topic",
       "output": "destination-topic",
@@ -363,12 +369,12 @@ data:
 
 ```bash
 # Check logs
-docker logs wap-mirrormaker
+docker logs streamforge
 
 # Run interactively
 docker run --rm -it \
   -v $(pwd)/config.json:/app/config/config.json:ro \
-  wap-mirrormaker-rust:latest
+  streamforge:latest
 ```
 
 ### Config Validation
@@ -377,7 +383,7 @@ docker run --rm -it \
 # Test config file
 docker run --rm \
   -v $(pwd)/config.json:/app/config/config.json:ro \
-  wap-mirrormaker-rust:latest --help
+  streamforge:latest --help
 ```
 
 ### Network Issues
@@ -403,17 +409,17 @@ chmod 644 config.json
 ### Container Stats
 
 ```bash
-docker stats wap-mirrormaker
+docker stats streamforge
 ```
 
 ### Resource Usage
 
 ```bash
 # CPU and memory
-docker inspect wap-mirrormaker | jq '.[0].HostConfig.Memory'
+docker inspect streamforge | jq '.[0].HostConfig.Memory'
 
 # Current usage
-docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" wap-mirrormaker
+docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" streamforge
 ```
 
 ## CI/CD Integration
@@ -434,15 +440,15 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Build Docker image
-      run: docker build -t wap-mirrormaker-rust:${{ github.sha }} .
+      run: docker build -t streamforge:${{ github.sha }} .
 
     - name: Run tests
-      run: docker run --rm wap-mirrormaker-rust:${{ github.sha }} cargo test
+      run: docker run --rm streamforge:${{ github.sha }} cargo test
 
     - name: Push to registry
       run: |
         echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
-        docker push wap-mirrormaker-rust:${{ github.sha }}
+        docker push streamforge:${{ github.sha }}
 ```
 
 ## Best Practices Summary
@@ -464,16 +470,16 @@ jobs:
 
 ```bash
 # Tag
-docker tag wap-mirrormaker-rust:latest your-registry.com/wap-mirrormaker-rust:latest
+docker tag streamforge:latest your-registry.com/streamforge:latest
 
 # Push
-docker push your-registry.com/wap-mirrormaker-rust:latest
+docker push your-registry.com/streamforge:latest
 ```
 
 ### Pull from Registry
 
 ```bash
-docker pull your-registry.com/wap-mirrormaker-rust:latest
+docker pull your-registry.com/streamforge:latest
 ```
 
 ## Questions?

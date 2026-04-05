@@ -766,4 +766,4 @@ kafka:
 
 - [Hash Functions & Caching](HASH_AND_CACHE.md)
 - [Performance Guide](PERFORMANCE.md)
-- [Security Configuration](SECURITY.md)
+- [Security Configuration](SECURITY_CONFIGURATION.md)

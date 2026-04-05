@@ -1,3 +1,8 @@
+---
+title: DSL Reference
+nav_order: 5
+---
+
 # Advanced DSL Guide
 
 This guide covers advanced filtering and transformation capabilities including array operations, regular expressions, and arithmetic operations.
@@ -1329,5 +1334,5 @@ You can combine these advanced features with existing boolean logic:
 ## Next Steps
 
 - See [ADVANCED_FILTERS.md](ADVANCED_FILTERS.md) for boolean logic
-- See [README.md](README.md) for basic usage
+- See [README.md](../README.md) for basic usage
 - See [QUICKSTART.md](QUICKSTART.md) for getting started

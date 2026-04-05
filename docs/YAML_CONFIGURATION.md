@@ -1,6 +1,11 @@
+---
+title: Configuration
+nav_order: 4
+---
+
 # YAML Configuration Guide
 
-WAP MirrorMaker now supports both JSON and YAML configuration formats. YAML is recommended for complex configurations with multiple filters and transformations due to its superior readability.
+StreamForge now supports both JSON and YAML configuration formats. YAML is recommended for complex configurations with multiple filters and transformations due to its superior readability.
 
 ## Table of Contents
 
@@ -43,10 +48,10 @@ The configuration parser automatically detects the format based on file extensio
 
 ```bash
 # YAML format
-CONFIG_FILE=config.yaml ./wap-mirrormaker-rust
+CONFIG_FILE=config.yaml ./streamforge
 
 # JSON format (backward compatible)
-CONFIG_FILE=config.json ./wap-mirrormaker-rust
+CONFIG_FILE=config.json ./streamforge
 ```
 
 **Supported extensions:**
@@ -60,7 +65,7 @@ CONFIG_FILE=config.json ./wap-mirrormaker-rust
 
 **YAML** (config.yaml):
 ```yaml
-appid: wap-mirrormaker
+appid: streamforge
 bootstrap: kafka:9092
 input: source-topic
 output: destination-topic
@@ -75,7 +80,7 @@ compression:
 **JSON** (config.json):
 ```json
 {
-  "appid": "wap-mirrormaker",
+  "appid": "streamforge",
   "bootstrap": "kafka:9092",
   "input": "source-topic",
   "output": "destination-topic",
@@ -443,7 +448,7 @@ transform: |
 
 ```yaml
 # Development environment configuration
-appid: wap-mirrormaker-dev
+appid: streamforge-dev
 bootstrap: localhost:9092
 input: dev-events
 offset: earliest  # Start from beginning for dev
@@ -462,7 +467,7 @@ routing:
 
 ```yaml
 # Production environment configuration
-appid: wap-mirrormaker-prod
+appid: streamforge-prod
 bootstrap: prod-kafka-1:9092,prod-kafka-2:9092,prod-kafka-3:9092
 target_broker: prod-kafka-target-1:9092,prod-kafka-target-2:9092
 input: production-events
@@ -517,7 +522,7 @@ yamllint config.yaml
 yq eval config.yaml
 
 # Test loading
-./wap-mirrormaker-rust --help  # If no error, config is valid
+./streamforge --help  # If no error, config is valid
 ```
 
 ### Common YAML Errors
@@ -575,9 +580,9 @@ filter: "/path:value"
 
 ## See Also
 
-- [config.example.yaml](config.example.yaml) - Simple YAML example
-- [config.multidest.yaml](config.multidest.yaml) - Multi-destination YAML
-- [config.advanced.yaml](config.advanced.yaml) - Advanced YAML with all features
+- [config.example.yaml](../examples/configs/config.example.yaml) - Simple YAML example
+- [config.multidest.yaml](../examples/configs/config.multidest.yaml) - Multi-destination YAML
+- [config.advanced.yaml](../examples/configs/config.advanced.yaml) - Advanced YAML with all features
 - [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Filter and transform syntax
 - [USAGE.md](USAGE.md) - Complete use cases
 
@@ -585,5 +590,5 @@ filter: "/path:value"
 
 **Try it now!** Copy one of the YAML examples and run:
 ```bash
-CONFIG_FILE=config.yaml ./wap-mirrormaker-rust
+CONFIG_FILE=config.yaml ./streamforge
 ```

@@ -1,4 +1,4 @@
-# WAP MirrorMaker Configuration - YAML Format
+# StreamForge Configuration - YAML Format
 # Simple single-destination mirroring example
 
 appid: streamforge

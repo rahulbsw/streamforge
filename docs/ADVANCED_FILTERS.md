@@ -232,7 +232,7 @@ Messages can match multiple destinations and be routed to all of them!
 
 ```json
 {
-  "appid": "wap-mirrormaker-advanced",
+  "appid": "streamforge-advanced",
   "bootstrap": "kafka-source:9092",
   "input": "raw-events",
   "target_broker": "kafka-target:9092",
@@ -324,9 +324,9 @@ echo '{"message": {"siteId": 5000, "status": "active", "confId": 456}}' | \
 
 ```bash
 # Enable debug logging
-RUST_LOG=wap_mirrormaker_rust::processor=debug \
+RUST_LOG=streamforge::processor=debug \
   CONFIG_FILE=config.advanced-filters.example.json \
-  ./target/release/wap-mirrormaker-rust
+  ./target/release/streamforge
 ```
 
 You'll see:

@@ -1,6 +1,12 @@
+---
+title: Scaling
+nav_order: 8
+parent: Deployment
+---
+
 # Scaling Guide
 
-Complete guide to scaling WAP MirrorMaker for high-throughput production deployments.
+Complete guide to scaling StreamForge for high-throughput production deployments.
 
 ## Table of Contents
 
@@ -28,7 +34,7 @@ Complete guide to scaling WAP MirrorMaker for high-throughput production deploym
     │             │             │
     ▼             ▼             ▼
 ┌─────────┐ ┌─────────┐ ┌─────────┐
-│Instance1│ │Instance2│ │Instance3│  Consumer Group: "wap-mirrormaker"
+│Instance1│ │Instance2│ │Instance3│  Consumer Group: "streamforge"
 │P0,P1,P2 │ │P3,P4,P5 │ │P6,P7,P8 │  Each gets partitions
 └────┬────┘ └────┬────┘ └────┬────┘
      │           │           │
@@ -86,7 +92,7 @@ Max Instances = Number of Source Topic Partitions
 
 ```json
 {
-  "appid": "wap-mirrormaker",
+  "appid": "streamforge",
   "bootstrap": "kafka:9092",
   "input": "events",
   "output": "events-mirror",
@@ -108,7 +114,7 @@ Max Instances = Number of Source Topic Partitions
 version: '3.8'
 services:
   mirrormaker:
-    image: wap-mirrormaker-rust:latest
+    image: streamforge:latest
     deploy:
       replicas: 5  # Scale to 5 instances
     environment:
@@ -128,20 +134,20 @@ docker-compose up -d --scale mirrormaker=5
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: wap-mirrormaker
+  name: streamforge
 spec:
   replicas: 5  # Number of instances
   selector:
     matchLabels:
-      app: wap-mirrormaker
+      app: streamforge
   template:
     metadata:
       labels:
-        app: wap-mirrormaker
+        app: streamforge
     spec:
       containers:
       - name: mirrormaker
-        image: wap-mirrormaker-rust:latest
+        image: streamforge:latest
         resources:
           requests:
             memory: "256Mi"
@@ -164,7 +170,7 @@ spec:
 
 Scale with kubectl:
 ```bash
-kubectl scale deployment wap-mirrormaker --replicas=10
+kubectl scale deployment streamforge --replicas=10
 ```
 
 #### Horizontal Pod Autoscaler (HPA)
@@ -173,12 +179,12 @@ kubectl scale deployment wap-mirrormaker --replicas=10
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: wap-mirrormaker-hpa
+  name: streamforge-hpa
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: wap-mirrormaker
+    name: streamforge
   minReplicas: 3
   maxReplicas: 10
   metrics:
@@ -307,7 +313,7 @@ Allocate 512MB for safety
 docker run \
   --cpus="4.0" \
   --memory="1g" \
-  wap-mirrormaker-rust
+  streamforge
 ```
 
 **Kubernetes:**
@@ -374,7 +380,7 @@ kafka-topics.sh --alter \
   --bootstrap-server kafka:9092
 
 # Restart consumers to pick up new partitions
-kubectl rollout restart deployment wap-mirrormaker
+kubectl rollout restart deployment streamforge
 ```
 
 **Note:** Cannot reduce partition count (Kafka limitation).
@@ -385,9 +391,9 @@ kubectl rollout restart deployment wap-mirrormaker
 
 ```json
 {
-  "appid": "wap-mirrormaker",
+  "appid": "streamforge",
   "consumer_properties": {
-    "group.id": "wap-mirrormaker",
+    "group.id": "streamforge",
     "enable.auto.commit": "false",
     "auto.offset.reset": "latest",
     "session.timeout.ms": "30000",
@@ -432,7 +438,7 @@ Monitor lag:
 ```bash
 kafka-consumer-groups.sh \
   --bootstrap-server kafka:9092 \
-  --group wap-mirrormaker \
+  --group streamforge \
   --describe
 ```
 
@@ -510,18 +516,18 @@ let partition_key = format!("{}-{}", user_id, timestamp % 1000);
 
 ```bash
 # Stage 1: Start with 3 instances
-kubectl scale deployment wap-mirrormaker --replicas=3
+kubectl scale deployment streamforge --replicas=3
 
 # Monitor for 30 minutes
 # Check: CPU, memory, lag, throughput
 
 # Stage 2: Scale to 5 instances
-kubectl scale deployment wap-mirrormaker --replicas=5
+kubectl scale deployment streamforge --replicas=5
 
 # Monitor...
 
 # Stage 3: Scale to 10 instances
-kubectl scale deployment wap-mirrormaker --replicas=10
+kubectl scale deployment streamforge --replicas=10
 ```
 
 ### Pattern 3: Auto-Scaling
@@ -537,7 +543,7 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: wap-mirrormaker
+    name: streamforge
   minReplicas: 3
   maxReplicas: 10
   metrics:
@@ -548,7 +554,7 @@ spec:
         selector:
           matchLabels:
             topic: events
-            group: wap-mirrormaker
+            group: streamforge
       target:
         type: AverageValue
         averageValue: "1000"  # Scale when lag > 1000
@@ -583,7 +589,7 @@ Each region processes independently, different consumer groups.
 
 **Consumer Lag:**
 ```bash
-kafka-consumer-groups.sh --describe --group wap-mirrormaker
+kafka-consumer-groups.sh --describe --group streamforge
 ```
 
 Watch for:
@@ -623,7 +629,7 @@ Stats: processed=10000 (1000.0/s), filtered=100 (10.0/s),
 1. **Monitor rebalancing** (1-5 minutes)
 2. **Verify partition distribution**
    ```bash
-   kafka-consumer-groups.sh --describe --group wap-mirrormaker
+   kafka-consumer-groups.sh --describe --group streamforge
    ```
 3. **Check per-instance throughput**
 4. **Adjust thread count if needed**
@@ -673,13 +679,13 @@ Don't scale blindly:
 # Kubernetes
 livenessProbe:
   exec:
-    command: ["pgrep", "wap-mirrormaker-rust"]
+    command: ["pgrep", "streamforge"]
   initialDelaySeconds: 10
   periodSeconds: 30
 
 readinessProbe:
   exec:
-    command: ["pgrep", "wap-mirrormaker-rust"]
+    command: ["pgrep", "streamforge"]
   initialDelaySeconds: 5
   periodSeconds: 10
 ```
@@ -837,7 +843,7 @@ resources:
 **Check:**
 ```bash
 # Verify consumer group
-kafka-consumer-groups.sh --describe --group wap-mirrormaker
+kafka-consumer-groups.sh --describe --group streamforge
 
 # Check instance count vs partitions
 kubectl get pods | grep mirrormaker | wc -l
@@ -859,7 +865,7 @@ kubectl get pods | grep mirrormaker | wc -l
 **Check:**
 ```bash
 # Check logs for rebalance messages
-kubectl logs -f deployment/wap-mirrormaker | grep rebalance
+kubectl logs -f deployment/streamforge | grep rebalance
 ```
 
 **Solution:**

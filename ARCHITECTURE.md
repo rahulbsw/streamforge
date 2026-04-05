@@ -1,6 +1,6 @@
 # Architecture Overview
 
-High-level architecture and design principles for Streamforge (formerly WAP MirrorMaker Rust).
+High-level architecture and design principles for Streamforge (formerly StreamForge).
 
 ---
 

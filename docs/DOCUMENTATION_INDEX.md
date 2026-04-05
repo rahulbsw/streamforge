@@ -1,3 +1,8 @@
+---
+title: All Docs
+nav_order: 14
+---
+
 # Documentation Index
 
 Complete guide to all Streamforge documentation.
@@ -13,7 +18,7 @@ Complete guide to all Streamforge documentation.
 1. [examples/README.md](../examples/README.md) - Configuration examples
 2. [YAML_CONFIGURATION.md](YAML_CONFIGURATION.md) - YAML vs JSON (recommended reading!)
 3. [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Complete DSL reference
-4. [config.advanced.yaml](../examples/config.advanced.yaml) - 17 production examples
+4. [config.advanced.yaml](../examples/configs/config.advanced.yaml) - 17 production examples
 
 ### Ready to Deploy?
 1. [DOCKER.md](DOCKER.md) - Docker deployment
@@ -73,17 +78,17 @@ Complete guide to all Streamforge documentation.
 See [examples/README.md](../examples/README.md) for comprehensive configuration examples and patterns.
 
 **YAML Format (Recommended):**
-- [config.example.yaml](../examples/config.example.yaml) - Simple single-destination
-- [config.multidest.yaml](../examples/config.multidest.yaml) - Multi-destination with comments
-- [config.advanced.yaml](../examples/config.advanced.yaml) - 17 production examples
+- [config.example.yaml](../examples/configs/config.example.yaml) - Simple single-destination
+- [config.multidest.yaml](../examples/configs/config.multidest.yaml) - Multi-destination with comments
+- [config.advanced.yaml](../examples/configs/config.advanced.yaml) - 17 production examples
 - 🆕 [config.envelope-simple.yaml](../examples/config.envelope-simple.yaml) - 6 envelope patterns (concise)
 - 🆕 [config.envelope-features.yaml](../examples/config.envelope-features.yaml) - 8 envelope examples (comprehensive)
 - 🆕 [config.with-observability.yaml](../examples/config.with-observability.yaml) - Observability with metrics
 
 **JSON Format (Backward Compatible):**
-- [config.example.json](../examples/config.example.json) - Simple single-destination
-- [config.multidest.example.json](../examples/config.multidest.example.json) - Multi-destination
-- [config.advanced.example.json](../examples/config.advanced.example.json) - Advanced examples
+- [config.example.json](../examples/configs/config.example.json) - Simple single-destination
+- [config.multi-destination.example.json](../examples/configs/config.multi-destination.example.json) - Multi-destination
+- [config.advanced.example.json](../examples/configs/config.advanced.example.json) - Advanced examples
 
 ---
 

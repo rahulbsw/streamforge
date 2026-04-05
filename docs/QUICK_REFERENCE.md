@@ -1,4 +1,4 @@
-# WAP MirrorMaker - Quick Reference Card
+# StreamForge - Quick Reference Card
 
 ## Installation
 
@@ -7,20 +7,20 @@
 cargo build --release
 
 # Or use Docker
-docker pull wap-mirrormaker-rust:latest
+docker pull streamforge:latest
 ```
 
 ## Running
 
 ```bash
 # Direct
-CONFIG_FILE=config.json ./target/release/wap-mirrormaker-rust
+CONFIG_FILE=config.json ./target/release/streamforge
 
 # Docker
-docker run -v $(pwd)/config.json:/app/config/config.json:ro wap-mirrormaker-rust
+docker run -v $(pwd)/config.json:/app/config/config.json:ro streamforge
 
 # With logging
-RUST_LOG=debug CONFIG_FILE=config.json ./wap-mirrormaker-rust
+RUST_LOG=debug CONFIG_FILE=config.json ./streamforge
 ```
 
 ## Basic Configuration
@@ -208,7 +208,7 @@ Stats: processed=10000 (1000.0/s), filtered=100 (10.0/s),
 ```bash
 kafka-consumer-groups.sh \
   --bootstrap-server kafka:9092 \
-  --group wap-mirrormaker \
+  --group streamforge \
   --describe
 ```
 
@@ -221,7 +221,7 @@ kafka-consumer-groups.sh \
 docker logs mirrormaker
 
 # Run interactively
-docker run --rm -it -v $(pwd)/config.json:/app/config/config.json:ro wap-mirrormaker-rust
+docker run --rm -it -v $(pwd)/config.json:/app/config/config.json:ro streamforge
 ```
 
 ### No Messages Flowing
@@ -244,7 +244,7 @@ RUST_LOG=debug docker run ...
 # Reduce threads or simplify filters
 
 # Profile
-perf record -p $(pgrep wap-mirrormaker)
+perf record -p $(pgrep streamforge)
 ```
 
 ### High Memory Usage
@@ -399,4 +399,4 @@ resources:
 
 ---
 
-**Quick Help**: `RUST_LOG=debug ./wap-mirrormaker-rust --help`
+**Quick Help**: `RUST_LOG=debug ./streamforge --help`

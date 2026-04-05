@@ -291,6 +291,5 @@ let stats = cache.stats();
 
 ## See Also
 
-- [Full Documentation](docs/HASH_AND_CACHE.md)
-- [Examples](examples/config.hash-and-cache.yaml)
-- [Implementation Summary](IMPLEMENTATION_SUMMARY.md)
+- [Full Documentation](../../HASH_AND_CACHE.md)
+- [Examples](../../../examples/config.hash-and-cache.yaml)
