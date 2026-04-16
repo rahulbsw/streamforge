@@ -134,26 +134,10 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Main processing loop with concurrent message processing
-
-    /// Maximum messages to collect before processing as a batch.
-    /// Higher values improve throughput but increase latency and memory usage.
-    /// Typical range: 50-500 depending on message size and processing complexity.
-    const BATCH_SIZE: usize = 100;
-
-    /// Maximum time (ms) to wait for batch to fill before processing partial batch.
-    /// Lower values reduce latency during low-traffic periods.
-    /// Higher values maximize batch utilization during high traffic.
-    /// Should be much smaller than consumer session timeout (default 30s).
-    const BATCH_FILL_TIMEOUT_MS: u64 = 100;
-
-    /// Multiplier applied to config.threads to determine concurrent processing limit.
-    /// Example: threads=4, factor=10 → parallelism=40 concurrent operations.
-    /// Higher values improve CPU utilization for I/O-bound tasks but increase memory overhead.
-    /// Adjust based on: I/O wait time, message processing duration, available memory.
-    const PARALLELISM_FACTOR: usize = 10;
-
-    let parallelism = (config.threads * PARALLELISM_FACTOR).max(1);
+    // Main processing loop — batch sizes and parallelism from performance config
+    let batch_size = config.performance.consumer_batch_size;
+    let batch_timeout_ms = config.performance.consumer_batch_timeout_ms;
+    let parallelism = (config.threads * config.performance.parallelism_factor).max(1);
     let manual_commit = config.commit_strategy.manual_commit;
     let commit_mode = match config.commit_strategy.commit_mode {
         streamforge::config::CommitMode::Async => rdkafka::consumer::CommitMode::Async,
@@ -161,8 +145,8 @@ async fn main() -> Result<()> {
     };
 
     info!(
-        "Starting concurrent message processing (parallelism: {}, batch_size: {})",
-        parallelism, BATCH_SIZE
+        "Starting concurrent message processing (parallelism: {}, batch_size: {}, timeout: {}ms)",
+        parallelism, batch_size, batch_timeout_ms
     );
 
     if manual_commit {
@@ -176,11 +160,11 @@ async fn main() -> Result<()> {
 
     loop {
         // Collect batch of messages with single deadline
-        let mut batch = Vec::with_capacity(BATCH_SIZE);
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(BATCH_FILL_TIMEOUT_MS);
+        let mut batch = Vec::with_capacity(batch_size);
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(batch_timeout_ms);
         let mut stream_ended = false;
 
-        for _ in 0..BATCH_SIZE {
+        for _ in 0..batch_size {
             match tokio::time::timeout_at(deadline, message_stream.next()).await {
                 Ok(Some(msg_result)) => batch.push(msg_result),
                 Ok(None) => {
@@ -458,15 +442,36 @@ fn create_default_config() -> MirrorMakerConfig {
         commit_strategy: Default::default(),
         cache: None,
         observability: Default::default(),
+        performance: Default::default(),
     }
 }
 
 fn create_consumer(config: &MirrorMakerConfig) -> Result<StreamConsumer> {
+    let p = &config.performance;
     let mut consumer_config = ClientConfig::new();
     consumer_config
         .set("bootstrap.servers", &config.bootstrap)
         .set("group.id", &config.appid)
-        .set("auto.offset.reset", &config.offset);
+        .set("auto.offset.reset", &config.offset)
+        // ── Consumer fetch tuning ────────────────────────────────────────────
+        // Minimum bytes the broker accumulates before sending a fetch response.
+        // Default=1 causes one round-trip per message. 64KB–1MB batches broker-side.
+        .set("fetch.min.bytes", p.fetch_min_bytes.to_string())
+        // Max ms the broker waits to reach fetch.min.bytes.
+        .set("fetch.wait.max.ms", p.fetch_max_wait_ms.to_string())
+        // Max bytes fetched per partition per request.
+        .set(
+            "max.partition.fetch.bytes",
+            p.max_partition_fetch_bytes.to_string(),
+        )
+        // rdkafka internal pre-fetch buffer. Larger = smoother throughput at peak.
+        .set(
+            "queued.max.messages.kbytes",
+            p.queued_max_messages_kbytes.to_string(),
+        )
+        // Session and heartbeat — keep defaults unless network is unstable
+        .set("session.timeout.ms", "30000")
+        .set("heartbeat.interval.ms", "3000");
 
     // Configure commit strategy based on config
     let auto_commit = !config.commit_strategy.manual_commit;

@@ -105,6 +105,11 @@ pub struct MirrorMakerConfig {
     /// Observability configuration (metrics, monitoring)
     #[serde(default)]
     pub observability: ObservabilityConfig,
+
+    /// Performance tuning — consumer poll sizes, producer batching, acks.
+    /// All settings have production-safe defaults; override to increase throughput.
+    #[serde(default)]
+    pub performance: PerformanceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -709,6 +714,169 @@ impl Default for ObservabilityConfig {
             metrics_path: default_metrics_path(),
             lag_monitoring_enabled: default_lag_monitoring(),
             lag_monitoring_interval_secs: default_lag_interval(),
+        }
+    }
+}
+
+// ============================================================================
+// PerformanceConfig
+// ============================================================================
+
+/// Fine-grained throughput tuning for the consumer poll loop and Kafka producer.
+///
+/// All settings are optional — the defaults are safe for most workloads.
+/// To maximize throughput you typically want to increase the batch sizes
+/// and relax acks on the producer side.
+///
+/// ```yaml
+/// performance:
+///   # Consumer
+///   consumer_batch_size: 1000        # messages per poll batch (default 500)
+///   consumer_batch_timeout_ms: 50    # max wait to fill batch (default 50ms)
+///   fetch_min_bytes: 131072          # 128KB — broker waits until this much data is ready
+///   fetch_max_wait_ms: 100           # max ms broker waits for fetch.min.bytes
+///   queued_max_messages_kbytes: 524288  # rdkafka pre-fetch buffer = 512MB
+///   parallelism_factor: 10           # concurrent produce futures = threads * factor
+///
+///   # Producer
+///   producer_acks: "1"               # "all" (safest), "1" (faster), "0" (fastest, lossy)
+///   producer_batch_size_bytes: 524288  # 512KB — librdkafka batch size
+///   producer_linger_ms: 5            # batch accumulation window
+///   producer_queue_max_messages: 1000000  # max messages in produce queue
+///   producer_queue_max_kbytes: 2097152    # 2GB produce queue size
+///   message_max_bytes: 1048576       # max message size (1MB)
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceConfig {
+    // ── Consumer poll loop ─────────────────────────────────────────────────
+    /// Max messages collected per poll batch before processing.
+    /// Higher = better throughput under load; lower = lower latency per message.
+    /// Typical range: 200–2000.
+    #[serde(default = "default_consumer_batch_size")]
+    pub consumer_batch_size: usize,
+
+    /// Max milliseconds to wait filling a batch before processing a partial one.
+    /// Lower values reduce latency at low throughput; higher values reduce overhead.
+    #[serde(default = "default_consumer_batch_timeout_ms")]
+    pub consumer_batch_timeout_ms: u64,
+
+    /// Multiplier on `threads` to set the max number of concurrent produce futures.
+    /// threads=8, factor=10 → 80 produce I/Os in flight simultaneously.
+    #[serde(default = "default_parallelism_factor")]
+    pub parallelism_factor: usize,
+
+    // ── librdkafka consumer tuning ─────────────────────────────────────────
+    /// Minimum bytes the broker accumulates before responding to a fetch request.
+    /// Default 1 means the broker replies immediately even for one message.
+    /// Set to 65536–1048576 to batch broker-side and reduce round-trips.
+    /// Maps to librdkafka `fetch.min.bytes`.
+    #[serde(default = "default_fetch_min_bytes")]
+    pub fetch_min_bytes: u32,
+
+    /// Max milliseconds the broker waits to reach `fetch_min_bytes`.
+    /// Increase when `fetch_min_bytes > 1` to allow batching time.
+    /// Maps to librdkafka `fetch.wait.max.ms`.
+    #[serde(default = "default_fetch_max_wait_ms")]
+    pub fetch_max_wait_ms: u32,
+
+    /// Max bytes fetched per partition per fetch request.
+    /// Maps to librdkafka `max.partition.fetch.bytes`.
+    #[serde(default = "default_max_partition_fetch_bytes")]
+    pub max_partition_fetch_bytes: u32,
+
+    /// rdkafka internal consumer pre-fetch buffer size (KB).
+    /// Higher = more messages buffered ahead of processing = smoother throughput.
+    /// Maps to librdkafka `queued.max.messages.kbytes`.
+    #[serde(default = "default_queued_max_messages_kbytes")]
+    pub queued_max_messages_kbytes: u32,
+
+    // ── librdkafka producer tuning ─────────────────────────────────────────
+    /// Producer acknowledgement requirement.
+    /// `"all"` — wait for all ISR replicas (safest, slowest).
+    /// `"1"`   — wait for leader only (good balance).
+    /// `"0"`   — fire-and-forget (highest throughput, messages may be lost on broker crash).
+    /// Maps to librdkafka `request.required.acks`.
+    #[serde(default = "default_producer_acks")]
+    pub producer_acks: String,
+
+    /// librdkafka internal batch accumulation size in bytes.
+    /// Messages are coalesced into batches up to this size before sending.
+    /// Higher = fewer network round-trips; default 16KB is conservative.
+    /// Maps to librdkafka `batch.size`.
+    #[serde(default = "default_producer_batch_size_bytes")]
+    pub producer_batch_size_bytes: u32,
+
+    /// Time in ms to wait for a batch to fill before sending it.
+    /// `0` = send immediately (lowest latency, higher overhead).
+    /// `5`–`50` = good throughput/latency balance.
+    /// Maps to librdkafka `linger.ms` / `queue.buffering.max.ms`.
+    #[serde(default = "default_producer_linger_ms")]
+    pub producer_linger_ms: u32,
+
+    /// Max number of messages in the librdkafka produce queue.
+    /// Maps to librdkafka `queue.buffering.max.messages`.
+    #[serde(default = "default_producer_queue_max_messages")]
+    pub producer_queue_max_messages: u32,
+
+    /// Max total bytes in the librdkafka produce queue.
+    /// Maps to librdkafka `queue.buffering.max.kbytes`.
+    #[serde(default = "default_producer_queue_max_kbytes")]
+    pub producer_queue_max_kbytes: u32,
+}
+
+// Default functions for PerformanceConfig
+fn default_consumer_batch_size() -> usize {
+    500
+}
+fn default_consumer_batch_timeout_ms() -> u64 {
+    50
+}
+fn default_parallelism_factor() -> usize {
+    10
+}
+fn default_fetch_min_bytes() -> u32 {
+    1
+} // safe: no additional latency at low load
+fn default_fetch_max_wait_ms() -> u32 {
+    100
+}
+fn default_max_partition_fetch_bytes() -> u32 {
+    1_048_576
+} // 1MB per partition
+fn default_queued_max_messages_kbytes() -> u32 {
+    524_288
+} // 512MB pre-fetch buffer
+fn default_producer_acks() -> String {
+    "all".to_string()
+}
+fn default_producer_batch_size_bytes() -> u32 {
+    524_288
+} // 512KB batch (librdkafka default is 16KB)
+fn default_producer_linger_ms() -> u32 {
+    5
+}
+fn default_producer_queue_max_messages() -> u32 {
+    1_000_000
+}
+fn default_producer_queue_max_kbytes() -> u32 {
+    2_097_152
+} // 2GB queue
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            consumer_batch_size: default_consumer_batch_size(),
+            consumer_batch_timeout_ms: default_consumer_batch_timeout_ms(),
+            parallelism_factor: default_parallelism_factor(),
+            fetch_min_bytes: default_fetch_min_bytes(),
+            fetch_max_wait_ms: default_fetch_max_wait_ms(),
+            max_partition_fetch_bytes: default_max_partition_fetch_bytes(),
+            queued_max_messages_kbytes: default_queued_max_messages_kbytes(),
+            producer_acks: default_producer_acks(),
+            producer_batch_size_bytes: default_producer_batch_size_bytes(),
+            producer_linger_ms: default_producer_linger_ms(),
+            producer_queue_max_messages: default_producer_queue_max_messages(),
+            producer_queue_max_kbytes: default_producer_queue_max_kbytes(),
         }
     }
 }

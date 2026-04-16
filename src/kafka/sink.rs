@@ -58,12 +58,34 @@ impl KafkaSink {
             target_broker, output_template, is_template, compression_type
         );
 
-        // Build producer configuration
+        // Build producer configuration — tuning from performance config
+        let p = &config.performance;
         let mut producer_config = ClientConfig::new();
         producer_config
             .set("bootstrap.servers", &target_broker)
-            .set("acks", "all")
-            .set("message.timeout.ms", "60000");
+            // Acks: "all" (safest), "1" (faster), "0" (max throughput / lossy)
+            .set("request.required.acks", &p.producer_acks)
+            .set("message.timeout.ms", "60000")
+            // ── Producer batching ────────────────────────────────────────────
+            // Coalesce messages into batches up to this many bytes before sending.
+            // Default is 16KB; 512KB–1MB dramatically reduces round-trips.
+            .set("batch.size", p.producer_batch_size_bytes.to_string())
+            // Wait this long for a batch to fill before sending a partial one.
+            // 0=send immediately (low latency), 5-50ms=high throughput.
+            .set("queue.buffering.max.ms", p.producer_linger_ms.to_string())
+            // Max messages buffered in the producer queue before back-pressure.
+            .set(
+                "queue.buffering.max.messages",
+                p.producer_queue_max_messages.to_string(),
+            )
+            // Max bytes in the producer queue.
+            .set(
+                "queue.buffering.max.kbytes",
+                p.producer_queue_max_kbytes.to_string(),
+            )
+            // Retry on transient errors (leader election, network blip).
+            .set("message.send.max.retries", "5")
+            .set("retry.backoff.ms", "100");
 
         // Configure native Kafka compression
         match compression_type {
@@ -375,6 +397,7 @@ mod tests {
             commit_strategy: CommitStrategyConfig::default(),
             cache: None,
             observability: Default::default(),
+            performance: Default::default(),
         }
     }
 
