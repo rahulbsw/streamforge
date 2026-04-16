@@ -971,7 +971,7 @@ impl CachePutTransform {
         })
     }
 
-    fn extract_path<'a>(&self, value: &'a Value, path: &str) -> Option<Value> {
+    fn extract_path(&self, value: &Value, path: &str) -> Option<Value> {
         let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
         let mut current = value;
         for part in parts {
