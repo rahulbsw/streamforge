@@ -24,13 +24,54 @@ use std::collections::HashMap;
 ///   - 'msg + #{ email: msg["email"].to_lower() }'
 ///   - 'msg + #{ processed: true }'
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum DslExpr {
     /// A single Rhai expression or script string.
     Single(String),
     /// Multiple expressions — ANDed for filters, piped for transforms.
     Multi(Vec<String>),
+}
+
+// Custom deserializer — serde_yaml's untagged enum support does not reliably
+// fall through to Vec<String> when it encounters a YAML sequence inside a
+// nested struct. This visitor handles both explicitly.
+impl<'de> serde::Deserialize<'de> for DslExpr {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::{self, SeqAccess, Visitor};
+        use std::fmt;
+
+        struct DslExprVisitor;
+
+        impl<'de> Visitor<'de> for DslExprVisitor {
+            type Value = DslExpr;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a Rhai expression string or an array of expression strings")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(DslExpr::Single(v.to_string()))
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(DslExpr::Single(v))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut parts = Vec::new();
+                while let Some(s) = seq.next_element::<String>()? {
+                    parts.push(s);
+                }
+                if parts.len() == 1 {
+                    Ok(DslExpr::Single(parts.remove(0)))
+                } else {
+                    Ok(DslExpr::Multi(parts))
+                }
+            }
+        }
+
+        d.deserialize_any(DslExprVisitor)
+    }
 }
 
 impl DslExpr {
