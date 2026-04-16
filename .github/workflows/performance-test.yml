@@ -1,78 +1,549 @@
 name: Performance Tests
 
-# Manual trigger only - don't run on every commit
+# Manual trigger with configurable parameters.
+# Run this before a release or when evaluating DSL/pipeline changes.
 on:
   workflow_dispatch:
     inputs:
       messages:
-        description: 'Number of messages to test'
+        description: 'Number of messages per scenario'
         required: false
         default: '100000'
-      partitions:
-        description: 'Number of partitions'
+      threads:
+        description: 'StreamForge worker threads'
         required: false
         default: '8'
-      threads:
-        description: 'Number of threads'
+      partitions:
+        description: 'Kafka topic partitions'
         required: false
         default: '8'
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  # ==================== MICROBENCHMARKS ====================
-  criterion-benchmarks:
-    name: Criterion Benchmarks
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # JOB 1 — Rhai DSL micro-benchmarks (no Kafka needed)
+  # ══════════════════════════════════════════════════════════════════════════
+  dsl-benchmarks:
+    name: DSL Micro-benchmarks (Rhai)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libsasl2-dev \
-            libssl-dev \
-            libzstd-dev \
-            cmake \
-            pkg-config \
-            clang \
-            libclang-dev
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libsasl2-dev libssl-dev libzstd-dev cmake pkg-config clang libclang-dev
 
-      - name: Install Rust
+      - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
       - name: Run Criterion benchmarks
-        run: cargo bench --bench filter_benchmarks --bench transform_benchmarks
+        run: |
+          cargo bench \
+            --bench filter_benchmarks \
+            --bench transform_benchmarks \
+            -- --output-format bencher | tee criterion_output.txt
 
-      - name: Upload benchmark results
+      - name: Parse benchmark results
+        run: |
+          echo "## DSL Micro-benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat criterion_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload criterion results
         uses: actions/upload-artifact@v4
         with:
           name: criterion-results
-          path: target/criterion/
+          path: |
+            target/criterion/
+            criterion_output.txt
 
-  # ==================== THROUGHPUT TEST ====================
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # JOB 2 — End-to-end throughput across 3 pipeline scenarios
+  #
+  #   Scenario A — Passthrough (baseline, no filter/transform)
+  #   Scenario B — Rhai filter + transform (realistic workload)
+  #   Scenario C — Multi-destination with cache enrichment
+  # ══════════════════════════════════════════════════════════════════════════
   throughput-test:
-    name: End-to-End Throughput Test
+    name: End-to-End Throughput (${{ inputs.messages }} msgs, ${{ inputs.threads }} threads)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libsasl2-dev \
-            libssl-dev \
-            libzstd-dev \
-            cmake \
-            pkg-config \
-            clang \
-            libclang-dev \
-            kafkacat \
-            jq
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libsasl2-dev libssl-dev libzstd-dev cmake pkg-config \
+            clang libclang-dev jq curl
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      # ── Start Kafka (KRaft mode — no Zookeeper) ──────────────────────────
+      - name: Start Kafka (KRaft)
+        run: |
+          docker run -d \
+            --name perf-kafka \
+            -p 9092:9092 \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_LISTENERS="PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093" \
+            -e KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://localhost:9092" \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS="1@localhost:9093" \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP="PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT" \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_AUTO_CREATE_TOPICS_ENABLE=true \
+            -e CLUSTER_ID="perf-test-cluster-001" \
+            confluentinc/cp-kafka:7.6.0
+
+      - name: Wait for Kafka to be ready
+        run: |
+          echo "Waiting for Kafka..."
+          for i in $(seq 1 30); do
+            if docker exec perf-kafka kafka-topics \
+                --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+              echo "✓ Kafka ready after ${i}s"
+              break
+            fi
+            [ "$i" -eq 30 ] && { echo "✗ Kafka failed to start"; exit 1; }
+            sleep 2
+          done
+
+      # ── Create topics ─────────────────────────────────────────────────────
+      - name: Create test topics
+        run: |
+          P=${{ inputs.partitions }}
+          for topic in \
+            perf-passthrough-in perf-passthrough-out \
+            perf-rhai-in perf-rhai-out-active perf-rhai-out-archive \
+            perf-multi-in perf-multi-premium perf-multi-standard perf-multi-dlq; do
+            docker exec perf-kafka kafka-topics \
+              --create --if-not-exists \
+              --topic "$topic" \
+              --partitions "$P" \
+              --replication-factor 1 \
+              --bootstrap-server localhost:9092
+            echo "  created: $topic"
+          done
+
+      # ── Generate test data ────────────────────────────────────────────────
+      - name: Generate test messages
+        run: |
+          MSGS=${{ inputs.messages }}
+          python3 - "$MSGS" << 'PYEOF'
+          import json, random, time, sys
+
+          count = int(sys.argv[1])
+          tiers = ["free", "standard", "premium", "enterprise"]
+          events = ["page.view", "item.added", "checkout.started", "purchase.completed"]
+
+          with open("test_data.jsonl", "w") as f:
+              for i in range(count):
+                  f.write(json.dumps({
+                      "userId": f"usr-{i:06d}",
+                      "email": f"user{i}@example.com",
+                      "tier": random.choice(tiers),
+                      "status": "active" if random.random() > 0.1 else "suspended",
+                      "eventType": random.choice(events),
+                      "amount": round(random.uniform(1, 2000), 2),
+                      "score": random.randint(0, 100),
+                      "timestamp": int(time.time() * 1000) - random.randint(0, 60000),
+                  }) + "\n")
+
+          print(f"Generated {count} messages → test_data.jsonl")
+          PYEOF
+
+      # ══════════════════════════════════════════════════════════════════════
+      # SCENARIO A — Passthrough baseline (no filter, no transform)
+      # ══════════════════════════════════════════════════════════════════════
+      - name: "Scenario A: Passthrough baseline"
+        run: |
+          cat > config-a.yaml << 'EOF'
+          appid: perf-passthrough
+          bootstrap: localhost:9092
+          input: perf-passthrough-in
+          output: perf-passthrough-out
+          threads: ${{ inputs.threads }}
+          offset: earliest
+          observability:
+            metrics_enabled: true
+            metrics_port: 9091
+            lag_monitoring_enabled: false
+          EOF
+
+          # Start StreamForge
+          CONFIG_FILE=config-a.yaml ./target/release/streamforge > /tmp/sf-a.log 2>&1 &
+          SF_PID=$!
+          sleep 3
+
+          # Produce messages
+          T_START=$(date +%s%3N)
+          cat test_data.jsonl | docker exec -i perf-kafka \
+            kafka-console-producer \
+            --bootstrap-server localhost:9092 \
+            --topic perf-passthrough-in \
+            --batch-size 5000 \
+            --request-required-acks 1
+          T_PRODUCE=$(date +%s%3N)
+
+          # Wait for all messages to be consumed
+          MSGS=${{ inputs.messages }}
+          for i in $(seq 1 60); do
+            CONSUMED=$(curl -s http://localhost:9091/metrics \
+              | grep "^streamforge_messages_consumed_total " \
+              | awk '{printf "%.0f", $2}')
+            [ -z "$CONSUMED" ] && CONSUMED=0
+            echo "  [${i}s] consumed: $CONSUMED / $MSGS"
+            [ "$CONSUMED" -ge "$MSGS" ] && break
+            sleep 2
+          done
+
+          T_END=$(date +%s%3N)
+          DURATION_MS=$((T_END - T_START))
+          DURATION_S=$(echo "scale=2; $DURATION_MS / 1000" | bc)
+
+          CONSUMED=$(curl -s http://localhost:9091/metrics \
+            | grep "^streamforge_messages_consumed_total " \
+            | awk '{printf "%.0f", $2}')
+          THROUGHPUT=$(echo "scale=0; $CONSUMED * 1000 / $DURATION_MS" | bc)
+
+          echo "SCENARIO_A_CONSUMED=$CONSUMED"       >> scenario_results.env
+          echo "SCENARIO_A_DURATION_S=$DURATION_S"   >> scenario_results.env
+          echo "SCENARIO_A_THROUGHPUT=$THROUGHPUT"   >> scenario_results.env
+
+          echo "Scenario A: ${THROUGHPUT} msg/s in ${DURATION_S}s"
+
+          # Save metrics snapshot
+          curl -s http://localhost:9091/metrics > /tmp/metrics-a.txt
+
+          # Stop StreamForge
+          kill $SF_PID 2>/dev/null; sleep 2
+
+      # ══════════════════════════════════════════════════════════════════════
+      # SCENARIO B — Rhai filter + transform (realistic workload)
+      # ══════════════════════════════════════════════════════════════════════
+      - name: "Scenario B: Rhai filter + transform"
+        run: |
+          cat > config-b.yaml << 'EOF'
+          appid: perf-rhai
+          bootstrap: localhost:9092
+          input: perf-rhai-in
+          threads: ${{ inputs.threads }}
+          offset: earliest
+          observability:
+            metrics_enabled: true
+            metrics_port: 9092
+            lag_monitoring_enabled: false
+
+          routing:
+            destinations:
+              - output: perf-rhai-out-active
+                filter:
+                  - 'msg["status"] == "active"'
+                  - 'msg["score"] > 50'
+                  - 'not_null(msg["userId"])'
+                transform: |
+                  #{
+                    id:        msg["userId"],
+                    tier:      msg["tier"].to_upper(),
+                    email:     msg["email"].to_lower(),
+                    amount:    msg["amount"] * 1.08,
+                    processed: true,
+                    ts:        now_ms()
+                  }
+
+              - output: perf-rhai-out-archive
+                # catch-all — every message lands here too
+                transform: 'msg + #{ archived: true }'
+          EOF
+
+          CONFIG_FILE=config-b.yaml ./target/release/streamforge > /tmp/sf-b.log 2>&1 &
+          SF_PID=$!
+          sleep 3
+
+          T_START=$(date +%s%3N)
+          cat test_data.jsonl | docker exec -i perf-kafka \
+            kafka-console-producer \
+            --bootstrap-server localhost:9092 \
+            --topic perf-rhai-in \
+            --batch-size 5000 \
+            --request-required-acks 1
+          T_PRODUCE=$(date +%s%3N)
+
+          MSGS=${{ inputs.messages }}
+          for i in $(seq 1 90); do
+            CONSUMED=$(curl -s http://localhost:9092/metrics \
+              | grep "^streamforge_messages_consumed_total " \
+              | awk '{printf "%.0f", $2}')
+            [ -z "$CONSUMED" ] && CONSUMED=0
+            echo "  [${i}s] consumed: $CONSUMED / $MSGS"
+            [ "$CONSUMED" -ge "$MSGS" ] && break
+            sleep 2
+          done
+
+          T_END=$(date +%s%3N)
+          DURATION_MS=$((T_END - T_START))
+          DURATION_S=$(echo "scale=2; $DURATION_MS / 1000" | bc)
+
+          CONSUMED=$(curl -s http://localhost:9092/metrics \
+            | grep "^streamforge_messages_consumed_total " \
+            | awk '{printf "%.0f", $2}')
+          THROUGHPUT=$(echo "scale=0; $CONSUMED * 1000 / $DURATION_MS" | bc)
+
+          # Count active vs archive routing
+          ACTIVE=$(curl -s http://localhost:9092/metrics \
+            | grep 'streamforge_messages_produced_total{destination="perf-rhai-out-active"}' \
+            | awk '{printf "%.0f", $2}')
+          ARCHIVE=$(curl -s http://localhost:9092/metrics \
+            | grep 'streamforge_messages_produced_total{destination="perf-rhai-out-archive"}' \
+            | awk '{printf "%.0f", $2}')
+
+          # p99 latency
+          P99=$(curl -s http://localhost:9092/metrics \
+            | grep 'streamforge_processing_duration_seconds{.*quantile="0.99"' \
+            | awk '{printf "%.4f", $2}' | head -1)
+
+          echo "SCENARIO_B_CONSUMED=$CONSUMED"         >> scenario_results.env
+          echo "SCENARIO_B_DURATION_S=$DURATION_S"     >> scenario_results.env
+          echo "SCENARIO_B_THROUGHPUT=$THROUGHPUT"     >> scenario_results.env
+          echo "SCENARIO_B_ACTIVE_ROUTED=$ACTIVE"      >> scenario_results.env
+          echo "SCENARIO_B_ARCHIVE_ROUTED=$ARCHIVE"    >> scenario_results.env
+          echo "SCENARIO_B_P99_LATENCY_S=$P99"         >> scenario_results.env
+
+          echo "Scenario B: ${THROUGHPUT} msg/s | p99=${P99}s | active=${ACTIVE} archive=${ARCHIVE}"
+
+          curl -s http://localhost:9092/metrics > /tmp/metrics-b.txt
+
+          kill $SF_PID 2>/dev/null; sleep 2
+
+      # ══════════════════════════════════════════════════════════════════════
+      # SCENARIO C — Multi-destination + cache enrichment
+      # ══════════════════════════════════════════════════════════════════════
+      - name: "Scenario C: Multi-destination + cache enrichment"
+        run: |
+          cat > config-c.yaml << 'EOF'
+          appid: perf-multi
+          bootstrap: localhost:9092
+          input: perf-multi-in
+          threads: ${{ inputs.threads }}
+          offset: earliest
+          observability:
+            metrics_enabled: true
+            metrics_port: 9093
+            lag_monitoring_enabled: false
+
+          # In-process cache — pre-populated via cache_put in transform
+          cache:
+            backend_type: local
+            local:
+              max_capacity: 50000
+              ttl_seconds: 3600
+
+          routing:
+            destinations:
+              - output: perf-multi-premium
+                filter:
+                  - 'msg["tier"] in ["premium", "enterprise"]'
+                  - 'msg["status"] == "active"'
+                transform: |
+                  cache_put("seen", msg["userId"], msg["tier"]);
+                  msg + #{
+                    tier:      msg["tier"].to_upper(),
+                    email:     msg["email"].to_lower(),
+                    amount:    msg["amount"] * 1.0,
+                    processed: true
+                  }
+
+              - output: perf-multi-standard
+                filter:
+                  - 'msg["tier"] in ["free", "standard"]'
+                  - 'msg["status"] == "active"'
+                transform: |
+                  let prev = cache_lookup("seen", msg["userId"]);
+                  msg + #{ previouslyPremium: prev == "premium" || prev == "enterprise" }
+
+              - output: perf-multi-dlq
+                filter: 'msg["status"] != "active"'
+          EOF
+
+          CONFIG_FILE=config-c.yaml ./target/release/streamforge > /tmp/sf-c.log 2>&1 &
+          SF_PID=$!
+          sleep 3
+
+          T_START=$(date +%s%3N)
+          cat test_data.jsonl | docker exec -i perf-kafka \
+            kafka-console-producer \
+            --bootstrap-server localhost:9092 \
+            --topic perf-multi-in \
+            --batch-size 5000 \
+            --request-required-acks 1
+
+          MSGS=${{ inputs.messages }}
+          for i in $(seq 1 90); do
+            CONSUMED=$(curl -s http://localhost:9093/metrics \
+              | grep "^streamforge_messages_consumed_total " \
+              | awk '{printf "%.0f", $2}')
+            [ -z "$CONSUMED" ] && CONSUMED=0
+            echo "  [${i}s] consumed: $CONSUMED / $MSGS"
+            [ "$CONSUMED" -ge "$MSGS" ] && break
+            sleep 2
+          done
+
+          T_END=$(date +%s%3N)
+          DURATION_MS=$((T_END - T_START))
+          DURATION_S=$(echo "scale=2; $DURATION_MS / 1000" | bc)
+
+          CONSUMED=$(curl -s http://localhost:9093/metrics \
+            | grep "^streamforge_messages_consumed_total " \
+            | awk '{printf "%.0f", $2}')
+          THROUGHPUT=$(echo "scale=0; $CONSUMED * 1000 / $DURATION_MS" | bc)
+
+          P99=$(curl -s http://localhost:9093/metrics \
+            | grep 'streamforge_processing_duration_seconds{.*quantile="0.99"' \
+            | awk '{printf "%.4f", $2}' | head -1)
+
+          echo "SCENARIO_C_CONSUMED=$CONSUMED"       >> scenario_results.env
+          echo "SCENARIO_C_DURATION_S=$DURATION_S"   >> scenario_results.env
+          echo "SCENARIO_C_THROUGHPUT=$THROUGHPUT"   >> scenario_results.env
+          echo "SCENARIO_C_P99_LATENCY_S=$P99"       >> scenario_results.env
+
+          echo "Scenario C: ${THROUGHPUT} msg/s | p99=${P99}s"
+
+          curl -s http://localhost:9093/metrics > /tmp/metrics-c.txt
+
+          kill $SF_PID 2>/dev/null; sleep 2
+
+      # ── Collect all Prometheus metrics ───────────────────────────────────
+      - name: Collect full metrics snapshots
+        if: always()
+        run: |
+          mkdir -p metrics_output
+          for scenario in a b c; do
+            [ -f /tmp/metrics-${scenario}.txt ] && \
+              cp /tmp/metrics-${scenario}.txt metrics_output/scenario-${scenario}.txt
+          done
+
+          # Parse and write structured JSON for downstream analysis
+          python3 - << 'PYEOF'
+          import re, json, os
+
+          results = {}
+          env = {}
+          if os.path.exists("scenario_results.env"):
+              for line in open("scenario_results.env"):
+                  k, _, v = line.strip().partition("=")
+                  env[k] = v
+
+          for s in ["A", "B", "C"]:
+              results[f"scenario_{s.lower()}"] = {
+                  "consumed":    int(env.get(f"SCENARIO_{s}_CONSUMED", 0) or 0),
+                  "duration_s":  float(env.get(f"SCENARIO_{s}_DURATION_S", 0) or 0),
+                  "throughput":  int(env.get(f"SCENARIO_{s}_THROUGHPUT", 0) or 0),
+                  "p99_latency_s": float(env.get(f"SCENARIO_{s}_P99_LATENCY_S", 0) or 0),
+              }
+
+          with open("metrics_output/results.json", "w") as f:
+              json.dump(results, f, indent=2)
+          print(json.dumps(results, indent=2))
+          PYEOF
+
+      # ── Write GitHub step summary ─────────────────────────────────────────
+      - name: Write performance report to step summary
+        if: always()
+        run: |
+          source scenario_results.env 2>/dev/null || true
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # StreamForge Performance Test Results
+
+          **Commit:** \`${{ github.sha }}\`
+          **Branch:** \`${{ github.ref_name }}\`
+          **Triggered by:** ${{ github.actor }}
+          **Config:** ${{ inputs.messages }} messages · ${{ inputs.threads }} threads · ${{ inputs.partitions }} partitions
+
+          ## Throughput by Scenario
+
+          | Scenario | Description | Messages | Duration | **Throughput** | p99 Latency |
+          |---|---|---|---|---|---|
+          | A | Passthrough (baseline) | ${SCENARIO_A_CONSUMED:-?} | ${SCENARIO_A_DURATION_S:-?}s | **${SCENARIO_A_THROUGHPUT:-?} msg/s** | — |
+          | B | Rhai filter + transform | ${SCENARIO_B_CONSUMED:-?} | ${SCENARIO_B_DURATION_S:-?}s | **${SCENARIO_B_THROUGHPUT:-?} msg/s** | ${SCENARIO_B_P99_LATENCY_S:-?}s |
+          | C | Multi-dest + cache | ${SCENARIO_C_CONSUMED:-?} | ${SCENARIO_C_DURATION_S:-?}s | **${SCENARIO_C_THROUGHPUT:-?} msg/s** | ${SCENARIO_C_P99_LATENCY_S:-?}s |
+
+          ## Routing Results (Scenario B)
+
+          | Destination | Messages Routed |
+          |---|---|
+          | active (filtered + transformed) | ${SCENARIO_B_ACTIVE_ROUTED:-?} |
+          | archive (catch-all) | ${SCENARIO_B_ARCHIVE_ROUTED:-?} |
+
+          ## Interpretation
+
+          - **Scenario A → B delta** shows the cost of running Rhai filter + transform per message
+          - **Scenario B → C delta** shows the cost of multi-destination routing + cache operations
+          - p99 latency is the DSL evaluation time (excludes Kafka network round-trip)
+
+          > Results from GitHub-hosted runners. Production performance on dedicated hardware will be higher.
+          EOF
+
+      # ── Upload artifacts ──────────────────────────────────────────────────
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: throughput-results-${{ github.sha }}
+          path: |
+            metrics_output/
+            scenario_results.env
+            /tmp/sf-*.log
+          retention-days: 30
+
+      - name: Stop Kafka
+        if: always()
+        run: docker rm -f perf-kafka 2>/dev/null || true
+
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # JOB 3 — Latency profile under sustained load
+  # ══════════════════════════════════════════════════════════════════════════
+  latency-profile:
+    name: Latency Profile (histogram)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libsasl2-dev libssl-dev libzstd-dev cmake pkg-config \
+            clang libclang-dev curl
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -80,262 +551,208 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Build Streamforge
-        run: cargo build --release
-
-      - name: Start Kafka
-        run: |
-          docker-compose -f docker-compose.benchmark.yml up -d
-          sleep 30
-
-      - name: Wait for Kafka
-        run: |
-          for i in {1..30}; do
-            if nc -z localhost 9092; then
-              echo "Kafka is ready"
-              exit 0
-            fi
-            echo "Waiting for Kafka... ($i/30)"
-            sleep 2
-          done
-          echo "Kafka failed to start"
-          exit 1
-
-      - name: Create topics
-        run: |
-          docker exec benchmark-kafka kafka-topics \
-            --create --topic test-${{ inputs.partitions }}p-input \
-            --partitions ${{ inputs.partitions }} \
-            --replication-factor 1 \
-            --bootstrap-server localhost:9092 || true
-
-          docker exec benchmark-kafka kafka-topics \
-            --create --topic test-${{ inputs.partitions }}p-output \
-            --partitions ${{ inputs.partitions }} \
-            --replication-factor 1 \
-            --bootstrap-server localhost:9092 || true
-
-      - name: Generate test data
-        run: |
-          cd benchmarks
-          ./generate_json_test_data.sh ${{ inputs.messages }} test_data.jsonl
-
-      - name: Create test config
-        run: |
-          cat > config.json << EOF
-          {
-            "appid": "ci-perf-test",
-            "bootstrap": "localhost:9092",
-            "target_broker": "localhost:9092",
-            "input": "test-${{ inputs.partitions }}p-input",
-            "output": "test-${{ inputs.partitions }}p-output",
-            "threads": ${{ inputs.threads }},
-            "offset": "earliest",
-            "observability": {
-              "metrics_enabled": true,
-              "metrics_port": 9090,
-              "lag_monitoring_enabled": true,
-              "lag_monitoring_interval_secs": 10
-            },
-            "routing": {
-              "routing_type": "filter",
-              "destinations": [
-                {
-                  "output": "test-${{ inputs.partitions }}p-output",
-                  "key_transform": "/userId",
-                  "headers": {
-                    "x-processed": "true"
-                  }
-                }
-              ]
-            }
-          }
-          EOF
-
-      - name: Start Streamforge
-        run: |
-          ./target/release/streamforge > streamforge.log 2>&1 &
-          echo $! > streamforge.pid
-          sleep 5
-
-      - name: Send test messages
-        run: |
-          date +%s > start_time.txt
-          cat benchmarks/test_data.jsonl | docker exec -i benchmark-kafka \
-            kafka-console-producer \
-            --bootstrap-server localhost:9092 \
-            --topic test-${{ inputs.partitions }}p-input \
-            --batch-size 2000
-          date +%s > end_time.txt
-
-      - name: Wait for processing
-        run: |
-          for i in {1..60}; do
-            CONSUMED=$(curl -s http://localhost:9090/metrics | grep "^streamforge_messages_consumed_total " | awk '{print $2}')
-            PRODUCED=$(curl -s http://localhost:9090/metrics | grep "^streamforge_messages_produced_total" | awk '{print $2}')
-            echo "[$i] Consumed: $CONSUMED | Produced: $PRODUCED"
-
-            if [[ "$CONSUMED" -ge "${{ inputs.messages }}" ]]; then
-              echo "✓ All messages processed!"
-              break
-            fi
-            sleep 5
-          done
-
-      - name: Collect metrics
-        run: |
-          curl -s http://localhost:9090/metrics > final_metrics.txt
-
-          START=$(cat start_time.txt)
-          END=$(cat end_time.txt)
-          DURATION=$((END - START))
-
-          CONSUMED=$(grep "^streamforge_messages_consumed_total " final_metrics.txt | awk '{print $2}')
-          PRODUCED=$(grep "^streamforge_messages_produced_total" final_metrics.txt | awk -F'}' '{print $2}' | awk '{print $1}')
-          ERRORS=$(grep "^streamforge_processing_errors_total " final_metrics.txt | awk '{print $2}' | head -1)
-
-          THROUGHPUT=$((CONSUMED / DURATION))
-
-          echo "=== PERFORMANCE TEST RESULTS ===" | tee -a $GITHUB_STEP_SUMMARY
-          echo "" | tee -a $GITHUB_STEP_SUMMARY
-          echo "**Configuration:**" | tee -a $GITHUB_STEP_SUMMARY
-          echo "- Messages: ${{ inputs.messages }}" | tee -a $GITHUB_STEP_SUMMARY
-          echo "- Partitions: ${{ inputs.partitions }}" | tee -a $GITHUB_STEP_SUMMARY
-          echo "- Threads: ${{ inputs.threads }}" | tee -a $GITHUB_STEP_SUMMARY
-          echo "" | tee -a $GITHUB_STEP_SUMMARY
-          echo "**Results:**" | tee -a $GITHUB_STEP_SUMMARY
-          echo "- Consumed: $CONSUMED" | tee -a $GITHUB_STEP_SUMMARY
-          echo "- Produced: $PRODUCED" | tee -a $GITHUB_STEP_SUMMARY
-          echo "- Errors: ${ERRORS:-0}" | tee -a $GITHUB_STEP_SUMMARY
-          echo "- Duration: ${DURATION}s" | tee -a $GITHUB_STEP_SUMMARY
-          echo "- **Throughput: ${THROUGHPUT} msg/s**" | tee -a $GITHUB_STEP_SUMMARY
-          echo "" | tee -a $GITHUB_STEP_SUMMARY
-
-      - name: Stop Streamforge
-        if: always()
-        run: |
-          if [ -f streamforge.pid ]; then
-            kill $(cat streamforge.pid) || true
-          fi
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: performance-test-logs
-          path: |
-            streamforge.log
-            final_metrics.txt
-            benchmarks/test_data.jsonl
-
-      - name: Stop Kafka
-        if: always()
-        run: |
-          docker-compose -f docker-compose.benchmark.yml down -v
-
-  # ==================== LATENCY TEST ====================
-  latency-test:
-    name: Latency Profile Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libsasl2-dev libssl-dev libzstd-dev cmake pkg-config clang libclang-dev
-
       - name: Build
         run: cargo build --release
 
-      - name: Start Kafka
+      - name: Start Kafka (KRaft)
         run: |
-          docker-compose -f docker-compose.benchmark.yml up -d
-          sleep 30
+          docker run -d \
+            --name latency-kafka \
+            -p 9092:9092 \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_LISTENERS="PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093" \
+            -e KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://localhost:9092" \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS="1@localhost:9093" \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP="PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT" \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_AUTO_CREATE_TOPICS_ENABLE=true \
+            -e CLUSTER_ID="latency-test-cluster-001" \
+            confluentinc/cp-kafka:7.6.0
+          # Poll until ready
+          for i in $(seq 1 30); do
+            docker exec latency-kafka kafka-topics \
+              --bootstrap-server localhost:9092 --list >/dev/null 2>&1 && break
+            sleep 2
+          done
+          echo "Kafka ready"
 
-      - name: Run latency test
+      - name: Run latency profile
         run: |
-          # Create small config for latency test
-          cat > config.json << EOF
-          {
-            "appid": "latency-test",
-            "bootstrap": "localhost:9092",
-            "input": "test-latency-input",
-            "output": "test-latency-output",
-            "threads": 4,
-            "observability": {
-              "metrics_enabled": true,
-              "metrics_port": 9090
-            }
-          }
+          # Pipeline: filter + transform with envelope ops — realistic workload
+          cat > config-latency.yaml << 'EOF'
+          appid: latency-profile
+          bootstrap: localhost:9092
+          input: latency-in
+          threads: 4
+          offset: earliest
+          observability:
+            metrics_enabled: true
+            metrics_port: 9090
+            lag_monitoring_enabled: false
+
+          routing:
+            destinations:
+              - output: latency-out-hot
+                filter:
+                  - 'msg["tier"] in ["premium", "enterprise"]'
+                  - 'msg["score"] > 70'
+                transform: |
+                  #{ id: msg["userId"], tier: msg["tier"].to_upper(),
+                     amount: msg["amount"] * 1.08, ts: now_ms() }
+                key_transform: '/userId'
+                headers:
+                  x-pipeline: "latency-test"
+
+              - output: latency-out-cold
+                transform: 'msg + #{ ts: now_ms() }'
           EOF
 
-          # Create topics
-          docker exec benchmark-kafka kafka-topics \
-            --create --topic test-latency-input --partitions 4 --replication-factor 1 \
-            --bootstrap-server localhost:9092 || true
-          docker exec benchmark-kafka kafka-topics \
-            --create --topic test-latency-output --partitions 4 --replication-factor 1 \
-            --bootstrap-server localhost:9092 || true
+          CONFIG_FILE=config-latency.yaml ./target/release/streamforge \
+            > /tmp/sf-latency.log 2>&1 &
+          SF_PID=$!
+          sleep 3
 
-          # Start Streamforge
-          ./target/release/streamforge > streamforge.log 2>&1 &
-          STREAMFORGE_PID=$!
-          sleep 5
+          # Generate and send 20K messages
+          python3 - << 'PYEOF'
+          import json, random, time
 
-          # Generate and send 10K messages
-          cd benchmarks
-          ./generate_json_test_data.sh 10000 latency_test.jsonl
-          cat latency_test.jsonl | docker exec -i benchmark-kafka \
-            kafka-console-producer --bootstrap-server localhost:9092 --topic test-latency-input
+          with open("latency_data.jsonl", "w") as f:
+              for i in range(20000):
+                  f.write(json.dumps({
+                      "userId": f"usr-{i:06d}",
+                      "tier": random.choice(["free","standard","premium","enterprise"]),
+                      "score": random.randint(0, 100),
+                      "amount": round(random.uniform(1, 500), 2),
+                      "status": "active",
+                      "email": f"user{i}@example.com",
+                      "timestamp": int(time.time() * 1000),
+                  }) + "\n")
+          PYEOF
+
+          cat latency_data.jsonl | docker exec -i latency-kafka \
+            kafka-console-producer \
+            --bootstrap-server localhost:9092 \
+            --topic latency-in \
+            --batch-size 1000 \
+            --request-required-acks 1
 
           # Wait for processing
-          sleep 10
+          for i in $(seq 1 30); do
+            C=$(curl -s http://localhost:9090/metrics \
+              | grep "^streamforge_messages_consumed_total " \
+              | awk '{printf "%.0f", $2}')
+            [ -z "$C" ] && C=0
+            echo "  consumed: $C / 20000"
+            [ "$C" -ge 20000 ] && break
+            sleep 2
+          done
 
-          # Extract latency metrics
+          kill $SF_PID 2>/dev/null
+
+      - name: Extract and report latency histogram
+        run: |
           curl -s http://localhost:9090/metrics > latency_metrics.txt
 
-          echo "=== LATENCY RESULTS ===" | tee -a $GITHUB_STEP_SUMMARY
-          echo "" | tee -a $GITHUB_STEP_SUMMARY
-          grep "streamforge_processing_duration_seconds" latency_metrics.txt | grep -v "^#" | tee -a $GITHUB_STEP_SUMMARY
+          echo "## Latency Histogram (processing_duration_seconds)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This measures Rhai filter + transform evaluation time per message." >> $GITHUB_STEP_SUMMARY
+          echo "(Excludes Kafka network I/O.)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
-          # Cleanup
-          kill $STREAMFORGE_PID || true
+          python3 - << 'PYEOF' >> $GITHUB_STEP_SUMMARY
+          import re
 
-      - name: Stop Kafka
+          metrics = open("latency_metrics.txt").read()
+
+          # Extract histogram quantiles
+          quantiles = {}
+          for m in re.finditer(
+              r'streamforge_processing_duration_seconds\{[^}]*quantile="([^"]+)"[^}]*\}\s+([\d.e+-]+)',
+              metrics
+          ):
+              q, v = m.groups()
+              quantiles[q] = float(v)
+
+          count_m = re.search(r'streamforge_processing_duration_seconds_count\s+([\d.]+)', metrics)
+          sum_m   = re.search(r'streamforge_processing_duration_seconds_sum\s+([\d.e+-]+)', metrics)
+
+          count = float(count_m.group(1)) if count_m else 0
+          total = float(sum_m.group(1)) if sum_m else 0
+          avg   = (total / count * 1_000_000) if count > 0 else 0
+
+          print(f"Messages processed : {int(count):,}")
+          print(f"Average            : {avg:.1f} µs")
+          print()
+          for q in ["0.5", "0.75", "0.9", "0.95", "0.99", "0.999"]:
+              if q in quantiles:
+                  us = quantiles[q] * 1_000_000
+                  bar = "█" * min(40, int(us / 10))
+                  print(f"  p{float(q)*100:>4.1f}  {us:>8.1f} µs  {bar}")
+          PYEOF
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload latency metrics
         if: always()
-        run: docker-compose -f docker-compose.benchmark.yml down -v
+        uses: actions/upload-artifact@v4
+        with:
+          name: latency-results-${{ github.sha }}
+          path: latency_metrics.txt
+          retention-days: 30
 
-  # ==================== COMPARISON REPORT ====================
+      - name: Cleanup
+        if: always()
+        run: docker rm -f latency-kafka 2>/dev/null || true
+
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # JOB 4 — Consolidate all results into final summary
+  # ══════════════════════════════════════════════════════════════════════════
   performance-report:
-    name: Generate Performance Report
-    needs: [criterion-benchmarks, throughput-test, latency-test]
+    name: Performance Report
+    needs: [dsl-benchmarks, throughput-test, latency-profile]
     runs-on: ubuntu-latest
     if: always()
+
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: all-results/
 
-      - name: Generate summary report
+      - name: Generate final summary
         run: |
-          echo "# 🚀 Performance Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Test run completed for:" >> $GITHUB_STEP_SUMMARY
-          echo "- SHA: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Triggered by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📊 Test Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "- Messages: ${{ inputs.messages }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Partitions: ${{ inputs.partitions }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Threads: ${{ inputs.threads }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📥 Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- Criterion benchmark results" >> $GITHUB_STEP_SUMMARY
-          echo "- Performance test logs" >> $GITHUB_STEP_SUMMARY
-          echo "- Prometheus metrics" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "*Note: CI performance results are indicative only. Production performance will vary based on hardware and network.*" >> $GITHUB_STEP_SUMMARY
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # Final Performance Test Summary
+
+          | Job | Status |
+          |---|---|
+          | DSL Micro-benchmarks | ${{ needs.dsl-benchmarks.result }} |
+          | Throughput Test | ${{ needs.throughput-test.result }} |
+          | Latency Profile | ${{ needs.latency-profile.result }} |
+
+          ## Artifacts
+
+          All raw Prometheus metrics, logs, and benchmark output are attached
+          to this workflow run as downloadable artifacts.
+
+          ## Notes
+
+          - Throughput measured on GitHub-hosted `ubuntu-latest` (2 vCPU / 7GB RAM)
+          - Production hardware with dedicated CPUs and low-latency networking will
+            show higher throughput (25K–45K msg/s documented on Apple M-series)
+          - The p99 latency metric covers only Rhai evaluation time, not Kafka I/O
+          - Scenario B→A throughput ratio shows the actual Rhai DSL overhead
+          EOF
+
+      - name: Check for results JSON
+        run: |
+          if [ -f all-results/throughput-results-*/results.json ]; then
+            echo "### Throughput Results (JSON)" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat all-results/throughput-results-*/results.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
