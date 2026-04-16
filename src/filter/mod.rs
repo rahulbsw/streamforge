@@ -14,7 +14,7 @@ pub use envelope_transform::{
     TimestampFromTransform, TimestampPreserveTransform, TimestampSubtractTransform,
 };
 
-use crate::cache::LookupCache;
+use crate::cache::SyncLookupCache;
 use crate::envelope::MessageEnvelope;
 use crate::error::{MirrorMakerError, Result};
 use crate::hash::{hash_value, HashAlgorithm};
@@ -343,8 +343,13 @@ impl JsonPathTransform {
 
 impl Transform for JsonPathTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        self.extract_value(&value)
-            .ok_or_else(|| MirrorMakerError::Processing(format!("Path not found: {}", self.path)))
+        match self.extract_value(&value) {
+            Some(extracted) => Ok(extracted),
+            None => {
+                tracing::debug!("JsonPathTransform: path '{}' not found, passing through", self.path);
+                Ok(value)
+            }
+        }
     }
 }
 
@@ -613,26 +618,20 @@ impl ArrayMapTransform {
 
 impl Transform for ArrayMapTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        if let Some(extracted) = self.extract_value(&value) {
-            if let Some(arr) = extracted.as_array() {
-                let mut result = Vec::new();
-                for element in arr {
-                    let transformed = self.element_transform.transform(element.clone())?;
-                    result.push(transformed);
-                }
-                Ok(Value::Array(result))
-            } else {
-                Err(MirrorMakerError::Processing(format!(
-                    "Path {} is not an array",
-                    self.path
-                )))
-            }
-        } else {
-            Err(MirrorMakerError::Processing(format!(
-                "Path not found: {}",
-                self.path
-            )))
+        let Some(extracted) = self.extract_value(&value) else {
+            tracing::debug!("ARRAY_MAP: path '{}' not found, passing through", self.path);
+            return Ok(value);
+        };
+        let Some(arr) = extracted.as_array() else {
+            tracing::debug!("ARRAY_MAP: path '{}' is not an array, passing through", self.path);
+            return Ok(value);
+        };
+        let mut result = Vec::new();
+        for element in arr {
+            let transformed = self.element_transform.transform(element.clone())?;
+            result.push(transformed);
         }
+        Ok(Value::Array(result))
     }
 }
 
@@ -733,25 +732,29 @@ impl ArithmeticTransform {
 
 impl Transform for ArithmeticTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let left = self.extract_value(&value, &self.left_path).ok_or_else(|| {
-            MirrorMakerError::Processing(format!(
-                "Left operand not found or not a number: {}",
-                self.left_path
-            ))
-        })?;
+        let Some(left) = self.extract_value(&value, &self.left_path) else {
+            tracing::debug!("ARITHMETIC: left operand '{}' not found or not a number, passing through", self.left_path);
+            return Ok(value);
+        };
 
         let right = match &self.right {
-            ArithmeticOperand::Path(path) => self.extract_value(&value, path).ok_or_else(|| {
-                MirrorMakerError::Processing(format!(
-                    "Right operand not found or not a number: {}",
-                    path
-                ))
-            })?,
+            ArithmeticOperand::Path(path) => {
+                let Some(r) = self.extract_value(&value, path) else {
+                    tracing::debug!("ARITHMETIC: right operand '{}' not found or not a number, passing through", path);
+                    return Ok(value);
+                };
+                r
+            }
             ArithmeticOperand::Constant(c) => *c,
         };
 
-        let result = self.calculate(left, right)?;
-        Ok(json!(result))
+        match self.calculate(left, right) {
+            Ok(result) => Ok(json!(result)),
+            Err(e) => {
+                tracing::debug!("ARITHMETIC: calculation failed ({}), passing through", e);
+                Ok(value)
+            }
+        }
     }
 }
 
@@ -827,9 +830,10 @@ impl HashTransform {
 
 impl Transform for HashTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = self.extract_value(&value).ok_or_else(|| {
-            MirrorMakerError::Processing(format!("Path not found: {}", self.path))
-        })?;
+        let Some(extracted) = self.extract_value(&value) else {
+            tracing::debug!("HASH: path '{}' not found, passing through", self.path);
+            return Ok(value);
+        };
 
         let hash = hash_value(&extracted, self.algorithm)?;
 
@@ -852,160 +856,391 @@ impl Transform for HashTransform {
     }
 }
 
-/// Cache lookup transform
+/// Cache lookup transform — reads from a named `SyncLookupCache` and enriches the message.
 ///
-/// Looks up a value in cache and enriches the message with the result.
+/// On a cache hit the looked-up value is added to (or merged into) the message.
+/// On a cache miss the message is returned unchanged.
 ///
-/// Example:
-/// ```ignore
-/// # use streamforge::filter::CacheLookupTransform;
-/// # use streamforge::cache::{LookupCache, CacheConfig};
-/// # use std::sync::Arc;
-/// // Create cache
-/// let cache = Arc::new(LookupCache::new(CacheConfig::default()));
-///
-/// // Lookup user by ID and add to message
-/// let transform = CacheLookupTransform::new(
-///     cache,
-///     "/userId",           // Key path in message
-///     "user",              // Cache key prefix
-///     Some("userProfile")  // Output field name
-/// ).unwrap();
-/// ```
+/// DSL syntax (via `parse_transform_with_cache`):
+/// - `CACHE_LOOKUP:/keyPath,store-name,outputField` — add result as a new field
+/// - `CACHE_LOOKUP:/keyPath,store-name,MERGE`       — merge result into the message object
 pub struct CacheLookupTransform {
-    cache: Arc<LookupCache>,
+    cache: Arc<SyncLookupCache>,
     key_path: String,
-    cache_key_prefix: Option<String>,
-    output_field: String,
-    merge_result: bool,
+    /// When `Some(field)` the lookup result is added under that field name.
+    /// When `None` the lookup result is merged directly into the message object.
+    output_field: Option<String>,
 }
 
 impl CacheLookupTransform {
-    /// Create a new cache lookup transform
-    ///
-    /// # Arguments
-    /// * `cache` - Shared cache instance
-    /// * `key_path` - JSON path to extract lookup key from
-    /// * `cache_key_prefix` - Optional prefix for cache keys (e.g., "user:")
-    /// * `output_field` - Field name to store lookup result
-    pub fn new(
-        cache: Arc<LookupCache>,
-        key_path: &str,
-        cache_key_prefix: Option<&str>,
-        output_field: Option<&str>,
-    ) -> Result<Self> {
+    /// Add the cached value as a new field in the message.
+    pub fn new(cache: Arc<SyncLookupCache>, key_path: &str, output_field: &str) -> Result<Self> {
         Ok(Self {
             cache,
             key_path: key_path.to_string(),
-            cache_key_prefix: cache_key_prefix.map(|s| s.to_string()),
-            output_field: output_field.unwrap_or("lookup_result").to_string(),
-            merge_result: false,
+            output_field: Some(output_field.to_string()),
         })
     }
 
-    /// Create a cache lookup transform that merges results
-    ///
-    /// Instead of adding a new field, merge the lookup result into the message
-    pub fn new_with_merge(
-        cache: Arc<LookupCache>,
-        key_path: &str,
-        cache_key_prefix: Option<&str>,
-    ) -> Result<Self> {
+    /// Merge the cached object directly into the message object.
+    pub fn new_merge(cache: Arc<SyncLookupCache>, key_path: &str) -> Result<Self> {
         Ok(Self {
             cache,
             key_path: key_path.to_string(),
-            cache_key_prefix: cache_key_prefix.map(|s| s.to_string()),
-            output_field: String::new(),
-            merge_result: true,
+            output_field: None,
         })
     }
 
-    /// Extract lookup key from JSON using path
     fn extract_key(&self, value: &Value) -> Option<String> {
         let parts: Vec<&str> = self.key_path.trim_matches('/').split('/').collect();
-
         let mut current = value;
         for part in parts {
             current = current.get(part)?;
         }
-
-        // Convert to string
         match current {
             Value::String(s) => Some(s.clone()),
             Value::Number(n) => Some(n.to_string()),
             _ => None,
         }
     }
+}
 
-    /// Build cache key with optional prefix
-    fn build_cache_key(&self, key: &str) -> String {
-        if let Some(prefix) = &self.cache_key_prefix {
-            format!("{}:{}", prefix, key)
-        } else {
-            key.to_string()
+impl Transform for CacheLookupTransform {
+    fn transform(&self, value: Value) -> Result<Value> {
+        let Some(key) = self.extract_key(&value) else {
+            tracing::debug!("CACHE_LOOKUP: key path '{}' not found or not a string/number, passing through", self.key_path);
+            return Ok(value);
+        };
+
+        let Some(cached) = self.cache.get(&key) else {
+            tracing::debug!("CACHE_LOOKUP miss for key '{}'", key);
+            return Ok(value);
+        };
+
+        match &self.output_field {
+            Some(field) => {
+                // Add lookup result as a new named field
+                if let Value::Object(mut obj) = value {
+                    obj.insert(field.clone(), cached);
+                    Ok(Value::Object(obj))
+                } else {
+                    let mut result = Map::new();
+                    result.insert("original".to_string(), value);
+                    result.insert(field.clone(), cached);
+                    Ok(Value::Object(result))
+                }
+            }
+            None => {
+                // Merge the cached object into the message object
+                match (value, cached) {
+                    (Value::Object(mut msg), Value::Object(cached_obj)) => {
+                        for (k, v) in cached_obj {
+                            msg.insert(k, v);
+                        }
+                        Ok(Value::Object(msg))
+                    }
+                    (original, _) => {
+                        tracing::debug!("CACHE_LOOKUP MERGE: message or cached value is not a JSON object, passing through");
+                        Ok(original)
+                    }
+                }
+            }
         }
     }
 }
 
-#[async_trait::async_trait]
-impl Transform for CacheLookupTransform {
-    fn transform(&self, _value: Value) -> Result<Value> {
-        // Note: We can't use async in the sync Transform trait
-        // This is a limitation - in practice, you'd want to use an async transform trait
-        // For now, this serves as a placeholder structure
-        Err(MirrorMakerError::Processing(
-            "CacheLookupTransform requires async context - use AsyncTransform instead".to_string(),
-        ))
+/// Cache put transform — writes a value to a named `SyncLookupCache` and passes
+/// the message through unchanged.
+///
+/// DSL syntax (via `parse_transform_with_cache`):
+/// - `CACHE_PUT:/keyPath,store-name`             — store the entire message at the key
+/// - `CACHE_PUT:/keyPath,store-name,/valuePath`  — store a field extracted from the message
+pub struct CachePutTransform {
+    cache: Arc<SyncLookupCache>,
+    key_path: String,
+    /// When `Some(path)` only that field is stored. When `None` the whole message is stored.
+    value_path: Option<String>,
+}
+
+impl CachePutTransform {
+    pub fn new(cache: Arc<SyncLookupCache>, key_path: &str, value_path: Option<&str>) -> Result<Self> {
+        Ok(Self {
+            cache,
+            key_path: key_path.to_string(),
+            value_path: value_path.map(|s| s.to_string()),
+        })
+    }
+
+    fn extract_path<'a>(&self, value: &'a Value, path: &str) -> Option<Value> {
+        let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+        let mut current = value;
+        for part in parts {
+            current = current.get(part)?;
+        }
+        Some(current.clone())
+    }
+
+    fn extract_key(&self, value: &Value) -> Option<String> {
+        let extracted = self.extract_path(value, &self.key_path)?;
+        match extracted {
+            Value::String(s) => Some(s),
+            Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        }
     }
 }
 
-/// Async transform trait for cache lookups
-#[async_trait::async_trait]
-pub trait AsyncTransform: Send + Sync {
-    async fn transform_async(&self, value: Value) -> Result<Value>;
+impl Transform for CachePutTransform {
+    fn transform(&self, value: Value) -> Result<Value> {
+        let Some(key) = self.extract_key(&value) else {
+            tracing::debug!("CACHE_PUT: key path '{}' not found or not a string/number, skipping cache write", self.key_path);
+            return Ok(value);
+        };
+
+        let to_store = match &self.value_path {
+            Some(path) => match self.extract_path(&value, path) {
+                Some(v) => v,
+                None => {
+                    tracing::debug!("CACHE_PUT: value path '{}' not found, skipping cache write", path);
+                    return Ok(value);
+                }
+            },
+            None => value.clone(),
+        };
+
+        self.cache.put(key.clone(), to_store);
+        tracing::debug!("CACHE_PUT stored key '{}'", key);
+
+        Ok(value) // pass message through unchanged
+    }
 }
 
-#[async_trait::async_trait]
-impl AsyncTransform for CacheLookupTransform {
-    async fn transform_async(&self, value: Value) -> Result<Value> {
-        let key = self.extract_key(&value).ok_or_else(|| {
-            MirrorMakerError::Processing(format!("Key path not found: {}", self.key_path))
-        })?;
+// ============================================================================
+// String transforms
+// ============================================================================
 
-        let cache_key = self.build_cache_key(&key);
+/// Extract a string value from a JSON path. Numbers and booleans are coerced.
+/// Returns `None` when the path is absent, null, or a non-scalar type (object/array).
+fn get_string_at_path(value: &Value, path: &str) -> Option<String> {
+    let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+    let mut current = value;
+    for part in &parts {
+        current = current.get(part)?;
+    }
+    match current {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        // Null, Object, Array are not coercible to a string for transform purposes
+        _ => None,
+    }
+}
 
-        // Lookup in cache
-        if let Some(lookup_result) = self.cache.get(&cache_key).await {
-            if self.merge_result {
-                // Merge lookup result into original value
-                if let (Value::Object(mut orig_obj), Value::Object(lookup_obj)) =
-                    (value, lookup_result)
-                {
-                    for (k, v) in lookup_obj {
-                        orig_obj.insert(k, v);
-                    }
-                    Ok(Value::Object(orig_obj))
-                } else {
-                    Err(MirrorMakerError::Processing(
-                        "Cannot merge: both values must be objects".to_string(),
-                    ))
-                }
+/// Write `result` into the message. If `output_field` is set adds a new top-level
+/// field and keeps the original. Otherwise overwrites the field at `path`.
+fn write_string_result(
+    value: Value,
+    path: &str,
+    result: Value,
+    output_field: Option<&str>,
+) -> Result<Value> {
+    match output_field {
+        Some(field) => {
+            // Add result as a new top-level field, keep original
+            if let Value::Object(mut obj) = value {
+                obj.insert(field.to_string(), result);
+                Ok(Value::Object(obj))
             } else {
-                // Add lookup result as new field
-                if let Value::Object(mut obj) = value {
-                    obj.insert(self.output_field.clone(), lookup_result);
-                    Ok(Value::Object(obj))
-                } else {
-                    // If not an object, create a new object
-                    let mut result = Map::new();
-                    result.insert("original".to_string(), value);
-                    result.insert(self.output_field.clone(), lookup_result);
-                    Ok(Value::Object(result))
-                }
+                Err(MirrorMakerError::Processing(
+                    "STRING: output_field requires the message to be a JSON object".to_string(),
+                ))
             }
+        }
+        None => set_value_at_path(value, path, result),
+    }
+}
+
+/// Overwrite the value at `path` inside `root` with `new_val`.
+fn set_value_at_path(root: Value, path: &str, new_val: Value) -> Result<Value> {
+    let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+    if parts.is_empty() || (parts.len() == 1 && parts[0].is_empty()) {
+        return Ok(new_val);
+    }
+    let mut root = root;
+    set_nested(&mut root, &parts, new_val)?;
+    Ok(root)
+}
+
+fn set_nested(node: &mut Value, parts: &[&str], new_val: Value) -> Result<()> {
+    if parts.is_empty() {
+        return Ok(());
+    }
+    let obj = node.as_object_mut().ok_or_else(|| {
+        MirrorMakerError::Processing("STRING: cannot descend into a non-object".to_string())
+    })?;
+    if parts.len() == 1 {
+        obj.insert(parts[0].to_string(), new_val);
+    } else {
+        let child = obj.get_mut(parts[0]).ok_or_else(|| {
+            MirrorMakerError::Processing(format!("STRING: intermediate path '{}' not found", parts[0]))
+        })?;
+        set_nested(child, &parts[1..], new_val)?;
+    }
+    Ok(())
+}
+
+/// String operations supported by [`StringTransform`].
+#[derive(Clone)]
+pub enum StringOp {
+    Upper,
+    Lower,
+    Trim,
+    TrimStart,
+    TrimEnd,
+    Substring { start: usize, length: Option<usize> },
+    Replace { from: String, to: String, all: bool },
+    RegexReplace { pattern: Regex, replacement: String },
+    Split { delimiter: String },
+    Length,
+}
+
+/// Apply a string operation to a JSON field, optionally writing to a separate output field.
+///
+/// DSL syntax (parsed via `filter_parser::parse_transform`):
+///
+/// | Expression | Description |
+/// |---|---|
+/// | `STRING:UPPER,/path` | Uppercase the field |
+/// | `STRING:LOWER,/path` | Lowercase the field |
+/// | `STRING:TRIM,/path` | Trim leading and trailing whitespace |
+/// | `STRING:TRIM_START,/path` | Trim leading whitespace |
+/// | `STRING:TRIM_END,/path` | Trim trailing whitespace |
+/// | `STRING:SUBSTRING,/path,start,length` | Extract substring (length optional) |
+/// | `STRING:REPLACE,/path,from,to` | Replace first occurrence of `from` with `to` |
+/// | `STRING:REPLACE_ALL,/path,from,to` | Replace all occurrences |
+/// | `STRING:REGEX_REPLACE,/path,pattern,replacement` | Regex replace all matches |
+/// | `STRING:SPLIT,/path,delimiter` | Split into a JSON array |
+/// | `STRING:LENGTH,/path` | Replace field with its character length |
+///
+/// All operations accept an optional extra `,outputField` argument.  When
+/// present the result is stored in a new top-level field and the original is
+/// preserved.  Without it the source field is overwritten.
+pub struct StringTransform {
+    pub path: String,
+    pub op: StringOp,
+    pub output_field: Option<String>,
+}
+
+impl StringTransform {
+    pub fn new(path: &str, op: StringOp, output_field: Option<&str>) -> Result<Self> {
+        Ok(Self {
+            path: path.to_string(),
+            op,
+            output_field: output_field.map(|s| s.to_string()),
+        })
+    }
+
+    fn apply(&self, s: &str) -> Result<Value> {
+        match &self.op {
+            StringOp::Upper => Ok(Value::String(s.to_uppercase())),
+            StringOp::Lower => Ok(Value::String(s.to_lowercase())),
+            StringOp::Trim => Ok(Value::String(s.trim().to_string())),
+            StringOp::TrimStart => Ok(Value::String(s.trim_start().to_string())),
+            StringOp::TrimEnd => Ok(Value::String(s.trim_end().to_string())),
+            StringOp::Length => Ok(json!(s.chars().count())),
+            StringOp::Substring { start, length } => {
+                let chars: Vec<char> = s.chars().collect();
+                let start = (*start).min(chars.len());
+                let slice = match length {
+                    Some(len) => &chars[start..(start + len).min(chars.len())],
+                    None => &chars[start..],
+                };
+                Ok(Value::String(slice.iter().collect()))
+            }
+            StringOp::Replace { from, to, all } => {
+                let result = if *all {
+                    s.replace(from.as_str(), to.as_str())
+                } else {
+                    s.replacen(from.as_str(), to.as_str(), 1)
+                };
+                Ok(Value::String(result))
+            }
+            StringOp::RegexReplace { pattern, replacement } => {
+                let result = pattern.replace_all(s, replacement.as_str()).to_string();
+                Ok(Value::String(result))
+            }
+            StringOp::Split { delimiter } => {
+                let parts: Vec<Value> = s
+                    .split(delimiter.as_str())
+                    .map(|p| Value::String(p.to_string()))
+                    .collect();
+                Ok(Value::Array(parts))
+            }
+        }
+    }
+}
+
+impl Transform for StringTransform {
+    fn transform(&self, value: Value) -> Result<Value> {
+        let Some(s) = get_string_at_path(&value, &self.path) else {
+            tracing::debug!("STRING: path '{}' not found or not a string/scalar, passing through", self.path);
+            return Ok(value);
+        };
+        let result = self.apply(&s)?;
+        write_string_result(value, &self.path, result, self.output_field.as_deref())
+    }
+}
+
+/// Concatenate multiple fields and/or literal strings into a single output field.
+///
+/// DSL syntax:
+/// ```text
+/// STRING:CONCAT,outputField,/firstName, ,/lastName
+/// ```
+/// Parts starting with `/` are JSON path extractions; all other parts are literals.
+///
+/// Numeric and boolean fields are coerced to their string representation.
+pub struct ConcatTransform {
+    pub parts: Vec<ConcatPart>,
+    pub output_field: String,
+}
+
+/// A single segment in a [`ConcatTransform`].
+#[derive(Debug, Clone)]
+pub enum ConcatPart {
+    Literal(String),
+    Path(String),
+}
+
+impl ConcatTransform {
+    pub fn new(output_field: &str, parts: Vec<ConcatPart>) -> Self {
+        Self {
+            parts,
+            output_field: output_field.to_string(),
+        }
+    }
+}
+
+impl Transform for ConcatTransform {
+    fn transform(&self, value: Value) -> Result<Value> {
+        let mut buf = String::new();
+        for part in &self.parts {
+            match part {
+                ConcatPart::Literal(s) => buf.push_str(s),
+                ConcatPart::Path(path) => match get_string_at_path(&value, path) {
+                    Some(s) => buf.push_str(&s),
+                    None => {
+                        tracing::debug!("CONCAT: path '{}' not found or not a string, using empty string", path);
+                    }
+                },
+            }
+        }
+
+        if let Value::Object(mut obj) = value {
+            obj.insert(self.output_field.clone(), Value::String(buf));
+            Ok(Value::Object(obj))
         } else {
-            // Cache miss - return original value unchanged
-            tracing::debug!("Cache miss for key: {}", cache_key);
+            tracing::debug!("CONCAT: message is not a JSON object, passing through");
             Ok(value)
         }
     }

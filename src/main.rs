@@ -8,7 +8,7 @@ use std::time::Duration;
 use streamforge::filter::{EnvelopeTransform, Filter, Transform};
 use streamforge::filter_parser::{
     parse_filter, parse_header_transform, parse_key_transform, parse_static_headers,
-    parse_timestamp_transform, parse_transform,
+    parse_timestamp_transform, parse_transform_with_cache,
 };
 use streamforge::kafka::KafkaSink;
 use streamforge::metrics::{Stats, StatsReporter};
@@ -18,7 +18,7 @@ use streamforge::observability::{
 use streamforge::processor::{
     DestinationProcessor, MessageProcessor, MultiDestinationProcessor, SingleDestinationProcessor,
 };
-use streamforge::{MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result};
+use streamforge::{MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result, SyncCacheManager};
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
@@ -67,22 +67,39 @@ async fn main() -> Result<()> {
     // Create statistics
     let stats = Arc::new(Stats::new());
 
+    // Shared sync cache manager — used by CACHE_LOOKUP / CACHE_PUT transforms
+    let cache_manager = Arc::new(SyncCacheManager::new());
+
+    // Warn when both routing and transform are set — routing wins, transform is ignored.
+    if config.routing.is_some() && config.transform.is_some() {
+        warn!(
+            "Both 'routing' and 'transform' are set in config. \
+             The top-level 'transform' field is ignored in multi-destination mode. \
+             Use per-destination 'transform' expressions inside 'routing.destinations' instead."
+        );
+    }
+
     // Build processor based on configuration
     let processor: Arc<dyn MessageProcessor> = if let Some(routing) = &config.routing {
         info!("Multi-destination routing enabled");
-        build_multi_destination_processor(&config, routing, stats.clone()).await?
+        build_multi_destination_processor(&config, routing, stats.clone(), cache_manager.clone()).await?
     } else {
         info!("Single-destination mode");
-        build_single_destination_processor(&config, stats.clone()).await?
+        build_single_destination_processor(&config, stats.clone(), cache_manager.clone()).await?
     };
 
     // Create Kafka consumer
     let consumer = create_consumer(&config)?;
 
-    // Subscribe to input topics
-    let topics: Vec<&str> = config.input.split(',').collect();
-    consumer.subscribe(&topics)?;
-    info!("Subscribed to topics: {:?}", topics);
+    // Subscribe to input topics (supports comma-separated list or regex pattern)
+    let topics = parse_input_topics(&config.input);
+    let topic_refs: Vec<&str> = topics.iter().map(String::as_str).collect();
+    consumer.subscribe(&topic_refs)?;
+    if is_topic_regex(&config.input) {
+        info!("Subscribed with regex pattern: {}", config.input);
+    } else {
+        info!("Subscribed to topics: {:?}", topics);
+    }
 
     // Wrap consumer in Arc for sharing
     let consumer = Arc::new(consumer);
@@ -371,6 +388,53 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Returns true if the input string is a regex pattern (starts with `^`).
+///
+/// rdkafka treats a subscription as a regex when the pattern begins with `^`,
+/// which causes the consumer to subscribe to all matching topics and pick up
+/// newly created topics automatically.
+///
+/// **Important:** patterns must start with `^` to be treated as regex by rdkafka.
+/// A string like `"events.*"` without a leading `^` is subscribed as a literal
+/// topic name; `parse_input_topics` logs a warning in that case.
+///
+/// Examples:
+/// - `"^payments.*"` → regex (all topics starting with "payments")
+/// - `"^(orders|invoices).*"` → regex (multiple prefixes)
+/// - `"payments,invoices"` → static list
+fn is_topic_regex(input: &str) -> bool {
+    input.trim_start().starts_with('^')
+}
+
+/// Parse the `input` config field into a list of topic strings to subscribe to.
+///
+/// - Regex pattern (starts with `^`): returned as a single-element vec so rdkafka
+///   handles the pattern matching and dynamic topic discovery.
+/// - Comma-separated list: split and trimmed into individual topic names.
+fn parse_input_topics(input: &str) -> Vec<String> {
+    if is_topic_regex(input) {
+        vec![input.trim().to_string()]
+    } else {
+        let trimmed = input.trim();
+        // Warn if it looks like a regex but is missing the required `^` prefix.
+        // rdkafka only treats a subscription as a regex when it starts with `^`.
+        if !trimmed.contains(',')
+            && (trimmed.contains(".*")
+                || trimmed.contains(".+")
+                || trimmed.contains('[')
+                || trimmed.contains('('))
+        {
+            warn!(
+                "Input '{}' contains regex metacharacters but does not start with '^'. \
+                 It will be treated as a literal topic name and likely produce no messages. \
+                 Prefix with '^' to enable regex subscription (e.g. '^{}').",
+                trimmed, trimmed
+            );
+        }
+        input.split(',').map(|s| s.trim().to_string()).collect()
+    }
+}
+
 fn load_config() -> Result<MirrorMakerConfig> {
     // Check for config file path in environment or use default
     let config_path = std::env::var("CONFIG_FILE").unwrap_or_else(|_| "config.json".to_string());
@@ -396,6 +460,7 @@ fn create_default_config() -> MirrorMakerConfig {
         threads: 4,
         compression: Default::default(),
         routing: None,
+        transform: None,
         consumer_properties: Default::default(),
         producer_properties: Default::default(),
         security: None,
@@ -438,20 +503,30 @@ fn create_consumer(config: &MirrorMakerConfig) -> Result<StreamConsumer> {
 async fn build_single_destination_processor(
     config: &MirrorMakerConfig,
     _stats: Arc<Stats>,
+    cache_manager: Arc<SyncCacheManager>,
 ) -> Result<Arc<dyn MessageProcessor>> {
     let output_topic = config
         .output
         .clone()
         .ok_or_else(|| MirrorMakerError::Config("Output topic not specified".to_string()))?;
 
-    let sink = KafkaSink::new(config, output_topic, None).await?;
-    Ok(Arc::new(SingleDestinationProcessor::new(Arc::new(sink))))
+    let sink = Arc::new(KafkaSink::new(config, output_topic, None).await?);
+
+    // Parse optional top-level transform (supports CACHE_LOOKUP, CACHE_PUT, STRING:, etc.)
+    if let Some(ref transform_expr) = config.transform {
+        info!("Value transform: {}", transform_expr);
+        let transform = parse_transform_with_cache(transform_expr, Some(cache_manager))?;
+        Ok(Arc::new(SingleDestinationProcessor::with_transform(sink, transform)))
+    } else {
+        Ok(Arc::new(SingleDestinationProcessor::new(sink)))
+    }
 }
 
 async fn build_multi_destination_processor(
     config: &MirrorMakerConfig,
     routing: &streamforge::RoutingConfig,
     _stats: Arc<Stats>,
+    cache_manager: Arc<SyncCacheManager>,
 ) -> Result<Arc<dyn MessageProcessor>> {
     let mut destinations = Vec::new();
 
@@ -503,11 +578,12 @@ async fn build_multi_destination_processor(
             envelope_transforms.push(parse_timestamp_transform(timestamp_expr)?);
         }
 
-        // Create value transform if specified (backward compatible)
+        // Create value transform — cache_manager is threaded through so
+        // CACHE_LOOKUP / CACHE_PUT expressions resolve named stores
         let transform: Option<Arc<dyn Transform>> = if let Some(ref transform_expr) = dest.transform
         {
             info!("  Value transform: {}", transform_expr);
-            Some(parse_transform(transform_expr)?)
+            Some(parse_transform_with_cache(transform_expr, Some(cache_manager.clone()))?)
         } else {
             None
         };
@@ -626,6 +702,73 @@ fn parse_message_value(raw: Option<&[u8]>) -> Result<Value> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    mod input_topic_tests {
+        use super::*;
+
+        #[test]
+        fn test_regex_pattern_detected() {
+            assert!(is_topic_regex("^payments.*"));
+            assert!(is_topic_regex("^(orders|invoices).*"));
+            assert!(is_topic_regex("^events"));
+        }
+
+        #[test]
+        fn test_static_list_not_regex() {
+            assert!(!is_topic_regex("payments"));
+            assert!(!is_topic_regex("payments,invoices"));
+            assert!(!is_topic_regex("topic1, topic2, topic3"));
+        }
+
+        #[test]
+        fn test_regex_returned_as_single_element() {
+            let result = parse_input_topics("^payments.*");
+            assert_eq!(result, vec!["^payments.*"]);
+        }
+
+        #[test]
+        fn test_static_list_split_and_trimmed() {
+            let result = parse_input_topics("topic1,topic2,topic3");
+            assert_eq!(result, vec!["topic1", "topic2", "topic3"]);
+        }
+
+        #[test]
+        fn test_static_list_with_spaces_trimmed() {
+            let result = parse_input_topics("topic1, topic2 , topic3");
+            assert_eq!(result, vec!["topic1", "topic2", "topic3"]);
+        }
+
+        #[test]
+        fn test_single_topic() {
+            let result = parse_input_topics("my-topic");
+            assert_eq!(result, vec!["my-topic"]);
+        }
+
+        // MAIN-2: apparent regex patterns without `^` are treated as literal topic names.
+        // The warning is emitted but parse_input_topics still returns a list (not an error),
+        // so callers see the unanchored pattern as a literal topic name string.
+        #[test]
+        fn test_unanchored_dotstar_treated_as_literal() {
+            let result = parse_input_topics("events.*");
+            // Returned as a single literal, not split (no comma) — rdkafka will subscribe
+            // to a topic literally named "events.*" which likely doesn't exist.
+            assert_eq!(result, vec!["events.*"]);
+        }
+
+        #[test]
+        fn test_unanchored_bracket_treated_as_literal() {
+            let result = parse_input_topics("payments[0-9]");
+            assert_eq!(result, vec!["payments[0-9]"]);
+        }
+
+        #[test]
+        fn test_anchored_pattern_is_regex() {
+            // Anchored with ^ → treated as regex subscription
+            let result = parse_input_topics("^events.*");
+            assert_eq!(result, vec!["^events.*"]);
+            assert!(is_topic_regex("^events.*"));
+        }
+    }
 
     mod parse_message_key_tests {
         use super::*;

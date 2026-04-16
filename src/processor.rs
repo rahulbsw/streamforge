@@ -13,20 +13,31 @@ pub trait MessageProcessor: Send + Sync {
     async fn process(&self, envelope: MessageEnvelope) -> Result<()>;
 }
 
-/// Single-destination processor
+/// Single-destination processor — optionally applies a value transform before sending.
 pub struct SingleDestinationProcessor {
     sink: Arc<KafkaSink>,
+    transform: Option<Arc<dyn Transform>>,
 }
 
 impl SingleDestinationProcessor {
     pub fn new(sink: Arc<KafkaSink>) -> Self {
-        Self { sink }
+        Self { sink, transform: None }
+    }
+
+    pub fn with_transform(sink: Arc<KafkaSink>, transform: Arc<dyn Transform>) -> Self {
+        Self { sink, transform: Some(transform) }
     }
 }
 
 #[async_trait::async_trait]
 impl MessageProcessor for SingleDestinationProcessor {
     async fn process(&self, envelope: MessageEnvelope) -> Result<()> {
+        let envelope = if let Some(t) = &self.transform {
+            let transformed = t.transform(envelope.value)?;
+            MessageEnvelope { value: transformed, ..envelope }
+        } else {
+            envelope
+        };
         self.sink.send(envelope).await
     }
 }

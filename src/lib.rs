@@ -13,7 +13,7 @@ pub mod observability;
 pub mod partitioner;
 pub mod processor;
 
-pub use cache::{CacheConfig, CacheManager, CacheStats, LookupCache};
+pub use cache::{CacheConfig, CacheManager, CacheStats, LookupCache, SyncCacheManager, SyncLookupCache};
 pub use cache_backend::CacheBackend;
 pub use config::{
     CacheBackendConfig, CacheBackendType, CommitMode, CommitStrategyConfig, DestinationConfig,
@@ -23,18 +23,19 @@ pub use config::{
 pub use envelope::MessageEnvelope;
 pub use error::{MirrorMakerError, Result};
 pub use filter::{
-    AndFilter, AsyncTransform, CacheLookupTransform, EnvelopeTransform, Filter, HashTransform,
-    HeaderCopyTransform, HeaderExistsFilter, HeaderFilter, HeaderFromTransform,
-    HeaderRemoveTransform, HeaderSetTransform, JsonPathFilter, JsonPathTransform,
-    KeyConstantTransform, KeyConstructTransform, KeyContainsFilter, KeyExistsFilter,
-    KeyFromTransform, KeyHashTransform, KeyMatchesFilter, KeyPrefixFilter, KeySuffixFilter,
-    KeyTemplateTransform, NotFilter, ObjectConstructTransform, OrFilter, TimestampAddTransform,
-    TimestampAfterFilter, TimestampAgeFilter, TimestampBeforeFilter, TimestampCurrentTransform,
-    TimestampFromTransform, TimestampPreserveTransform, TimestampSubtractTransform, Transform,
+    AndFilter, CacheLookupTransform, CachePutTransform, ConcatPart, ConcatTransform,
+    EnvelopeTransform, Filter, HashTransform, HeaderCopyTransform, HeaderExistsFilter,
+    HeaderFilter, HeaderFromTransform, HeaderRemoveTransform, HeaderSetTransform, JsonPathFilter,
+    JsonPathTransform, KeyConstantTransform, KeyConstructTransform, KeyContainsFilter,
+    KeyExistsFilter, KeyFromTransform, KeyHashTransform, KeyMatchesFilter, KeyPrefixFilter,
+    KeySuffixFilter, KeyTemplateTransform, NotFilter, ObjectConstructTransform, OrFilter,
+    StringOp, StringTransform, TimestampAddTransform, TimestampAfterFilter, TimestampAgeFilter,
+    TimestampBeforeFilter, TimestampCurrentTransform, TimestampFromTransform,
+    TimestampPreserveTransform, TimestampSubtractTransform, Transform,
 };
 pub use filter_parser::{
     parse_filter, parse_header_transform, parse_key_transform, parse_static_headers,
-    parse_timestamp_transform, parse_transform,
+    parse_timestamp_transform, parse_transform, parse_transform_with_cache,
 };
 pub use hash::{hash_bytes, hash_value, HashAlgorithm};
 pub use kafka::sink::KafkaSink;
