@@ -13,7 +13,9 @@ pub mod observability;
 pub mod partitioner;
 pub mod processor;
 
-pub use cache::{CacheConfig, CacheManager, CacheStats, LookupCache, SyncCacheManager, SyncLookupCache};
+pub use cache::{
+    CacheConfig, CacheManager, CacheStats, LookupCache, SyncCacheManager, SyncLookupCache,
+};
 pub use cache_backend::CacheBackend;
 pub use config::{
     CacheBackendConfig, CacheBackendType, CommitMode, CommitStrategyConfig, DestinationConfig,
@@ -28,8 +30,8 @@ pub use filter::{
     HeaderFilter, HeaderFromTransform, HeaderRemoveTransform, HeaderSetTransform, JsonPathFilter,
     JsonPathTransform, KeyConstantTransform, KeyConstructTransform, KeyContainsFilter,
     KeyExistsFilter, KeyFromTransform, KeyHashTransform, KeyMatchesFilter, KeyPrefixFilter,
-    KeySuffixFilter, KeyTemplateTransform, NotFilter, ObjectConstructTransform, OrFilter,
-    StringOp, StringTransform, TimestampAddTransform, TimestampAfterFilter, TimestampAgeFilter,
+    KeySuffixFilter, KeyTemplateTransform, NotFilter, ObjectConstructTransform, OrFilter, StringOp,
+    StringTransform, TimestampAddTransform, TimestampAfterFilter, TimestampAgeFilter,
     TimestampBeforeFilter, TimestampCurrentTransform, TimestampFromTransform,
     TimestampPreserveTransform, TimestampSubtractTransform, Transform,
 };
