@@ -708,12 +708,285 @@ jobs:
         run: docker rm -f latency-kafka 2>/dev/null || true
 
 
+
   # ══════════════════════════════════════════════════════════════════════════
-  # JOB 4 — Consolidate all results into final summary
+  # JOB 4 — Partition scaling sweep (4P / 8P / 16P with matched and fixed threads)
+  #
+  # Two views:
+  #   Matched  — partitions = threads (4P/4T, 8P/8T, 16P/16T)
+  #              Shows raw scaling capacity
+  #   Fixed-8T — threads fixed at 8, vary partitions (4P, 8P, 16P)
+  #              Shows where more partitions stop helping
+  # ══════════════════════════════════════════════════════════════════════════
+  partition-scaling:
+    name: Partition Scaling (4 / 8 / 16 partitions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libsasl2-dev libssl-dev libzstd-dev cmake pkg-config \
+            clang libclang-dev curl python3
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Start Kafka (KRaft)
+        run: |
+          docker run -d \
+            --name scale-kafka \
+            -p 9092:9092 \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_LISTENERS="PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093" \
+            -e KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://localhost:9092" \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS="1@localhost:9093" \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP="PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT" \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_AUTO_CREATE_TOPICS_ENABLE=true \
+            -e CLUSTER_ID="scale-test-cluster-001" \
+            confluentinc/cp-kafka:7.6.0
+          for i in $(seq 1 30); do
+            docker exec scale-kafka kafka-topics \
+              --bootstrap-server localhost:9092 --list >/dev/null 2>&1 && break
+            sleep 2
+          done
+          echo "Kafka ready"
+
+      - name: Generate test data
+        run: |
+          python3 - << 'PYEOF'
+          import json, random, time
+          with open("scale_data.jsonl", "w") as f:
+              for i in range(${{ inputs.messages }}):
+                  f.write(json.dumps({
+                      "userId": f"usr-{i:06d}",
+                      "email": f"User{i}@Example.COM",
+                      "tier": random.choice(["free","standard","premium","enterprise"]),
+                      "status": "active" if random.random() > 0.1 else "suspended",
+                      "eventType": random.choice(["page.view","purchase.completed","login"]),
+                      "amount": round(random.uniform(1, 2000), 2),
+                      "score": random.randint(0, 100),
+                      "timestamp": int(time.time() * 1000) - random.randint(0, 60000),
+                  }) + "\n")
+          PYEOF
+
+      - name: Run partition scaling matrix
+        run: |
+          MSGS=${{ inputs.messages }}
+          FIXED_THREADS=${{ inputs.threads }}
+
+          # Matrix: (partitions, threads, label, metrics_port)
+          # View A: matched partitions=threads
+          # View B: threads fixed at inputs.threads, vary partitions
+          declare -a MATRIX=(
+            "4:4:matched-4P4T:9101"
+            "8:8:matched-8P8T:9102"
+            "16:16:matched-16P16T:9103"
+            "4:${FIXED_THREADS}:fixed${FIXED_THREADS}T-4P:9104"
+            "8:${FIXED_THREADS}:fixed${FIXED_THREADS}T-8P:9105"
+            "16:${FIXED_THREADS}:fixed${FIXED_THREADS}T-16P:9106"
+          )
+
+          : > scale_results.csv
+
+          for entry in "${MATRIX[@]}"; do
+            IFS=: read -r PARTS THREADS LABEL PORT <<< "$entry"
+
+            echo ""
+            echo "━━ ${LABEL}: ${PARTS} partitions, ${THREADS} threads ━━"
+
+            # Create topics
+            for t in "scale-in-${LABEL}" "scale-out-${LABEL}"; do
+              docker exec scale-kafka kafka-topics \
+                --create --if-not-exists --topic "$t" \
+                --partitions "$PARTS" --replication-factor 1 \
+                --bootstrap-server localhost:9092 2>/dev/null
+            done
+
+            # Write config
+            cat > config-scale.yaml << CFGEOF
+          appid: scale-${LABEL}
+          bootstrap: localhost:9092
+          input: scale-in-${LABEL}
+          threads: ${THREADS}
+          offset: earliest
+          observability:
+            metrics_enabled: true
+            metrics_port: ${PORT}
+            lag_monitoring_enabled: false
+          routing:
+            destinations:
+              - output: scale-out-${LABEL}
+                filter:
+                  - 'msg["status"] == "active"'
+                  - 'msg["score"] > 50'
+                  - 'not_null(msg["userId"])'
+                transform: |
+                  #{
+                    id:        msg["userId"],
+                    tier:      msg["tier"].to_upper(),
+                    email:     msg["email"].to_lower(),
+                    amount:    msg["amount"] * 1.08,
+                    processed: true,
+                    ts:        now_ms()
+                  }
+          CFGEOF
+
+            # Start StreamForge
+            CONFIG_FILE=config-scale.yaml ./target/release/streamforge \
+              > sf-scale-${LABEL}.log 2>&1 &
+            SF_PID=$!
+            sleep 3
+
+            # Produce
+            T_START=$(python3 -c "import time; print(int(time.time()*1000))")
+            cat scale_data.jsonl | docker exec -i scale-kafka \
+              kafka-console-producer \
+              --bootstrap-server localhost:9092 \
+              --topic "scale-in-${LABEL}" \
+              --batch-size 5000 \
+              --request-required-acks 1 2>/dev/null
+
+            # Wait for completion
+            for i in $(seq 1 90); do
+              CONSUMED=$(curl -s "http://localhost:${PORT}/metrics" \
+                | grep "^streamforge_messages_consumed_total " \
+                | awk '{printf "%.0f", $2}' 2>/dev/null || echo 0)
+              printf "\r  [%3ds] %s / %s consumed" "$((i*2))" "${CONSUMED:-0}" "$MSGS"
+              [ "${CONSUMED:-0}" -ge "$MSGS" ] && break
+              sleep 2
+            done
+            echo ""
+
+            T_END=$(python3 -c "import time; print(int(time.time()*1000))")
+            ELAPSED_MS=$(( T_END - T_START ))
+            CONSUMED=$(curl -s "http://localhost:${PORT}/metrics" \
+              | grep "^streamforge_messages_consumed_total " \
+              | awk '{printf "%.0f", $2}')
+            THROUGHPUT=$(python3 -c "print(int(${CONSUMED:-0} * 1000 / max(${ELAPSED_MS},1)))")
+            P99=$(curl -s "http://localhost:${PORT}/metrics" \
+              | grep 'processing_duration_seconds{.*quantile="0.99"' \
+              | awk '{printf "%.0f", $2 * 1000000}' | head -1)
+
+            # Save Prometheus snapshot
+            curl -s "http://localhost:${PORT}/metrics" > metrics-scale-${LABEL}.txt
+
+            kill "$SF_PID" 2>/dev/null; sleep 2
+
+            echo "${LABEL}|${PARTS}|${THREADS}|${CONSUMED}|${THROUGHPUT}|${P99:-0}" >> scale_results.csv
+            echo "  Result: ${THROUGHPUT} msg/s | p99=${P99:-n/a} µs"
+          done
+
+      - name: Generate scaling report
+        run: |
+          python3 - "${{ inputs.messages }}" "${{ inputs.threads }}" << 'PYEOF'
+          import sys
+
+          messages      = int(sys.argv[1])
+          fixed_threads = int(sys.argv[2])
+
+          rows = []
+          for line in open("scale_results.csv"):
+              label, parts, threads, consumed, tp, p99 = line.strip().split("|")
+              rows.append({
+                  "label": label, "parts": int(parts), "threads": int(threads),
+                  "consumed": int(consumed), "tp": int(tp), "p99": int(p99)
+              })
+
+          matched = [r for r in rows if r["label"].startswith("matched")]
+          fixed   = [r for r in rows if r["label"].startswith("fixed")]
+
+          def bar(ratio, width=20):
+              filled = round(min(ratio, 1.0) * width)
+              return "█" * filled + "░" * (width - filled)
+
+          import os
+          summary = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/stdout")
+          with open(summary, "a") as out:
+              out.write("## Partition Scaling Results\n\n")
+              out.write(f"Rhai filter+transform pipeline · {messages:,} messages\n\n")
+
+              out.write("### View A — Matched: partitions = threads\n\n")
+              out.write("| Config | Partitions | Threads | Throughput | Speedup | Efficiency | Scaling |\n")
+              out.write("|---|---|---|---|---|---|---|\n")
+              base = matched[0]["tp"] if matched else 1
+              for r in matched:
+                  speedup   = r["tp"] / base
+                  expected  = r["parts"] / matched[0]["parts"]
+                  efficiency = speedup / expected if expected else 0
+                  b = bar(efficiency)
+                  out.write(f"| `{r['label']}` | {r['parts']} | {r['threads']} "
+                            f"| **{r['tp']:,}/s** | {speedup:.2f}x | {efficiency:.0%} | `{b}` |\n")
+
+              out.write("\n### View B — Fixed threads, vary partitions\n\n")
+              out.write(f"All runs use {fixed_threads} threads.\n\n")
+              out.write("| Config | Partitions | Threads | Throughput | vs 4P | Note |\n")
+              out.write("|---|---|---|---|---|---|\n")
+              base_f = next((r["tp"] for r in fixed if r["parts"] == 4), fixed[0]["tp"] if fixed else 1)
+              for r in fixed:
+                  vs = r["tp"] / base_f
+                  if r["parts"] < r["threads"]:
+                      note = "threads idle"
+                  elif r["parts"] == r["threads"]:
+                      note = "✓ optimal"
+                  else:
+                      note = "partitions > threads — no gain"
+                  out.write(f"| `{r['label']}` | {r['parts']} | {r['threads']} "
+                            f"| **{r['tp']:,}/s** | {vs:.2f}x | {note} |\n")
+
+              out.write("\n### Key Takeaways\n\n")
+              if matched and len(matched) >= 2:
+                  ratio = matched[-1]["tp"] / matched[0]["tp"]
+                  parts_ratio = matched[-1]["parts"] / matched[0]["parts"]
+                  eff = ratio / parts_ratio * 100
+                  out.write(f"- Scaling from {matched[0]['parts']}→{matched[-1]['parts']} partitions "
+                            f"(with matching threads) gives **{ratio:.1f}x throughput** "
+                            f"({eff:.0f}% of ideal linear scaling)\n")
+              if fixed:
+                  low  = next((r["tp"] for r in fixed if r["parts"] == 4),  0)
+                  mid  = next((r["tp"] for r in fixed if r["parts"] == 8),  0)
+                  high = next((r["tp"] for r in fixed if r["parts"] == 16), 0)
+                  if high and mid and (high / mid) < 1.1:
+                      out.write(f"- With {fixed_threads} threads, going from 8→16 partitions gives "
+                                f"<10% improvement — the thread count is the bottleneck\n")
+                  out.write(f"- **Rule of thumb: set `threads` ≈ `partitions` for best throughput**\n")
+          PYEOF
+
+      - name: Upload scaling results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: partition-scaling-${{ github.sha }}
+          path: |
+            scale_results.csv
+            metrics-scale-*.txt
+            sf-scale-*.log
+          retention-days: 30
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f scale-kafka 2>/dev/null || true
+
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # JOB 5 — Consolidate all results into final summary
   # ══════════════════════════════════════════════════════════════════════════
   performance-report:
     name: Performance Report
-    needs: [dsl-benchmarks, throughput-test, latency-profile]
+    needs: [dsl-benchmarks, throughput-test, latency-profile, partition-scaling]
     runs-on: ubuntu-latest
     if: always()
 
@@ -731,8 +1004,9 @@ jobs:
           | Job | Status |
           |---|---|
           | DSL Micro-benchmarks | ${{ needs.dsl-benchmarks.result }} |
-          | Throughput Test | ${{ needs.throughput-test.result }} |
+          | Throughput Test (3 scenarios) | ${{ needs.throughput-test.result }} |
           | Latency Profile | ${{ needs.latency-profile.result }} |
+          | Partition Scaling (4/8/16P) | ${{ needs.partition-scaling.result }} |
 
           ## Artifacts
 

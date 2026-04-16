@@ -22,6 +22,7 @@ THREADS=8
 PARTITIONS=8
 DSL_ONLY=false
 NO_KAFKA=false
+SWEEP=false
 KAFKA_CONTAINER="bench-kafka"
 STREAMFORGE_BIN="./target/release/streamforge"
 TMP_DIR=$(mktemp -d)
@@ -45,8 +46,9 @@ while [[ $# -gt 0 ]]; do
     -p|--partitions) PARTITIONS="$2"; shift 2;;
     --dsl-only)      DSL_ONLY=true;   shift;;
     --no-kafka)      NO_KAFKA=true;   shift;;
+    --sweep)         SWEEP=true;      shift;;
     -h|--help)
-      echo "Usage: $0 [-m messages] [-t threads] [-p partitions] [--dsl-only] [--no-kafka]"
+      echo "Usage: $0 [-m messages] [-t threads] [-p partitions] [--dsl-only] [--no-kafka] [--sweep]"
       exit 0;;
     *) err "Unknown argument: $1"; exit 1;;
   esac
@@ -406,6 +408,197 @@ if baseline:
 
 print()
 PYEOF
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PART 9 — Partition scaling sweep (--sweep mode)
+#
+# Two views:
+#   a) Matched: partitions = threads (shows raw scaling capacity)
+#      4P/4T  →  8P/8T  →  16P/16T
+#
+#   b) Fixed threads = 8, vary partitions: 4P  8P  16P
+#      Shows where adding partitions stops helping (ceiling = thread count)
+# ══════════════════════════════════════════════════════════════════════════════
+if $SWEEP && ! $NO_KAFKA; then
+  hdr "Part 9: Partition Scaling Sweep"
+
+  NCPUS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 8)
+  log "Detected ${NCPUS} logical CPUs"
+
+  # Only go to 16 if the machine has enough cores to avoid noise
+  SWEEP_CONFIGS="4:4 8:8"
+  [ "$NCPUS" -ge 12 ] && SWEEP_CONFIGS="4:4 8:8 16:16" || \
+    warn "Fewer than 12 CPUs — skipping 16P/16T (would produce noisy results)"
+
+  FIXED_THREAD_CONFIGS="4:8 8:8 16:8"   # P:T with threads fixed at 8
+  SWEEP_CSV="$RESULTS_DIR/sweep.csv"
+  : > "$SWEEP_CSV"
+
+  # Helper: create Rhai filter+transform config and run scenario B
+  sweep_one() {
+    local label="$1" partitions="$2" threads="$3" metrics_port="$4"
+    local in_topic="sweep-in-${partitions}p-${threads}t"
+    local out_topic="sweep-out-${partitions}p-${threads}t"
+
+    # Create topics
+    for t in "$in_topic" "$out_topic"; do
+      docker exec "$KAFKA_CONTAINER" kafka-topics \
+        --create --if-not-exists --topic "$t" \
+        --partitions "$partitions" --replication-factor 1 \
+        --bootstrap-server localhost:9092 2>/dev/null
+    done
+
+    # Config
+    cat > "$TMP_DIR/sweep-${label}.yaml" << CFGEOF
+appid: sweep-${label}
+bootstrap: localhost:9092
+input: ${in_topic}
+threads: ${threads}
+offset: earliest
+observability:
+  metrics_enabled: true
+  metrics_port: ${metrics_port}
+  lag_monitoring_enabled: false
+routing:
+  destinations:
+    - output: ${out_topic}
+      filter:
+        - 'msg["status"] == "active"'
+        - 'msg["score"] > 50'
+        - 'not_null(msg["userId"])'
+      transform: |
+        #{
+          id:        msg["userId"],
+          tier:      msg["tier"].to_upper(),
+          email:     msg["email"].to_lower(),
+          amount:    msg["amount"] * 1.08,
+          processed: true,
+          ts:        now_ms()
+        }
+CFGEOF
+
+    CONFIG_FILE="$TMP_DIR/sweep-${label}.yaml" \
+      "$STREAMFORGE_BIN" > "$RESULTS_DIR/sf-sweep-${label}.log" 2>&1 &
+    local sf_pid=$!
+    sleep 2
+
+    local t_start consumed throughput p99
+    t_start=$(python3 -c "import time; print(int(time.time()*1000))")
+
+    cat "$TMP_DIR/test_data.jsonl" | docker exec -i "$KAFKA_CONTAINER" \
+      kafka-console-producer \
+      --bootstrap-server localhost:9092 \
+      --topic "$in_topic" \
+      --batch-size 5000 \
+      --request-required-acks 1 2>/dev/null
+
+    for i in $(seq 1 60); do
+      consumed=$(curl -s "http://localhost:${metrics_port}/metrics" \
+        | grep "^streamforge_messages_consumed_total " \
+        | awk '{printf "%.0f", $2}' 2>/dev/null || echo 0)
+      [ "${consumed:-0}" -ge "$MESSAGES" ] && break
+      sleep 2
+    done
+
+    local t_end elapsed
+    t_end=$(python3 -c "import time; print(int(time.time()*1000))")
+    elapsed=$(( t_end - t_start ))
+    consumed=$(curl -s "http://localhost:${metrics_port}/metrics" \
+      | grep "^streamforge_messages_consumed_total " \
+      | awk '{printf "%.0f", $2}')
+    throughput=$(python3 -c "print(int(${consumed:-0} * 1000 / max(${elapsed},1)))")
+    p99=$(curl -s "http://localhost:${metrics_port}/metrics" \
+      | grep 'processing_duration_seconds{.*quantile="0.99"' \
+      | awk '{printf "%.0f", $2 * 1000000}' | head -1)
+
+    kill "$sf_pid" 2>/dev/null; sleep 2
+
+    echo "${label}|${partitions}|${threads}|${throughput}|${p99:-0}" >> "$SWEEP_CSV"
+    printf "  %-20s  %3dP / %2dT   %8s msg/s   p99=%s µs\n" \
+      "$label" "$partitions" "$threads" "$throughput" "${p99:-n/a}"
+  }
+
+  METRICS_PORT=9094
+
+  echo ""
+  log "View A: Matched partitions = threads (shows raw scaling)"
+  echo ""
+  for cfg in $SWEEP_CONFIGS; do
+    P="${cfg%%:*}"; T="${cfg##*:}"
+    METRICS_PORT=$((METRICS_PORT + 1))
+    sweep_one "matched-${P}p${T}t" "$P" "$T" "$METRICS_PORT"
+  done
+
+  echo ""
+  log "View B: Fixed threads=8, vary partitions (shows ceiling effect)"
+  echo ""
+  for cfg in $FIXED_THREAD_CONFIGS; do
+    P="${cfg%%:*}"; T="${cfg##*:}"
+    METRICS_PORT=$((METRICS_PORT + 1))
+    sweep_one "fixed8t-${P}p" "$P" "$T" "$METRICS_PORT"
+  done
+
+  # ── Print sweep summary table ───────────────────────────────────────────
+  hdr "Partition Scaling Results"
+
+  python3 - "$SWEEP_CSV" << 'PYEOF'
+import sys, csv
+
+rows = []
+for line in open(sys.argv[1]):
+    label, parts, threads, tp, p99 = line.strip().split("|")
+    rows.append({"label": label, "parts": int(parts), "threads": int(threads),
+                 "tp": int(tp), "p99": int(p99) if p99 else 0})
+
+matched = [r for r in rows if r["label"].startswith("matched")]
+fixed   = [r for r in rows if r["label"].startswith("fixed")]
+
+def scaling_bar(efficiency):
+    filled = round(efficiency * 20)
+    return "█" * filled + "░" * (20 - filled)
+
+print()
+print("  VIEW A: Matched (partitions = threads)")
+print(f"  {'Config':<18} {'P':>4} {'T':>4} {'Throughput':>12}  {'Speedup':>8}  {'Efficiency':>10}  Scaling")
+print(f"  {'─'*80}")
+base = matched[0]["tp"] if matched else 1
+for r in matched:
+    speedup   = r["tp"] / base
+    expected  = r["parts"] / matched[0]["parts"]   # ideal linear
+    efficiency = speedup / expected if expected else 0
+    bar = scaling_bar(min(efficiency, 1.0))
+    print(f"  {r['label']:<18} {r['parts']:>4} {r['threads']:>4} {r['tp']:>10,}/s  {speedup:>7.2f}x  {efficiency:>9.0%}  {bar}")
+
+print()
+print("  VIEW B: Fixed threads=8, vary partitions")
+print(f"  {'Config':<18} {'P':>4} {'T':>4} {'Throughput':>12}  {'vs 4P':>8}")
+print(f"  {'─'*55}")
+base_fixed = next((r["tp"] for r in fixed if r["parts"] == 4), fixed[0]["tp"] if fixed else 1)
+for r in fixed:
+    vs = r["tp"] / base_fixed
+    note = " ← optimal" if r["parts"] == r["threads"] else \
+           " ← bottleneck: partitions > threads, no gain" if r["parts"] > r["threads"] else \
+           " ← threads idle (partitions < threads)"
+    print(f"  {r['label']:<18} {r['parts']:>4} {r['threads']:>4} {r['tp']:>10,}/s  {vs:>7.2f}x{note}")
+
+print()
+print("  Key takeaways:")
+if matched and len(matched) >= 2:
+    ratio = matched[-1]["tp"] / matched[0]["tp"]
+    parts_ratio = matched[-1]["parts"] / matched[0]["parts"]
+    eff = ratio / parts_ratio * 100
+    print(f"  • Scaling {matched[0]['parts']}→{matched[-1]['parts']} partitions (with matching threads): {ratio:.1f}x throughput ({eff:.0f}% of linear)")
+if fixed:
+    ceiling = max(r["tp"] for r in fixed)
+    floor   = min(r["tp"] for r in fixed)
+    if ceiling / max(floor, 1) < 1.15:
+        print(f"  • Adding partitions beyond thread count gives <15% gain — threads are the bottleneck")
+    print(f"  • Best configuration: partitions ≈ threads (Kafka assigns ~1 partition per consumer thread)")
+PYEOF
+
+  ok "Sweep results: $RESULTS_DIR/sweep.csv"
+fi
+
 
 echo ""
 ok "Results saved to: $RESULTS_DIR"
