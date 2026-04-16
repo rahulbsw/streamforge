@@ -186,6 +186,112 @@ impl Default for CacheManager {
     }
 }
 
+// ============================================================================
+// Sync cache — used by transform/filter pipeline (which is synchronous)
+// ============================================================================
+
+/// Synchronous lookup cache backed by `moka::sync::Cache`.
+///
+/// Used by `CacheLookupTransform` and `CachePutTransform` so they can
+/// implement the synchronous `Transform` trait without blocking an async thread.
+pub struct SyncLookupCache {
+    cache: moka::sync::Cache<String, Value>,
+}
+
+impl SyncLookupCache {
+    pub fn new(config: CacheConfig) -> Self {
+        let mut builder = moka::sync::Cache::builder()
+            .max_capacity(config.max_capacity);
+
+        if let Some(ttl) = config.ttl_seconds {
+            builder = builder.time_to_live(Duration::from_secs(ttl));
+        }
+        if let Some(tti) = config.tti_seconds {
+            builder = builder.time_to_idle(Duration::from_secs(tti));
+        }
+
+        info!(
+            "Created sync lookup cache: max_capacity={}, ttl={:?}s, tti={:?}s",
+            config.max_capacity, config.ttl_seconds, config.tti_seconds
+        );
+
+        Self { cache: builder.build() }
+    }
+
+    /// Look up a value by key. Returns `None` on cache miss.
+    pub fn get(&self, key: &str) -> Option<Value> {
+        let result = self.cache.get(key);
+        if result.is_some() {
+            debug!("Cache hit: {}", key);
+        } else {
+            debug!("Cache miss: {}", key);
+        }
+        result
+    }
+
+    /// Insert a value into the cache.
+    pub fn put(&self, key: String, value: Value) {
+        debug!("Cache put: {}", key);
+        self.cache.insert(key, value);
+    }
+
+    /// Remove a key from the cache.
+    pub fn remove(&self, key: &str) {
+        self.cache.invalidate(key);
+    }
+
+    /// Returns true if the key is present.
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.cache.contains_key(key)
+    }
+
+    pub fn entry_count(&self) -> u64 {
+        self.cache.entry_count()
+    }
+}
+
+/// Named store of `SyncLookupCache` instances.
+///
+/// Passed to the transform parser so `CACHE_LOOKUP` and `CACHE_PUT`
+/// expressions can reference caches by name. Caches are created on
+/// first use with default settings (10k entries, 1h TTL).
+pub struct SyncCacheManager {
+    caches: dashmap::DashMap<String, Arc<SyncLookupCache>>,
+}
+
+impl SyncCacheManager {
+    pub fn new() -> Self {
+        Self { caches: dashmap::DashMap::new() }
+    }
+
+    /// Get an existing cache by name, or create it with default config.
+    pub fn get_or_create(&self, name: &str) -> Arc<SyncLookupCache> {
+        self.caches
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                info!("Creating new sync cache store: '{}'", name);
+                Arc::new(SyncLookupCache::new(CacheConfig::default()))
+            })
+            .clone()
+    }
+
+    /// Get an existing cache by name. Returns `None` if it doesn't exist.
+    pub fn get(&self, name: &str) -> Option<Arc<SyncLookupCache>> {
+        self.caches.get(name).map(|e| e.clone())
+    }
+
+    /// List all named stores.
+    pub fn store_names(&self) -> Vec<String> {
+        self.caches.iter().map(|e| e.key().clone()).collect()
+    }
+}
+
+impl Default for SyncCacheManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

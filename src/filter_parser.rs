@@ -1,15 +1,18 @@
+use crate::cache::SyncCacheManager;
 use crate::error::{MirrorMakerError, Result};
 use crate::filter::{
     AndFilter, ArithmeticOp, ArithmeticTransform, ArrayFilter, ArrayFilterMode, ArrayMapTransform,
-    EnvelopeTransform, Filter, HashTransform, HeaderCopyTransform, HeaderExistsFilter,
-    HeaderFilter, HeaderFromTransform, HeaderRemoveTransform, HeaderSetTransform, JsonPathFilter,
+    CacheLookupTransform, CachePutTransform, ConcatPart, ConcatTransform, EnvelopeTransform,
+    Filter, HashTransform, HeaderCopyTransform, HeaderExistsFilter, HeaderFilter,
+    HeaderFromTransform, HeaderRemoveTransform, HeaderSetTransform, JsonPathFilter,
     JsonPathTransform, KeyConstantTransform, KeyConstructTransform, KeyContainsFilter,
     KeyExistsFilter, KeyFromTransform, KeyHashTransform, KeyMatchesFilter, KeyPrefixFilter,
     KeySuffixFilter, KeyTemplateTransform, NotFilter, ObjectConstructTransform, OrFilter,
-    RegexFilter, TimestampAddTransform, TimestampAfterFilter, TimestampAgeFilter,
-    TimestampBeforeFilter, TimestampCurrentTransform, TimestampFromTransform,
+    RegexFilter, StringOp, StringTransform, TimestampAddTransform, TimestampAfterFilter,
+    TimestampAgeFilter, TimestampBeforeFilter, TimestampCurrentTransform, TimestampFromTransform,
     TimestampPreserveTransform, TimestampSubtractTransform, Transform,
 };
+use regex::Regex;
 use crate::hash::HashAlgorithm;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -273,18 +276,45 @@ fn parse_array_filter(parts: &[&str], mode: ArrayFilterMode) -> Result<Box<dyn F
     Ok(Box::new(ArrayFilter::new(path, element_filter, mode)?))
 }
 
-/// Parse transform expression from string
+/// Parse transform expression from string.
 ///
 /// Formats:
 /// - Simple path: "/message" or "/message/confId"
 /// - Object construction: "CONSTRUCT:field1=/path1:field2=/path2"
 /// - Array map: "ARRAY_MAP:/path,element_transform"
 /// - Arithmetic: "ARITHMETIC:op,operand1,operand2"
-///   - op: ADD, SUB, MUL, DIV
-///   - operands: /path or numeric constant
-/// - Hash: "HASH:algorithm,/path" or "HASH:algorithm,/path,output_field"
-///   - algorithm: MD5, SHA256, SHA512, MURMUR64, MURMUR128
+/// - Hash: "HASH:algorithm,/path[,output_field]"
+///
+/// For cache transforms use [`parse_transform_with_cache`].
 pub fn parse_transform(expr: &str) -> Result<Arc<dyn Transform>> {
+    parse_transform_with_cache(expr, None)
+}
+
+/// Parse a transform expression, with optional access to named cache stores.
+///
+/// All formats supported by [`parse_transform`] are accepted, plus:
+///
+/// - `CACHE_LOOKUP:/keyPath,store-name,outputField`
+///   Looks up `message[keyPath]` in `store-name`. On hit, adds the cached
+///   value as a new field named `outputField`. On miss, passes through unchanged.
+///
+/// - `CACHE_LOOKUP:/keyPath,store-name,MERGE`
+///   Same as above but merges the cached object into the message instead of
+///   adding a named field (both message and cached value must be objects).
+///
+/// - `CACHE_PUT:/keyPath,store-name`
+///   Stores the entire message in `store-name` under the key extracted from
+///   `message[keyPath]`. The message passes through unchanged.
+///
+/// - `CACHE_PUT:/keyPath,store-name,/valuePath`
+///   Stores `message[valuePath]` instead of the whole message.
+///
+/// Named cache stores are created on first use (10 000 entries, 1 h TTL).
+/// If `cache_manager` is `None`, `CACHE_LOOKUP` / `CACHE_PUT` return an error.
+pub fn parse_transform_with_cache(
+    expr: &str,
+    cache_manager: Option<Arc<SyncCacheManager>>,
+) -> Result<Arc<dyn Transform>> {
     if let Some(rest) = expr.strip_prefix("CONSTRUCT:") {
         parse_construct_transform(rest)
     } else if let Some(rest) = expr.strip_prefix("ARRAY_MAP:") {
@@ -293,9 +323,274 @@ pub fn parse_transform(expr: &str) -> Result<Arc<dyn Transform>> {
         parse_arithmetic_transform(rest)
     } else if let Some(rest) = expr.strip_prefix("HASH:") {
         parse_hash_transform(rest)
+    } else if let Some(rest) = expr.strip_prefix("CACHE_LOOKUP:") {
+        parse_cache_lookup_transform(rest, cache_manager)
+    } else if let Some(rest) = expr.strip_prefix("CACHE_PUT:") {
+        parse_cache_put_transform(rest, cache_manager)
+    } else if let Some(rest) = expr.strip_prefix("STRING:") {
+        parse_string_transform(rest)
     } else {
         Ok(Arc::new(JsonPathTransform::new(expr)?))
     }
+}
+
+// ============================================================================
+// STRING TRANSFORM PARSERS
+// ============================================================================
+
+/// Parse `STRING:<op>,/path[,arg...]` into a `StringTransform` or `ConcatTransform`.
+///
+/// All single-field operations accept an optional trailing `,outputField` argument.
+/// When present the result is added as a new top-level field; the source is unchanged.
+///
+/// Operations:
+/// - `STRING:UPPER,/path[,outputField]`
+/// - `STRING:LOWER,/path[,outputField]`
+/// - `STRING:TRIM,/path[,outputField]`
+/// - `STRING:TRIM_START,/path[,outputField]`
+/// - `STRING:TRIM_END,/path[,outputField]`
+/// - `STRING:SUBSTRING,/path,start[,length][,outputField]`
+/// - `STRING:REPLACE,/path,from,to[,outputField]`
+/// - `STRING:REPLACE_ALL,/path,from,to[,outputField]`
+/// - `STRING:REGEX_REPLACE,/path,pattern,replacement[,outputField]`
+/// - `STRING:SPLIT,/path,delimiter[,outputField]`
+/// - `STRING:LENGTH,/path[,outputField]`
+/// - `STRING:CONCAT,outputField,part1,part2,...`
+fn parse_string_transform(expr: &str) -> Result<Arc<dyn Transform>> {
+    // Split op from the rest on the first comma
+    let (op, rest) = match expr.find(',') {
+        Some(idx) => (&expr[..idx], &expr[idx + 1..]),
+        None => (expr, ""),
+    };
+
+    match op {
+        "UPPER" => parse_string_simple(rest, StringOp::Upper),
+        "LOWER" => parse_string_simple(rest, StringOp::Lower),
+        "TRIM" => parse_string_simple(rest, StringOp::Trim),
+        "TRIM_START" => parse_string_simple(rest, StringOp::TrimStart),
+        "TRIM_END" => parse_string_simple(rest, StringOp::TrimEnd),
+        "LENGTH" => parse_string_simple(rest, StringOp::Length),
+        "SUBSTRING" => parse_string_substring(rest),
+        "REPLACE" => parse_string_replace(rest, false),
+        "REPLACE_ALL" => parse_string_replace(rest, true),
+        "REGEX_REPLACE" => parse_string_regex_replace(rest),
+        "SPLIT" => parse_string_split(rest),
+        "CONCAT" => parse_string_concat(rest),
+        _ => Err(MirrorMakerError::Config(format!(
+            "Unknown STRING operation '{}'. Supported: UPPER, LOWER, TRIM, TRIM_START, \
+             TRIM_END, LENGTH, SUBSTRING, REPLACE, REPLACE_ALL, REGEX_REPLACE, SPLIT, CONCAT",
+            op
+        ))),
+    }
+}
+
+/// Parse `/path[,outputField]` for single-field ops (UPPER, LOWER, TRIM, LENGTH).
+fn parse_string_simple(rest: &str, op: StringOp) -> Result<Arc<dyn Transform>> {
+    let parts: Vec<&str> = rest.splitn(2, ',').collect();
+    if parts.is_empty() || parts[0].is_empty() {
+        return Err(MirrorMakerError::Config(
+            "STRING: missing /path argument".to_string(),
+        ));
+    }
+    let path = parts[0];
+    let output_field = parts.get(1).copied().filter(|s| !s.is_empty());
+    Ok(Arc::new(StringTransform::new(path, op, output_field)?))
+}
+
+/// Parse `/path,start[,length][,outputField]` for SUBSTRING.
+fn parse_string_substring(rest: &str) -> Result<Arc<dyn Transform>> {
+    let parts: Vec<&str> = rest.splitn(4, ',').collect();
+    if parts.len() < 2 {
+        return Err(MirrorMakerError::Config(format!(
+            "STRING:SUBSTRING requires at least /path and start index. Got: '{}'",
+            rest
+        )));
+    }
+    let path = parts[0];
+    let start = parts[1].parse::<usize>().map_err(|_| {
+        MirrorMakerError::Config(format!("STRING:SUBSTRING: invalid start index '{}'", parts[1]))
+    })?;
+
+    // parts[2] is either a length (number) or an outputField (non-numeric)
+    let (length, output_field) = match parts.get(2) {
+        None => (None, None),
+        Some(s) => match s.parse::<usize>() {
+            Ok(n) => (Some(n), parts.get(3).copied().filter(|f| !f.is_empty())),
+            Err(_) => (None, Some(*s)),
+        },
+    };
+
+    Ok(Arc::new(StringTransform::new(
+        path,
+        StringOp::Substring { start, length },
+        output_field,
+    )?))
+}
+
+/// Parse `/path,from,to[,outputField]` for REPLACE / REPLACE_ALL.
+fn parse_string_replace(rest: &str, all: bool) -> Result<Arc<dyn Transform>> {
+    let parts: Vec<&str> = rest.splitn(4, ',').collect();
+    if parts.len() < 3 {
+        return Err(MirrorMakerError::Config(format!(
+            "STRING:REPLACE requires /path,from,to. Got: '{}'",
+            rest
+        )));
+    }
+    let path = parts[0];
+    let from = parts[1].to_string();
+    if from.is_empty() {
+        return Err(MirrorMakerError::Config(format!(
+            "STRING:REPLACE: 'from' string must not be empty. \
+             Replacing an empty string inserts the replacement between every character \
+             (e.g. \"abc\".replace(\"\", \"X\") → \"XaXbXcX\"). \
+             Expression: '{}'",
+            rest
+        )));
+    }
+    let to = parts[2].to_string();
+    let output_field = parts.get(3).copied().filter(|s| !s.is_empty());
+    Ok(Arc::new(StringTransform::new(
+        path,
+        StringOp::Replace { from, to, all },
+        output_field,
+    )?))
+}
+
+/// Parse `/path,pattern,replacement[,outputField]` for REGEX_REPLACE.
+fn parse_string_regex_replace(rest: &str) -> Result<Arc<dyn Transform>> {
+    let parts: Vec<&str> = rest.splitn(4, ',').collect();
+    if parts.len() < 3 {
+        return Err(MirrorMakerError::Config(format!(
+            "STRING:REGEX_REPLACE requires /path,pattern,replacement. Got: '{}'",
+            rest
+        )));
+    }
+    let path = parts[0];
+    let pattern = Regex::new(parts[1]).map_err(|e| {
+        MirrorMakerError::Config(format!("STRING:REGEX_REPLACE: invalid pattern '{}': {}", parts[1], e))
+    })?;
+    let replacement = parts[2].to_string();
+    let output_field = parts.get(3).copied().filter(|s| !s.is_empty());
+    Ok(Arc::new(StringTransform::new(
+        path,
+        StringOp::RegexReplace { pattern, replacement },
+        output_field,
+    )?))
+}
+
+/// Parse `/path,delimiter[,outputField]` for SPLIT.
+fn parse_string_split(rest: &str) -> Result<Arc<dyn Transform>> {
+    let parts: Vec<&str> = rest.splitn(3, ',').collect();
+    if parts.len() < 2 {
+        return Err(MirrorMakerError::Config(format!(
+            "STRING:SPLIT requires /path,delimiter. Got: '{}'",
+            rest
+        )));
+    }
+    let path = parts[0];
+    let delimiter = parts[1].to_string();
+    let output_field = parts.get(2).copied().filter(|s| !s.is_empty());
+    Ok(Arc::new(StringTransform::new(
+        path,
+        StringOp::Split { delimiter },
+        output_field,
+    )?))
+}
+
+/// Parse `outputField,part1,part2,...` for CONCAT.
+/// Parts starting with `/` are JSON path extractions; all others are literals.
+fn parse_string_concat(rest: &str) -> Result<Arc<dyn Transform>> {
+    let parts: Vec<&str> = rest.split(',').collect();
+    if parts.len() < 2 {
+        return Err(MirrorMakerError::Config(format!(
+            "STRING:CONCAT requires outputField and at least one part. Got: '{}'",
+            rest
+        )));
+    }
+    let output_field = parts[0];
+    let concat_parts: Vec<ConcatPart> = parts[1..]
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| {
+            if p.is_empty() {
+                Err(MirrorMakerError::Config(format!(
+                    "STRING:CONCAT: part {} is empty (check for trailing or double comma in: '{}'). \
+                     An empty literal produces invisible whitespace in the output.",
+                    i + 1,
+                    rest
+                )))
+            } else if p.starts_with('/') {
+                Ok(ConcatPart::Path(p.to_string()))
+            } else {
+                Ok(ConcatPart::Literal(p.to_string()))
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Arc::new(ConcatTransform::new(output_field, concat_parts)))
+}
+
+fn parse_cache_lookup_transform(
+    expr: &str,
+    cache_manager: Option<Arc<SyncCacheManager>>,
+) -> Result<Arc<dyn Transform>> {
+    let mgr = cache_manager.ok_or_else(|| {
+        MirrorMakerError::Config(
+            "CACHE_LOOKUP requires a cache manager — ensure cache is configured".to_string(),
+        )
+    })?;
+
+    // Format: /keyPath,store-name,outputField  OR  /keyPath,store-name,MERGE
+    let parts: Vec<&str> = expr.splitn(3, ',').collect();
+    if parts.len() != 3 {
+        return Err(MirrorMakerError::Config(format!(
+            "Invalid CACHE_LOOKUP format: '{}'. \
+             Expected 'CACHE_LOOKUP:/keyPath,store-name,outputField' \
+             or 'CACHE_LOOKUP:/keyPath,store-name,MERGE'",
+            expr
+        )));
+    }
+
+    let key_path = parts[0];
+    let store_name = parts[1];
+    let output = parts[2];
+
+    let cache = mgr.get_or_create(store_name);
+
+    if output == "MERGE" {
+        Ok(Arc::new(CacheLookupTransform::new_merge(cache, key_path)?))
+    } else {
+        Ok(Arc::new(CacheLookupTransform::new(cache, key_path, output)?))
+    }
+}
+
+fn parse_cache_put_transform(
+    expr: &str,
+    cache_manager: Option<Arc<SyncCacheManager>>,
+) -> Result<Arc<dyn Transform>> {
+    let mgr = cache_manager.ok_or_else(|| {
+        MirrorMakerError::Config(
+            "CACHE_PUT requires a cache manager — ensure cache is configured".to_string(),
+        )
+    })?;
+
+    // Format: /keyPath,store-name  OR  /keyPath,store-name,/valuePath
+    let parts: Vec<&str> = expr.splitn(3, ',').collect();
+    if parts.len() < 2 {
+        return Err(MirrorMakerError::Config(format!(
+            "Invalid CACHE_PUT format: '{}'. \
+             Expected 'CACHE_PUT:/keyPath,store-name' \
+             or 'CACHE_PUT:/keyPath,store-name,/valuePath'",
+            expr
+        )));
+    }
+
+    let key_path = parts[0];
+    let store_name = parts[1];
+    let value_path = parts.get(2).copied();
+
+    let cache = mgr.get_or_create(store_name);
+
+    Ok(Arc::new(CachePutTransform::new(cache, key_path, value_path)?))
 }
 
 fn parse_construct_transform(expr: &str) -> Result<Arc<dyn Transform>> {
@@ -915,6 +1210,475 @@ mod tests {
 
         // Same input should produce same hash
         assert_eq!(result1, result2);
+    }
+
+    // ========================================================================
+    // STRING TRANSFORM TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_string_upper() {
+        let t = parse_transform("STRING:UPPER,/email").unwrap();
+        let result = t.transform(json!({"email": "user@EXAMPLE.com"})).unwrap();
+        assert_eq!(result["email"], json!("USER@EXAMPLE.COM"));
+    }
+
+    #[test]
+    fn test_string_lower() {
+        let t = parse_transform("STRING:LOWER,/status").unwrap();
+        let result = t.transform(json!({"status": "ACTIVE"})).unwrap();
+        assert_eq!(result["status"], json!("active"));
+    }
+
+    #[test]
+    fn test_string_trim() {
+        let t = parse_transform("STRING:TRIM,/name").unwrap();
+        let result = t.transform(json!({"name": "  Alice  "})).unwrap();
+        assert_eq!(result["name"], json!("Alice"));
+    }
+
+    #[test]
+    fn test_string_trim_start() {
+        let t = parse_transform("STRING:TRIM_START,/name").unwrap();
+        let result = t.transform(json!({"name": "  Alice  "})).unwrap();
+        assert_eq!(result["name"], json!("Alice  "));
+    }
+
+    #[test]
+    fn test_string_trim_end() {
+        let t = parse_transform("STRING:TRIM_END,/name").unwrap();
+        let result = t.transform(json!({"name": "  Alice  "})).unwrap();
+        assert_eq!(result["name"], json!("  Alice"));
+    }
+
+    #[test]
+    fn test_string_substring_with_length() {
+        let t = parse_transform("STRING:SUBSTRING,/description,0,10").unwrap();
+        let result = t.transform(json!({"description": "Hello, World!"})).unwrap();
+        assert_eq!(result["description"], json!("Hello, Wor"));
+    }
+
+    #[test]
+    fn test_string_substring_without_length() {
+        let t = parse_transform("STRING:SUBSTRING,/text,7").unwrap();
+        let result = t.transform(json!({"text": "Hello, World!"})).unwrap();
+        assert_eq!(result["text"], json!("World!"));
+    }
+
+    #[test]
+    fn test_string_substring_beyond_end_clamps() {
+        let t = parse_transform("STRING:SUBSTRING,/text,0,100").unwrap();
+        let result = t.transform(json!({"text": "short"})).unwrap();
+        assert_eq!(result["text"], json!("short"));
+    }
+
+    #[test]
+    fn test_string_replace_first() {
+        let t = parse_transform("STRING:REPLACE,/msg,foo,bar").unwrap();
+        let result = t.transform(json!({"msg": "foo and foo"})).unwrap();
+        assert_eq!(result["msg"], json!("bar and foo"));
+    }
+
+    #[test]
+    fn test_string_replace_all() {
+        let t = parse_transform("STRING:REPLACE_ALL,/msg,foo,bar").unwrap();
+        let result = t.transform(json!({"msg": "foo and foo"})).unwrap();
+        assert_eq!(result["msg"], json!("bar and bar"));
+    }
+
+    #[test]
+    fn test_string_regex_replace() {
+        let t = parse_transform(r"STRING:REGEX_REPLACE,/email,@.*,@example.com").unwrap();
+        let result = t.transform(json!({"email": "user@oldomain.io"})).unwrap();
+        assert_eq!(result["email"], json!("user@example.com"));
+    }
+
+    #[test]
+    fn test_string_split() {
+        let t = parse_transform("STRING:SPLIT,/tags,|").unwrap();
+        let result = t.transform(json!({"tags": "rust|kafka|streaming"})).unwrap();
+        assert_eq!(result["tags"], json!(["rust", "kafka", "streaming"]));
+    }
+
+    #[test]
+    fn test_string_length() {
+        let t = parse_transform("STRING:LENGTH,/description").unwrap();
+        let result = t.transform(json!({"description": "hello"})).unwrap();
+        assert_eq!(result["description"], json!(5));
+    }
+
+    #[test]
+    fn test_string_output_field_preserves_original() {
+        let t = parse_transform("STRING:UPPER,/email,emailUpper").unwrap();
+        let result = t.transform(json!({"email": "user@example.com"})).unwrap();
+        assert_eq!(result["email"], json!("user@example.com"), "original must be kept");
+        assert_eq!(result["emailUpper"], json!("USER@EXAMPLE.COM"));
+    }
+
+    #[test]
+    fn test_string_concat_paths_and_literals() {
+        let t = parse_transform("STRING:CONCAT,fullName,/firstName, ,/lastName").unwrap();
+        let result = t.transform(json!({"firstName": "Jane", "lastName": "Doe"})).unwrap();
+        assert_eq!(result["fullName"], json!("Jane Doe"));
+    }
+
+    #[test]
+    fn test_string_concat_literal_only() {
+        let t = parse_transform("STRING:CONCAT,greeting,Hello , World").unwrap();
+        let result = t.transform(json!({"x": 1})).unwrap();
+        assert_eq!(result["greeting"], json!("Hello  World"));
+    }
+
+    #[test]
+    fn test_string_nested_path() {
+        let t = parse_transform("STRING:UPPER,/user/email").unwrap();
+        let result = t.transform(json!({"user": {"email": "me@example.com"}})).unwrap();
+        assert_eq!(result["user"]["email"], json!("ME@EXAMPLE.COM"));
+    }
+
+    #[test]
+    fn test_string_length_with_output_field() {
+        let t = parse_transform("STRING:LENGTH,/bio,bioLength").unwrap();
+        let result = t.transform(json!({"bio": "I write Rust"})).unwrap();
+        assert_eq!(result["bio"], json!("I write Rust"), "original kept");
+        assert_eq!(result["bioLength"], json!(12));
+    }
+
+    #[test]
+    fn test_string_unknown_op_returns_error() {
+        let result = parse_transform("STRING:CAPITALIZE,/name");
+        assert!(result.is_err());
+        assert!(result.err().unwrap().to_string().contains("Unknown STRING operation"));
+    }
+
+    // ========================================================================
+    // ========================================================================
+    // NULL / MISSING FIELD — PASS-THROUGH TESTS
+    // ========================================================================
+    // All transforms must pass through the message unchanged when a referenced
+    // field is absent, null, or the wrong type for the operation.
+
+    #[test]
+    fn test_json_path_transform_missing_field_passes_through() {
+        let t = parse_transform("/nonexistent").unwrap();
+        let msg = json!({"other": "value"});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "missing path must pass through");
+    }
+
+    #[test]
+    fn test_arithmetic_missing_left_operand_passes_through() {
+        let t = parse_transform("ARITHMETIC:MUL,/missing,2.0").unwrap();
+        let msg = json!({"price": 10.0});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "missing left operand must pass through");
+    }
+
+    #[test]
+    fn test_arithmetic_missing_right_operand_passes_through() {
+        let t = parse_transform("ARITHMETIC:ADD,/price,/missing").unwrap();
+        let msg = json!({"price": 10.0});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "missing right operand must pass through");
+    }
+
+    #[test]
+    fn test_arithmetic_division_by_zero_passes_through() {
+        let t = parse_transform("ARITHMETIC:DIV,/price,/zero").unwrap();
+        let msg = json!({"price": 10.0, "zero": 0.0});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "division by zero must pass through");
+    }
+
+    #[test]
+    fn test_hash_missing_field_passes_through() {
+        let t = parse_transform("HASH:SHA256,/nonexistent").unwrap();
+        let msg = json!({"other": "value"});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "missing hash path must pass through");
+    }
+
+    #[test]
+    fn test_array_map_missing_path_passes_through() {
+        let t = parse_transform("ARRAY_MAP:/missing,/id").unwrap();
+        let msg = json!({"other": "value"});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "missing array path must pass through");
+    }
+
+    #[test]
+    fn test_array_map_non_array_passes_through() {
+        let t = parse_transform("ARRAY_MAP:/name,/id").unwrap();
+        let msg = json!({"name": "Alice"});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "non-array at path must pass through");
+    }
+
+    #[test]
+    fn test_string_upper_missing_field_passes_through() {
+        let t = parse_transform("STRING:UPPER,/missing").unwrap();
+        let msg = json!({"other": "value"});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "missing STRING path must pass through");
+    }
+
+    #[test]
+    fn test_string_upper_null_field_passes_through() {
+        let t = parse_transform("STRING:UPPER,/name").unwrap();
+        let msg = json!({"name": null});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "null STRING field must pass through");
+    }
+
+    #[test]
+    fn test_string_upper_object_field_passes_through() {
+        let t = parse_transform("STRING:UPPER,/nested").unwrap();
+        let msg = json!({"nested": {"key": "value"}});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "object at STRING path must pass through");
+    }
+
+    #[test]
+    fn test_string_concat_missing_path_uses_empty_string() {
+        // Missing path part → treated as empty string, concat continues
+        let t = parse_transform("STRING:CONCAT,full,/first, ,/missing").unwrap();
+        let msg = json!({"first": "Jane"});
+        let result = t.transform(msg).unwrap();
+        assert_eq!(result["full"], json!("Jane "), "missing concat path produces empty contribution");
+    }
+
+    #[test]
+    fn test_cache_lookup_missing_key_path_passes_through() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+        let t = parse_transform_with_cache("CACHE_LOOKUP:/userId,store,profile", Some(mgr)).unwrap();
+        let msg = json!({"event": "login"});  // no /userId
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "missing key path must pass through");
+    }
+
+    #[test]
+    fn test_cache_lookup_merge_non_object_cached_passes_through() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+        mgr.get_or_create("store").put("k1".to_string(), json!("a-scalar"));
+        let t = parse_transform_with_cache("CACHE_LOOKUP:/id,store,MERGE", Some(mgr)).unwrap();
+        let msg = json!({"id": "k1", "event": "click"});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "MERGE with non-object cached value must pass through");
+    }
+
+    #[test]
+    fn test_cache_put_missing_key_path_passes_through() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+        let t = parse_transform_with_cache("CACHE_PUT:/id,store", Some(mgr.clone())).unwrap();
+        let msg = json!({"name": "Alice"});  // no /id
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "missing key path must pass through without caching");
+        // Store is created by parse but must remain empty — key was never stored
+        let store = mgr.get("store").unwrap();
+        assert!(store.get("unknown-key").is_none(), "no entry should exist when key path was missing");
+    }
+
+    #[test]
+    fn test_cache_put_missing_value_path_passes_through() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+        let t = parse_transform_with_cache("CACHE_PUT:/id,store,/missing", Some(mgr.clone())).unwrap();
+        let msg = json!({"id": "u1", "other": "data"});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "missing value path must pass through without caching");
+        // The store was auto-created by get_or_create in parse, but nothing stored
+        let store = mgr.get("store").unwrap();
+        assert!(store.get("u1").is_none(), "nothing should be stored when value path is missing");
+    }
+
+    // HIGH-ISSUE FIX TESTS
+    // ========================================================================
+
+    // PARSER-3: REPLACE with empty `from` must error at parse time
+    #[test]
+    fn test_string_replace_empty_from_is_error() {
+        let result = parse_transform("STRING:REPLACE,/msg,,replacement");
+        assert!(result.is_err());
+        let msg = result.err().unwrap().to_string();
+        assert!(msg.contains("'from' string must not be empty"), "unexpected: {}", msg);
+    }
+
+    #[test]
+    fn test_string_replace_all_empty_from_is_error() {
+        let result = parse_transform("STRING:REPLACE_ALL,/msg,,replacement");
+        assert!(result.is_err());
+        let msg = result.err().unwrap().to_string();
+        assert!(msg.contains("'from' string must not be empty"), "unexpected: {}", msg);
+    }
+
+    // PARSER-2: CONCAT with empty parts must error at parse time
+    #[test]
+    fn test_string_concat_trailing_comma_is_error() {
+        // Trailing comma produces an empty part
+        let result = parse_transform("STRING:CONCAT,out,/first,");
+        assert!(result.is_err());
+        let msg = result.err().unwrap().to_string();
+        assert!(msg.contains("empty"), "unexpected: {}", msg);
+    }
+
+    #[test]
+    fn test_string_concat_double_comma_is_error() {
+        // Double comma produces an empty part between two valid parts
+        let result = parse_transform("STRING:CONCAT,out,/first,,/last");
+        assert!(result.is_err());
+        let msg = result.err().unwrap().to_string();
+        assert!(msg.contains("empty"), "unexpected: {}", msg);
+    }
+
+    #[test]
+    fn test_string_concat_valid_does_not_error() {
+        // Verify that the new validation does not break valid CONCAT
+        let t = parse_transform("STRING:CONCAT,fullName,/first, ,/last").unwrap();
+        let result = t.transform(json!({"first": "Jane", "last": "Doe"})).unwrap();
+        assert_eq!(result["fullName"], json!("Jane Doe"));
+    }
+
+    // ========================================================================
+    // CACHE TRANSFORM TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_cache_put_stores_message() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+
+        // CACHE_PUT stores whole message, passes it through
+        let t = parse_transform_with_cache("CACHE_PUT:/id,users", Some(mgr.clone())).unwrap();
+
+        let msg = json!({"id": "u1", "name": "Alice"});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "message must pass through unchanged");
+
+        // Verify the value was actually stored
+        let store = mgr.get("users").unwrap();
+        assert_eq!(store.get("u1"), Some(msg));
+    }
+
+    #[test]
+    fn test_cache_put_stores_field() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+
+        let t = parse_transform_with_cache(
+            "CACHE_PUT:/id,users,/profile",
+            Some(mgr.clone()),
+        )
+        .unwrap();
+
+        let msg = json!({"id": "u2", "profile": {"tier": "premium"}, "noise": true});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "message must pass through unchanged");
+
+        let store = mgr.get("users").unwrap();
+        assert_eq!(store.get("u2"), Some(json!({"tier": "premium"})));
+    }
+
+    #[test]
+    fn test_cache_lookup_adds_field() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+
+        // Pre-populate the cache
+        let store = mgr.get_or_create("users");
+        store.put("u1".to_string(), json!({"tier": "gold", "country": "US"}));
+
+        let t = parse_transform_with_cache(
+            "CACHE_LOOKUP:/userId,users,userProfile",
+            Some(mgr.clone()),
+        )
+        .unwrap();
+
+        let msg = json!({"userId": "u1", "event": "login"});
+        let result = t.transform(msg).unwrap();
+
+        assert_eq!(result["event"], json!("login"));
+        assert_eq!(result["userProfile"], json!({"tier": "gold", "country": "US"}));
+    }
+
+    #[test]
+    fn test_cache_lookup_merge() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+
+        let store = mgr.get_or_create("users");
+        store.put("u2".to_string(), json!({"tier": "silver"}));
+
+        let t = parse_transform_with_cache(
+            "CACHE_LOOKUP:/userId,users,MERGE",
+            Some(mgr.clone()),
+        )
+        .unwrap();
+
+        let msg = json!({"userId": "u2", "event": "purchase"});
+        let result = t.transform(msg).unwrap();
+
+        assert_eq!(result["event"], json!("purchase"));
+        assert_eq!(result["tier"], json!("silver"));
+        assert_eq!(result["userId"], json!("u2"));
+    }
+
+    #[test]
+    fn test_cache_lookup_miss_passthrough() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+
+        let t = parse_transform_with_cache(
+            "CACHE_LOOKUP:/userId,users,profile",
+            Some(mgr),
+        )
+        .unwrap();
+
+        let msg = json!({"userId": "unknown", "event": "login"});
+        let result = t.transform(msg.clone()).unwrap();
+        assert_eq!(result, msg, "on cache miss message must be returned unchanged");
+    }
+
+    #[test]
+    fn test_cache_put_then_lookup_pipeline() {
+        use crate::cache::SyncCacheManager;
+        let mgr = Arc::new(SyncCacheManager::new());
+
+        // Step 1: first message populates the cache
+        let put = parse_transform_with_cache(
+            "CACHE_PUT:/userId,profiles,/userData",
+            Some(mgr.clone()),
+        )
+        .unwrap();
+
+        let first = json!({"userId": "u3", "userData": {"plan": "pro", "active": true}});
+        put.transform(first).unwrap();
+
+        // Step 2: second message enriches from the cache
+        let lookup = parse_transform_with_cache(
+            "CACHE_LOOKUP:/userId,profiles,userData",
+            Some(mgr.clone()),
+        )
+        .unwrap();
+
+        let second = json!({"userId": "u3", "event": "checkout"});
+        let enriched = lookup.transform(second).unwrap();
+
+        assert_eq!(enriched["event"], json!("checkout"));
+        assert_eq!(enriched["userData"], json!({"plan": "pro", "active": true}));
+    }
+
+    #[test]
+    fn test_cache_without_manager_returns_error() {
+        let result = parse_transform_with_cache("CACHE_LOOKUP:/id,store,field", None);
+        assert!(result.is_err());
+        let err_msg = result.err().unwrap().to_string();
+        assert!(err_msg.contains("cache manager"), "unexpected error: {}", err_msg);
+
+        let result2 = parse_transform_with_cache("CACHE_PUT:/id,store", None);
+        assert!(result2.is_err());
     }
 
     // ========================================================================

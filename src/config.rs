@@ -34,6 +34,14 @@ pub struct MirrorMakerConfig {
     /// Multi-destination routing configuration
     pub routing: Option<RoutingConfig>,
 
+    /// Value transform expression for single-destination mode.
+    ///
+    /// Supports the full transform DSL including `STRING:`, `CACHE_LOOKUP:`,
+    /// `CACHE_PUT:`, `HASH:`, `CONSTRUCT:`, `ARITHMETIC:`, etc.
+    /// Ignored when `routing` is set.
+    #[serde(default)]
+    pub transform: Option<String>,
+
     /// Consumer properties
     #[serde(default)]
     pub consumer_properties: HashMap<String, String>,
