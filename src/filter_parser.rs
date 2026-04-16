@@ -12,8 +12,8 @@ use crate::filter::{
     TimestampAgeFilter, TimestampBeforeFilter, TimestampCurrentTransform, TimestampFromTransform,
     TimestampPreserveTransform, TimestampSubtractTransform, Transform,
 };
-use regex::Regex;
 use crate::hash::HashAlgorithm;
+use regex::Regex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -408,7 +408,10 @@ fn parse_string_substring(rest: &str) -> Result<Arc<dyn Transform>> {
     }
     let path = parts[0];
     let start = parts[1].parse::<usize>().map_err(|_| {
-        MirrorMakerError::Config(format!("STRING:SUBSTRING: invalid start index '{}'", parts[1]))
+        MirrorMakerError::Config(format!(
+            "STRING:SUBSTRING: invalid start index '{}'",
+            parts[1]
+        ))
     })?;
 
     // parts[2] is either a length (number) or an outputField (non-numeric)
@@ -467,13 +470,19 @@ fn parse_string_regex_replace(rest: &str) -> Result<Arc<dyn Transform>> {
     }
     let path = parts[0];
     let pattern = Regex::new(parts[1]).map_err(|e| {
-        MirrorMakerError::Config(format!("STRING:REGEX_REPLACE: invalid pattern '{}': {}", parts[1], e))
+        MirrorMakerError::Config(format!(
+            "STRING:REGEX_REPLACE: invalid pattern '{}': {}",
+            parts[1], e
+        ))
     })?;
     let replacement = parts[2].to_string();
     let output_field = parts.get(3).copied().filter(|s| !s.is_empty());
     Ok(Arc::new(StringTransform::new(
         path,
-        StringOp::RegexReplace { pattern, replacement },
+        StringOp::RegexReplace {
+            pattern,
+            replacement,
+        },
         output_field,
     )?))
 }
@@ -559,7 +568,9 @@ fn parse_cache_lookup_transform(
     if output == "MERGE" {
         Ok(Arc::new(CacheLookupTransform::new_merge(cache, key_path)?))
     } else {
-        Ok(Arc::new(CacheLookupTransform::new(cache, key_path, output)?))
+        Ok(Arc::new(CacheLookupTransform::new(
+            cache, key_path, output,
+        )?))
     }
 }
 
@@ -590,7 +601,9 @@ fn parse_cache_put_transform(
 
     let cache = mgr.get_or_create(store_name);
 
-    Ok(Arc::new(CachePutTransform::new(cache, key_path, value_path)?))
+    Ok(Arc::new(CachePutTransform::new(
+        cache, key_path, value_path,
+    )?))
 }
 
 fn parse_construct_transform(expr: &str) -> Result<Arc<dyn Transform>> {
@@ -1254,7 +1267,9 @@ mod tests {
     #[test]
     fn test_string_substring_with_length() {
         let t = parse_transform("STRING:SUBSTRING,/description,0,10").unwrap();
-        let result = t.transform(json!({"description": "Hello, World!"})).unwrap();
+        let result = t
+            .transform(json!({"description": "Hello, World!"}))
+            .unwrap();
         assert_eq!(result["description"], json!("Hello, Wor"));
     }
 
@@ -1296,7 +1311,9 @@ mod tests {
     #[test]
     fn test_string_split() {
         let t = parse_transform("STRING:SPLIT,/tags,|").unwrap();
-        let result = t.transform(json!({"tags": "rust|kafka|streaming"})).unwrap();
+        let result = t
+            .transform(json!({"tags": "rust|kafka|streaming"}))
+            .unwrap();
         assert_eq!(result["tags"], json!(["rust", "kafka", "streaming"]));
     }
 
@@ -1311,14 +1328,20 @@ mod tests {
     fn test_string_output_field_preserves_original() {
         let t = parse_transform("STRING:UPPER,/email,emailUpper").unwrap();
         let result = t.transform(json!({"email": "user@example.com"})).unwrap();
-        assert_eq!(result["email"], json!("user@example.com"), "original must be kept");
+        assert_eq!(
+            result["email"],
+            json!("user@example.com"),
+            "original must be kept"
+        );
         assert_eq!(result["emailUpper"], json!("USER@EXAMPLE.COM"));
     }
 
     #[test]
     fn test_string_concat_paths_and_literals() {
         let t = parse_transform("STRING:CONCAT,fullName,/firstName, ,/lastName").unwrap();
-        let result = t.transform(json!({"firstName": "Jane", "lastName": "Doe"})).unwrap();
+        let result = t
+            .transform(json!({"firstName": "Jane", "lastName": "Doe"}))
+            .unwrap();
         assert_eq!(result["fullName"], json!("Jane Doe"));
     }
 
@@ -1332,7 +1355,9 @@ mod tests {
     #[test]
     fn test_string_nested_path() {
         let t = parse_transform("STRING:UPPER,/user/email").unwrap();
-        let result = t.transform(json!({"user": {"email": "me@example.com"}})).unwrap();
+        let result = t
+            .transform(json!({"user": {"email": "me@example.com"}}))
+            .unwrap();
         assert_eq!(result["user"]["email"], json!("ME@EXAMPLE.COM"));
     }
 
@@ -1348,7 +1373,11 @@ mod tests {
     fn test_string_unknown_op_returns_error() {
         let result = parse_transform("STRING:CAPITALIZE,/name");
         assert!(result.is_err());
-        assert!(result.err().unwrap().to_string().contains("Unknown STRING operation"));
+        assert!(result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("Unknown STRING operation"));
     }
 
     // ========================================================================
@@ -1444,15 +1473,20 @@ mod tests {
         let t = parse_transform("STRING:CONCAT,full,/first, ,/missing").unwrap();
         let msg = json!({"first": "Jane"});
         let result = t.transform(msg).unwrap();
-        assert_eq!(result["full"], json!("Jane "), "missing concat path produces empty contribution");
+        assert_eq!(
+            result["full"],
+            json!("Jane "),
+            "missing concat path produces empty contribution"
+        );
     }
 
     #[test]
     fn test_cache_lookup_missing_key_path_passes_through() {
         use crate::cache::SyncCacheManager;
         let mgr = Arc::new(SyncCacheManager::new());
-        let t = parse_transform_with_cache("CACHE_LOOKUP:/userId,store,profile", Some(mgr)).unwrap();
-        let msg = json!({"event": "login"});  // no /userId
+        let t =
+            parse_transform_with_cache("CACHE_LOOKUP:/userId,store,profile", Some(mgr)).unwrap();
+        let msg = json!({"event": "login"}); // no /userId
         let result = t.transform(msg.clone()).unwrap();
         assert_eq!(result, msg, "missing key path must pass through");
     }
@@ -1461,11 +1495,15 @@ mod tests {
     fn test_cache_lookup_merge_non_object_cached_passes_through() {
         use crate::cache::SyncCacheManager;
         let mgr = Arc::new(SyncCacheManager::new());
-        mgr.get_or_create("store").put("k1".to_string(), json!("a-scalar"));
+        mgr.get_or_create("store")
+            .put("k1".to_string(), json!("a-scalar"));
         let t = parse_transform_with_cache("CACHE_LOOKUP:/id,store,MERGE", Some(mgr)).unwrap();
         let msg = json!({"id": "k1", "event": "click"});
         let result = t.transform(msg.clone()).unwrap();
-        assert_eq!(result, msg, "MERGE with non-object cached value must pass through");
+        assert_eq!(
+            result, msg,
+            "MERGE with non-object cached value must pass through"
+        );
     }
 
     #[test]
@@ -1473,25 +1511,38 @@ mod tests {
         use crate::cache::SyncCacheManager;
         let mgr = Arc::new(SyncCacheManager::new());
         let t = parse_transform_with_cache("CACHE_PUT:/id,store", Some(mgr.clone())).unwrap();
-        let msg = json!({"name": "Alice"});  // no /id
+        let msg = json!({"name": "Alice"}); // no /id
         let result = t.transform(msg.clone()).unwrap();
-        assert_eq!(result, msg, "missing key path must pass through without caching");
+        assert_eq!(
+            result, msg,
+            "missing key path must pass through without caching"
+        );
         // Store is created by parse but must remain empty — key was never stored
         let store = mgr.get("store").unwrap();
-        assert!(store.get("unknown-key").is_none(), "no entry should exist when key path was missing");
+        assert!(
+            store.get("unknown-key").is_none(),
+            "no entry should exist when key path was missing"
+        );
     }
 
     #[test]
     fn test_cache_put_missing_value_path_passes_through() {
         use crate::cache::SyncCacheManager;
         let mgr = Arc::new(SyncCacheManager::new());
-        let t = parse_transform_with_cache("CACHE_PUT:/id,store,/missing", Some(mgr.clone())).unwrap();
+        let t =
+            parse_transform_with_cache("CACHE_PUT:/id,store,/missing", Some(mgr.clone())).unwrap();
         let msg = json!({"id": "u1", "other": "data"});
         let result = t.transform(msg.clone()).unwrap();
-        assert_eq!(result, msg, "missing value path must pass through without caching");
+        assert_eq!(
+            result, msg,
+            "missing value path must pass through without caching"
+        );
         // The store was auto-created by get_or_create in parse, but nothing stored
         let store = mgr.get("store").unwrap();
-        assert!(store.get("u1").is_none(), "nothing should be stored when value path is missing");
+        assert!(
+            store.get("u1").is_none(),
+            "nothing should be stored when value path is missing"
+        );
     }
 
     // HIGH-ISSUE FIX TESTS
@@ -1503,7 +1554,11 @@ mod tests {
         let result = parse_transform("STRING:REPLACE,/msg,,replacement");
         assert!(result.is_err());
         let msg = result.err().unwrap().to_string();
-        assert!(msg.contains("'from' string must not be empty"), "unexpected: {}", msg);
+        assert!(
+            msg.contains("'from' string must not be empty"),
+            "unexpected: {}",
+            msg
+        );
     }
 
     #[test]
@@ -1511,7 +1566,11 @@ mod tests {
         let result = parse_transform("STRING:REPLACE_ALL,/msg,,replacement");
         assert!(result.is_err());
         let msg = result.err().unwrap().to_string();
-        assert!(msg.contains("'from' string must not be empty"), "unexpected: {}", msg);
+        assert!(
+            msg.contains("'from' string must not be empty"),
+            "unexpected: {}",
+            msg
+        );
     }
 
     // PARSER-2: CONCAT with empty parts must error at parse time
@@ -1537,7 +1596,9 @@ mod tests {
     fn test_string_concat_valid_does_not_error() {
         // Verify that the new validation does not break valid CONCAT
         let t = parse_transform("STRING:CONCAT,fullName,/first, ,/last").unwrap();
-        let result = t.transform(json!({"first": "Jane", "last": "Doe"})).unwrap();
+        let result = t
+            .transform(json!({"first": "Jane", "last": "Doe"}))
+            .unwrap();
         assert_eq!(result["fullName"], json!("Jane Doe"));
     }
 
@@ -1567,11 +1628,8 @@ mod tests {
         use crate::cache::SyncCacheManager;
         let mgr = Arc::new(SyncCacheManager::new());
 
-        let t = parse_transform_with_cache(
-            "CACHE_PUT:/id,users,/profile",
-            Some(mgr.clone()),
-        )
-        .unwrap();
+        let t =
+            parse_transform_with_cache("CACHE_PUT:/id,users,/profile", Some(mgr.clone())).unwrap();
 
         let msg = json!({"id": "u2", "profile": {"tier": "premium"}, "noise": true});
         let result = t.transform(msg.clone()).unwrap();
@@ -1590,17 +1648,18 @@ mod tests {
         let store = mgr.get_or_create("users");
         store.put("u1".to_string(), json!({"tier": "gold", "country": "US"}));
 
-        let t = parse_transform_with_cache(
-            "CACHE_LOOKUP:/userId,users,userProfile",
-            Some(mgr.clone()),
-        )
-        .unwrap();
+        let t =
+            parse_transform_with_cache("CACHE_LOOKUP:/userId,users,userProfile", Some(mgr.clone()))
+                .unwrap();
 
         let msg = json!({"userId": "u1", "event": "login"});
         let result = t.transform(msg).unwrap();
 
         assert_eq!(result["event"], json!("login"));
-        assert_eq!(result["userProfile"], json!({"tier": "gold", "country": "US"}));
+        assert_eq!(
+            result["userProfile"],
+            json!({"tier": "gold", "country": "US"})
+        );
     }
 
     #[test]
@@ -1611,11 +1670,8 @@ mod tests {
         let store = mgr.get_or_create("users");
         store.put("u2".to_string(), json!({"tier": "silver"}));
 
-        let t = parse_transform_with_cache(
-            "CACHE_LOOKUP:/userId,users,MERGE",
-            Some(mgr.clone()),
-        )
-        .unwrap();
+        let t = parse_transform_with_cache("CACHE_LOOKUP:/userId,users,MERGE", Some(mgr.clone()))
+            .unwrap();
 
         let msg = json!({"userId": "u2", "event": "purchase"});
         let result = t.transform(msg).unwrap();
@@ -1630,15 +1686,15 @@ mod tests {
         use crate::cache::SyncCacheManager;
         let mgr = Arc::new(SyncCacheManager::new());
 
-        let t = parse_transform_with_cache(
-            "CACHE_LOOKUP:/userId,users,profile",
-            Some(mgr),
-        )
-        .unwrap();
+        let t =
+            parse_transform_with_cache("CACHE_LOOKUP:/userId,users,profile", Some(mgr)).unwrap();
 
         let msg = json!({"userId": "unknown", "event": "login"});
         let result = t.transform(msg.clone()).unwrap();
-        assert_eq!(result, msg, "on cache miss message must be returned unchanged");
+        assert_eq!(
+            result, msg,
+            "on cache miss message must be returned unchanged"
+        );
     }
 
     #[test]
@@ -1647,21 +1703,17 @@ mod tests {
         let mgr = Arc::new(SyncCacheManager::new());
 
         // Step 1: first message populates the cache
-        let put = parse_transform_with_cache(
-            "CACHE_PUT:/userId,profiles,/userData",
-            Some(mgr.clone()),
-        )
-        .unwrap();
+        let put =
+            parse_transform_with_cache("CACHE_PUT:/userId,profiles,/userData", Some(mgr.clone()))
+                .unwrap();
 
         let first = json!({"userId": "u3", "userData": {"plan": "pro", "active": true}});
         put.transform(first).unwrap();
 
         // Step 2: second message enriches from the cache
-        let lookup = parse_transform_with_cache(
-            "CACHE_LOOKUP:/userId,profiles,userData",
-            Some(mgr.clone()),
-        )
-        .unwrap();
+        let lookup =
+            parse_transform_with_cache("CACHE_LOOKUP:/userId,profiles,userData", Some(mgr.clone()))
+                .unwrap();
 
         let second = json!({"userId": "u3", "event": "checkout"});
         let enriched = lookup.transform(second).unwrap();
@@ -1675,7 +1727,11 @@ mod tests {
         let result = parse_transform_with_cache("CACHE_LOOKUP:/id,store,field", None);
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
-        assert!(err_msg.contains("cache manager"), "unexpected error: {}", err_msg);
+        assert!(
+            err_msg.contains("cache manager"),
+            "unexpected error: {}",
+            err_msg
+        );
 
         let result2 = parse_transform_with_cache("CACHE_PUT:/id,store", None);
         assert!(result2.is_err());

@@ -21,11 +21,17 @@ pub struct SingleDestinationProcessor {
 
 impl SingleDestinationProcessor {
     pub fn new(sink: Arc<KafkaSink>) -> Self {
-        Self { sink, transform: None }
+        Self {
+            sink,
+            transform: None,
+        }
     }
 
     pub fn with_transform(sink: Arc<KafkaSink>, transform: Arc<dyn Transform>) -> Self {
-        Self { sink, transform: Some(transform) }
+        Self {
+            sink,
+            transform: Some(transform),
+        }
     }
 }
 
@@ -34,7 +40,10 @@ impl MessageProcessor for SingleDestinationProcessor {
     async fn process(&self, envelope: MessageEnvelope) -> Result<()> {
         let envelope = if let Some(t) = &self.transform {
             let transformed = t.transform(envelope.value)?;
-            MessageEnvelope { value: transformed, ..envelope }
+            MessageEnvelope {
+                value: transformed,
+                ..envelope
+            }
         } else {
             envelope
         };

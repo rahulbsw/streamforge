@@ -200,8 +200,7 @@ pub struct SyncLookupCache {
 
 impl SyncLookupCache {
     pub fn new(config: CacheConfig) -> Self {
-        let mut builder = moka::sync::Cache::builder()
-            .max_capacity(config.max_capacity);
+        let mut builder = moka::sync::Cache::builder().max_capacity(config.max_capacity);
 
         if let Some(ttl) = config.ttl_seconds {
             builder = builder.time_to_live(Duration::from_secs(ttl));
@@ -215,7 +214,9 @@ impl SyncLookupCache {
             config.max_capacity, config.ttl_seconds, config.tti_seconds
         );
 
-        Self { cache: builder.build() }
+        Self {
+            cache: builder.build(),
+        }
     }
 
     /// Look up a value by key. Returns `None` on cache miss.
@@ -261,7 +262,9 @@ pub struct SyncCacheManager {
 
 impl SyncCacheManager {
     pub fn new() -> Self {
-        Self { caches: dashmap::DashMap::new() }
+        Self {
+            caches: dashmap::DashMap::new(),
+        }
     }
 
     /// Get an existing cache by name, or create it with default config.

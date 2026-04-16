@@ -180,7 +180,10 @@ impl KafkaSink {
     fn get_or_fetch_partitions(&self, topic: &str) -> Result<i32> {
         // Fast path: already cached — lock is held only for a map lookup.
         {
-            let cache = self.partition_cache.lock().unwrap_or_else(|e| e.into_inner());
+            let cache = self
+                .partition_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(&n) = cache.get(topic) {
                 return Ok(n);
             }
@@ -189,10 +192,9 @@ impl KafkaSink {
         // `block_in_place` signals Tokio to move other tasks off this thread
         // while the blocking call runs, preventing scheduler starvation.
         let metadata = tokio::task::block_in_place(|| {
-            self.producer.client().fetch_metadata(
-                Some(topic),
-                Timeout::After(Duration::from_secs(10)),
-            )
+            self.producer
+                .client()
+                .fetch_metadata(Some(topic), Timeout::After(Duration::from_secs(10)))
         })?;
         let num_partitions = metadata
             .topics()
@@ -230,9 +232,12 @@ impl KafkaSink {
 
         // Determine partition
         let key_for_partition = envelope.key.as_ref().unwrap_or(&Value::Null);
-        let partition =
-            self.partitioner
-                .partition(&target_topic, key_for_partition, &envelope.value, num_partitions);
+        let partition = self.partitioner.partition(
+            &target_topic,
+            key_for_partition,
+            &envelope.value,
+            num_partitions,
+        );
 
         debug!(
             "Sending to topic '{}' partition {}/{}",
@@ -297,7 +302,10 @@ impl KafkaSink {
         self.producer
             .flush(Timeout::After(Duration::from_secs(30)))
             .map_err(|e| {
-                error!("Failed to flush producer for '{}': {}", self.output_template, e);
+                error!(
+                    "Failed to flush producer for '{}': {}",
+                    self.output_template, e
+                );
                 MirrorMakerError::Kafka(e)
             })
     }
@@ -391,7 +399,11 @@ mod tests {
         use serde_json::json;
 
         /// Mirror `KafkaSink::resolve_topic` logic for unit tests without a real broker.
-        fn resolve(template: &str, is_template: bool, source: Option<&str>) -> Result<String, String> {
+        fn resolve(
+            template: &str,
+            is_template: bool,
+            source: Option<&str>,
+        ) -> Result<String, String> {
             if is_template {
                 source
                     .ok_or_else(|| "no source topic".to_string())
@@ -403,7 +415,10 @@ mod tests {
 
         #[test]
         fn test_fixed_topic_unchanged() {
-            assert_eq!(resolve("events-copy", false, Some("events")).unwrap(), "events-copy");
+            assert_eq!(
+                resolve("events-copy", false, Some("events")).unwrap(),
+                "events-copy"
+            );
         }
 
         #[test]
@@ -441,11 +456,7 @@ mod tests {
             let mut envelope = MessageEnvelope::new(json!({"event": "login"}));
             envelope.topic = Some("auth-events".to_string());
 
-            let resolved = resolve(
-                "processed.{source_topic}",
-                true,
-                envelope.topic.as_deref(),
-            );
+            let resolved = resolve("processed.{source_topic}", true, envelope.topic.as_deref());
             assert_eq!(resolved.unwrap(), "processed.auth-events");
         }
     }

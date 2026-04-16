@@ -82,7 +82,8 @@ async fn main() -> Result<()> {
     // Build processor based on configuration
     let processor: Arc<dyn MessageProcessor> = if let Some(routing) = &config.routing {
         info!("Multi-destination routing enabled");
-        build_multi_destination_processor(&config, routing, stats.clone(), cache_manager.clone()).await?
+        build_multi_destination_processor(&config, routing, stats.clone(), cache_manager.clone())
+            .await?
     } else {
         info!("Single-destination mode");
         build_single_destination_processor(&config, stats.clone(), cache_manager.clone()).await?
@@ -516,7 +517,9 @@ async fn build_single_destination_processor(
     if let Some(ref transform_expr) = config.transform {
         info!("Value transform: {}", transform_expr);
         let transform = parse_transform_with_cache(transform_expr, Some(cache_manager))?;
-        Ok(Arc::new(SingleDestinationProcessor::with_transform(sink, transform)))
+        Ok(Arc::new(SingleDestinationProcessor::with_transform(
+            sink, transform,
+        )))
     } else {
         Ok(Arc::new(SingleDestinationProcessor::new(sink)))
     }
@@ -583,7 +586,10 @@ async fn build_multi_destination_processor(
         let transform: Option<Arc<dyn Transform>> = if let Some(ref transform_expr) = dest.transform
         {
             info!("  Value transform: {}", transform_expr);
-            Some(parse_transform_with_cache(transform_expr, Some(cache_manager.clone()))?)
+            Some(parse_transform_with_cache(
+                transform_expr,
+                Some(cache_manager.clone()),
+            )?)
         } else {
             None
         };

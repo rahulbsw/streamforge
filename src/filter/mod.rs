@@ -346,7 +346,10 @@ impl Transform for JsonPathTransform {
         match self.extract_value(&value) {
             Some(extracted) => Ok(extracted),
             None => {
-                tracing::debug!("JsonPathTransform: path '{}' not found, passing through", self.path);
+                tracing::debug!(
+                    "JsonPathTransform: path '{}' not found, passing through",
+                    self.path
+                );
                 Ok(value)
             }
         }
@@ -623,7 +626,10 @@ impl Transform for ArrayMapTransform {
             return Ok(value);
         };
         let Some(arr) = extracted.as_array() else {
-            tracing::debug!("ARRAY_MAP: path '{}' is not an array, passing through", self.path);
+            tracing::debug!(
+                "ARRAY_MAP: path '{}' is not an array, passing through",
+                self.path
+            );
             return Ok(value);
         };
         let mut result = Vec::new();
@@ -733,14 +739,20 @@ impl ArithmeticTransform {
 impl Transform for ArithmeticTransform {
     fn transform(&self, value: Value) -> Result<Value> {
         let Some(left) = self.extract_value(&value, &self.left_path) else {
-            tracing::debug!("ARITHMETIC: left operand '{}' not found or not a number, passing through", self.left_path);
+            tracing::debug!(
+                "ARITHMETIC: left operand '{}' not found or not a number, passing through",
+                self.left_path
+            );
             return Ok(value);
         };
 
         let right = match &self.right {
             ArithmeticOperand::Path(path) => {
                 let Some(r) = self.extract_value(&value, path) else {
-                    tracing::debug!("ARITHMETIC: right operand '{}' not found or not a number, passing through", path);
+                    tracing::debug!(
+                        "ARITHMETIC: right operand '{}' not found or not a number, passing through",
+                        path
+                    );
                     return Ok(value);
                 };
                 r
@@ -908,7 +920,10 @@ impl CacheLookupTransform {
 impl Transform for CacheLookupTransform {
     fn transform(&self, value: Value) -> Result<Value> {
         let Some(key) = self.extract_key(&value) else {
-            tracing::debug!("CACHE_LOOKUP: key path '{}' not found or not a string/number, passing through", self.key_path);
+            tracing::debug!(
+                "CACHE_LOOKUP: key path '{}' not found or not a string/number, passing through",
+                self.key_path
+            );
             return Ok(value);
         };
 
@@ -963,7 +978,11 @@ pub struct CachePutTransform {
 }
 
 impl CachePutTransform {
-    pub fn new(cache: Arc<SyncLookupCache>, key_path: &str, value_path: Option<&str>) -> Result<Self> {
+    pub fn new(
+        cache: Arc<SyncLookupCache>,
+        key_path: &str,
+        value_path: Option<&str>,
+    ) -> Result<Self> {
         Ok(Self {
             cache,
             key_path: key_path.to_string(),
@@ -993,7 +1012,10 @@ impl CachePutTransform {
 impl Transform for CachePutTransform {
     fn transform(&self, value: Value) -> Result<Value> {
         let Some(key) = self.extract_key(&value) else {
-            tracing::debug!("CACHE_PUT: key path '{}' not found or not a string/number, skipping cache write", self.key_path);
+            tracing::debug!(
+                "CACHE_PUT: key path '{}' not found or not a string/number, skipping cache write",
+                self.key_path
+            );
             return Ok(value);
         };
 
@@ -1001,7 +1023,10 @@ impl Transform for CachePutTransform {
             Some(path) => match self.extract_path(&value, path) {
                 Some(v) => v,
                 None => {
-                    tracing::debug!("CACHE_PUT: value path '{}' not found, skipping cache write", path);
+                    tracing::debug!(
+                        "CACHE_PUT: value path '{}' not found, skipping cache write",
+                        path
+                    );
                     return Ok(value);
                 }
             },
@@ -1082,7 +1107,10 @@ fn set_nested(node: &mut Value, parts: &[&str], new_val: Value) -> Result<()> {
         obj.insert(parts[0].to_string(), new_val);
     } else {
         let child = obj.get_mut(parts[0]).ok_or_else(|| {
-            MirrorMakerError::Processing(format!("STRING: intermediate path '{}' not found", parts[0]))
+            MirrorMakerError::Processing(format!(
+                "STRING: intermediate path '{}' not found",
+                parts[0]
+            ))
         })?;
         set_nested(child, &parts[1..], new_val)?;
     }
@@ -1165,7 +1193,10 @@ impl StringTransform {
                 };
                 Ok(Value::String(result))
             }
-            StringOp::RegexReplace { pattern, replacement } => {
+            StringOp::RegexReplace {
+                pattern,
+                replacement,
+            } => {
                 let result = pattern.replace_all(s, replacement.as_str()).to_string();
                 Ok(Value::String(result))
             }
@@ -1183,7 +1214,10 @@ impl StringTransform {
 impl Transform for StringTransform {
     fn transform(&self, value: Value) -> Result<Value> {
         let Some(s) = get_string_at_path(&value, &self.path) else {
-            tracing::debug!("STRING: path '{}' not found or not a string/scalar, passing through", self.path);
+            tracing::debug!(
+                "STRING: path '{}' not found or not a string/scalar, passing through",
+                self.path
+            );
             return Ok(value);
         };
         let result = self.apply(&s)?;
@@ -1230,7 +1264,10 @@ impl Transform for ConcatTransform {
                 ConcatPart::Path(path) => match get_string_at_path(&value, path) {
                     Some(s) => buf.push_str(&s),
                     None => {
-                        tracing::debug!("CONCAT: path '{}' not found or not a string, using empty string", path);
+                        tracing::debug!(
+                            "CONCAT: path '{}' not found or not a string, using empty string",
+                            path
+                        );
                     }
                 },
             }
