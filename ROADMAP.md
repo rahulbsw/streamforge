@@ -1,339 +1,121 @@
-# Streamforge Roadmap
+# StreamForge Roadmap
 
-Vision and planned features for Streamforge.
-
-## Vision
-
-Streamforge aims to be the **fastest, most reliable, and easiest-to-use Kafka streaming toolkit**. We focus on:
-
-1. **Performance** - Always faster than alternatives
-2. **Reliability** - Production-grade stability
-3. **Usability** - Simple configuration, great documentation
-4. **Security** - Enterprise-ready security features
-5. **Community** - Welcoming, collaborative ecosystem
+> **Current version: 0.5.0** · [Changelog](docs/CHANGELOG.md)
 
 ---
 
-## Current Version: 0.3.0
+## Shipped (v0.1–v0.5)
 
-### What's Included
+Everything below is already in the current release.
 
-✅ **Core Features:**
-- Cross-cluster mirroring
-- Multi-destination routing
-- Advanced filtering (DSL)
-- Powerful transformations
-- Custom partitioning
-- Native compression
-- Security (SSL/TLS, SASL, Kerberos)
+**Pipeline engine**
+- ✅ Kafka → Kafka pipeline with multi-destination routing
+- ✅ Topic regex subscription (`input: "^prod\..*"`)
+- ✅ Output topic templates (`output: "mirror.{source_topic}"`)
+- ✅ At-least-once delivery with manual commit
+- ✅ Dead-letter queue with exponential backoff retry
+- ✅ Cross-cluster mirroring
 
-✅ **Performance:**
-- 40x faster than Java JSLT
-- 10x less memory usage
-- 2.5x higher throughput
+**DSL (Rhai scripting engine)**
+- ✅ Full scripting: if/else, switch, closures, string ops, array ops
+- ✅ Filter arrays (all ANDed), transform arrays (sequential pipeline)
+- ✅ `msg`, `key`, `headers`, `timestamp` in every expression scope
+- ✅ Null/empty helpers: `is_null`, `is_empty`, `is_null_or_empty`, `??`
+- ✅ `cache_lookup` / `cache_put` callable from scripts
+- ✅ `now_ms()` for time-based filtering
 
-✅ **Documentation:**
-- 18 documentation files
-- 13 example configurations
-- Complete DSL reference
-- Security guide
-- Performance tuning guide
+**Envelope operations**
+- ✅ Key extraction, templates, construction, hashing
+- ✅ Header injection, copy, remove, FROM-field
+- ✅ Timestamp: preserve, current, extract, offset
 
----
+**Caching**
+- ✅ In-process Moka cache (TTL + TTI)
+- ✅ Redis backend
+- ✅ Kafka compacted topic as cache (warmup on start)
+- ✅ Multi-level L1 (local) + L2 (Redis)
 
-## Version 1.0 (Q2 2025)
+**Observability**
+- ✅ Prometheus `/metrics` with per-destination labels
+- ✅ Consumer lag monitoring
+- ✅ `/health` endpoint
+- ✅ Grafana alert rules
 
-**Goal**: First stable release
+**Security**
+- ✅ SSL/TLS with mTLS
+- ✅ SASL: PLAIN, SCRAM-SHA-256/512, GSSAPI/Kerberos, OAUTHBEARER
+- ✅ Chainguard distroless base image (0 CVEs)
 
-### Features
-
-- [ ] **Avro Support**
-  - Avro serialization/deserialization
-  - Schema Registry integration
-  - Schema evolution handling
-
-- [ ] **Dead Letter Queue**
-  - Configurable DLQ for failed messages
-  - Retry policies
-  - Error categorization
-
-- [ ] **Prometheus Metrics**
-  - Native Prometheus exporter
-  - Rich metrics (latency, throughput, errors)
-  - Grafana dashboard templates
-
-- [ ] **Health Check Endpoint**
-  - HTTP health endpoint
-  - Kafka connectivity check
-  - Resource utilization metrics
-
-- [ ] **Enhanced CLI**
-  - Better command-line interface
-  - Config validation mode
-  - Dry-run mode
-
-### Performance
-
-- [ ] Zero-copy optimizations
-- [ ] SIMD operations for filtering
-- [ ] Parallel message processing
-- Target: 50K+ messages/second
-
-### Documentation
-
-- [ ] Video tutorials
-- [ ] Interactive examples
-- [ ] Migration guide from MM2
-- [ ] Architecture deep-dive
+**Deployment**
+- ✅ Single binary (linux-x86_64, linux-aarch64, macos)
+- ✅ Docker / Docker Compose
+- ✅ Kubernetes operator (CRD-based pipelines)
+- ✅ Helm chart
+- ✅ Web UI for operator pipeline management
 
 ---
 
-## Version 1.1 (Q3 2025)
+## v0.6.0 — Schema & Validation
 
-**Goal**: Advanced features and integrations
+**Goal:** Production hardening and developer experience
 
-### Features
-
-- [ ] **Schema Registry Support**
-  - Full Schema Registry integration
-  - Schema validation
-  - Schema evolution strategies
-
-- [ ] **Message Transformation Enhancements**
-  - Nested transform composition
-  - Custom transform functions
-  - Jinja2-like templating
-
-- [ ] **Exactly-Once Semantics**
-  - Transactional processing
-  - Idempotent producers
-  - Offset management improvements
-
-- [ ] **Web UI** (Maybe)
-  - Configuration management
-  - Real-time metrics dashboard
-  - Pipeline visualization
-
-### Integrations
-
-- [ ] Confluent Cloud CLI integration
-- [ ] AWS MSK IAM authentication
-- [ ] Azure Event Hubs integration
-- [ ] Google Cloud Pub/Sub bridge
+- [ ] `streamforge validate` — dry-run config validation without connecting to Kafka
+- [ ] `streamforge lint` — catch common mistakes in filter/transform scripts at startup
+- [ ] Avro support (read/write with Schema Registry)
+- [ ] Protobuf support
+- [ ] Better startup error messages (which expression failed, at which line)
 
 ---
 
-## Version 1.2 (Q4 2025)
+## v0.7.0 — WASM Transforms
 
-**Goal**: Enterprise features
+**Goal:** Bring-your-own transform logic without modifying StreamForge
 
-### Features
-
-- [ ] **Multi-Tenancy**
-  - Isolated pipelines
-  - Resource quotas
-  - Per-tenant metrics
-
-- [ ] **Advanced Routing**
-  - Content-based routing rules engine
-  - Dynamic routing table updates
-  - Conditional transformations
-
-- [ ] **Data Governance**
-  - PII detection and masking
-  - Data lineage tracking
-  - Audit logging
-
-- [ ] **Kubernetes Operator**
-  - CRD for pipeline definitions
-  - Auto-scaling based on lag
-  - GitOps support
-
-### Performance
-
-- [ ] Adaptive batching
-- [ ] Smart backpressure
-- [ ] Connection pooling optimization
-- Target: 100K+ messages/second
+- [ ] WASM plugin system — compile a transform in any WASM-targeting language
+- [ ] UDF registry — share transform modules across pipeline configs
+- [ ] Hot-reload — update scripts without restarting (config watch mode)
+- [ ] `streamforge bench-config` — measure throughput of a given config locally
 
 ---
 
-## Version 2.0 (2026)
+## v1.0.0 — Production Hardening
 
-**Goal**: Next-generation streaming
+**Goal:** Long-term stable API, exactly-once semantics, stateful transforms
 
-### Vision Features
-
-- [ ] **Stream Processing**
-  - Windowing operations
-  - Joins across streams
-  - Aggregations
-  - Stateful processing
-
-- [ ] **Machine Learning**
-  - Real-time model inference
-  - Anomaly detection
-  - Auto-scaling predictions
-
-- [ ] **Multi-Protocol Support**
-  - Pulsar support
-  - NATS integration
-  - RabbitMQ bridge
-  - HTTP/gRPC sources/sinks
-
-- [ ] **Visual Pipeline Builder**
-  - Drag-and-drop pipeline creation
-  - Live preview
-  - Template marketplace
+- [ ] Exactly-once semantics (idempotent producer + transactional consumer)
+- [ ] RocksDB state backend for stateful transforms (counters, windows)
+- [ ] CDC (Change Data Capture) source connector
+- [ ] Message replay / backfill — reprocess a time range from a topic
+- [ ] Stable config API (no breaking changes after 1.0)
 
 ---
 
-## Community Wishlist
+## Beyond v1.0
 
-Features requested by the community (vote on GitHub Issues):
+These are on the list but not scheduled:
 
-### High Priority
-
-- [ ] Avro/Protobuf support (🔥 Most requested)
-- [ ] Prometheus metrics
-- [ ] Dead letter queue
-- [ ] Web UI for monitoring
-
-### Medium Priority
-
-- [ ] Exactly-once semantics
-- [ ] Schema Registry integration
-- [ ] Kubernetes operator
-- [ ] PII masking
-
-### Low Priority
-
-- [ ] Message deduplication
-- [ ] Time-based filtering
-- [ ] Geographic routing
-- [ ] Multi-cloud support
-
----
-
-## Research & Experiments
-
-Experimental features we're exploring:
-
-### Performance Innovations
-
-- **DPDK Integration**: Zero-copy networking
-- **io_uring**: Modern Linux async I/O
-- **SIMD Optimization**: Vectorized operations
-- **GPU Acceleration**: Parallel filtering/transforms
-
-### New Capabilities
-
-- **Stream SQL**: SQL-like query language
-- **CDC Support**: Change Data Capture integration
-- **Time-Travel**: Historical replay capabilities
-- **Smart Caching**: Intelligent message caching
+- Stream-stream joins (two input topics merged by key)
+- HTTP/gRPC source and sink connectors
+- Pulsar and NATS support
+- Multi-tenancy with isolated pipelines and per-tenant metrics
+- Visual pipeline builder (drag-and-drop)
 
 ---
 
 ## Non-Goals
 
-Things we explicitly don't plan to do:
+StreamForge is intentionally scoped. It will not become:
 
-❌ **Not a Stream Processor**: Use Kafka Streams or Flink for complex stream processing
-❌ **Not a Data Lake**: Use dedicated storage solutions
-❌ **Not a Message Queue**: Kafka is the message queue
-❌ **Not a Database**: Use proper databases for persistence
+- A stream processor with windowing / aggregations (use Kafka Streams or Flink)
+- A data lake or storage system
+- A message broker replacement
 
 ---
 
 ## How to Influence the Roadmap
 
-### 1. Vote on Issues
+1. **Open an issue** with the `enhancement` label
+2. **Vote** on existing issues with 👍
+3. **Submit a PR** — the best way to get something built
 
-Vote with 👍 on GitHub issues for features you want.
-
-### 2. Submit Proposals
-
-Create detailed feature proposals with:
-- Use case description
-- Technical approach
-- Benefits and tradeoffs
-
-### 3. Contribute Code
-
-Implement features yourself! See [CONTRIBUTING.md](docs/CONTRIBUTING.md).
-
-### 4. Sponsor Development
-
-Support development through GitHub Sponsors (coming soon).
-
----
-
-## Release Schedule
-
-### Cadence
-
-- **Major releases** (X.0.0): Yearly
-- **Minor releases** (0.X.0): Quarterly
-- **Patch releases** (0.0.X): As needed
-
-### Support Policy
-
-- **Current major version**: Full support
-- **Previous major version**: Security fixes for 6 months
-- **Older versions**: Community support only
-
----
-
-## Success Metrics
-
-How we measure success:
-
-### Adoption
-
-- **GitHub stars**: 1K+ (v1.0), 5K+ (v2.0)
-- **Downloads**: 10K/month (v1.0), 50K/month (v2.0)
-- **Production usage**: 100+ companies (v1.0), 500+ (v2.0)
-
-### Performance
-
-- **Throughput**: 50K msg/s (v1.0), 100K msg/s (v2.0)
-- **Latency p99**: <10ms (v1.0), <5ms (v2.0)
-- **Memory**: <50MB (v1.0), <30MB (v2.0)
-
-### Community
-
-- **Contributors**: 50+ (v1.0), 200+ (v2.0)
-- **Stars**: 1K+ (v1.0), 5K+ (v2.0)
-- **Conference talks**: 3+ (v1.0), 10+ (v2.0)
-
----
-
-## Get Involved
-
-### Ways to Contribute
-
-1. **Use it** - Try Streamforge and provide feedback
-2. **Report bugs** - Help us improve quality
-3. **Request features** - Tell us what you need
-4. **Write docs** - Improve documentation
-5. **Write code** - Implement features
-6. **Spread the word** - Star, tweet, blog about it
-
-### Communication
-
-- **GitHub Issues**: Feature requests and bugs
-- **GitHub Discussions**: Questions and ideas
-- **Email**: rahul.oracle.db@gmail.com
-
----
-
-## Changelog
-
-See [docs/CHANGELOG.md](docs/CHANGELOG.md) for version history.
-
----
-
-**Last Updated**: 2025-03-09
-**Current Version**: 0.3.0
-**Next Release**: 1.0.0 (Q2 2025)
+Contact: [GitHub Issues](https://github.com/rahulbsw/streamforge/issues) · rahul.oracle.db@gmail.com

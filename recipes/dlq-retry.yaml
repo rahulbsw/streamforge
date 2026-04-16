@@ -1,0 +1,62 @@
+# Recipe: Dead-Letter Queue with Retry
+#
+# Problem: Some messages fail processing (malformed JSON, downstream unavailable,
+#          constraint violations). You need to:
+#           1. Not lose the message
+#           2. Retry it automatically with backoff
+#           3. After max retries, park it for manual inspection
+#
+# Solution: StreamForge's at-least-once delivery + DLQ support handles this
+#           without any custom retry logic in application code.
+#
+# Behavior:
+#   - Messages are committed only after successful produce to all destinations
+#   - On failure, automatic retry with exponential backoff
+#   - After max_retries, message written to dlq_topic with error metadata
+#   - On restart, uncommitted messages are reprocessed from last commit
+
+appid: reliable-pipeline
+bootstrap: kafka:9092
+input: payment-requests
+threads: 4
+
+commit_strategy:
+  manual_commit: true       # commit only after successful produce
+  commit_mode: async        # async for throughput; use sync for strictest guarantees
+  enable_dlq: true
+  dlq_topic: payment-dlq
+  max_retries: 3
+  retry_backoff:
+    initial_backoff_ms: 100   # 100ms first retry
+    max_backoff_ms: 30000     # cap at 30 seconds
+    multiplier: 2.0           # 100ms → 200ms → 400ms → DLQ
+
+routing:
+  destinations:
+
+    # Valid payments — must have required fields
+    - output: validated-payments
+      filter:
+        - 'not_null(msg["paymentId"])'
+        - 'not_null(msg["customerId"])'
+        - 'msg["amount"] > 0'
+        - 'msg["currency"] in ["USD", "EUR", "GBP", "JPY"]'
+      transform: |
+        msg + #{
+          validatedAt: now_ms(),
+          status: "validated"
+        }
+
+    # Invalid payments → DLQ immediately (don't retry — they'll always fail)
+    - output: payment-dlq
+      filter: |
+        is_null_or_empty(msg["paymentId"]) ||
+        is_null_or_empty(msg["customerId"]) ||
+        (msg["amount"] ?? 0) <= 0
+      transform: |
+        msg + #{
+          dlqReason: if is_null_or_empty(msg["paymentId"]) { "missing paymentId" }
+                     else if is_null_or_empty(msg["customerId"]) { "missing customerId" }
+                     else { "invalid amount" },
+          dlqAt: now_ms()
+        }

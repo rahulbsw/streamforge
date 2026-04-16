@@ -1,0 +1,44 @@
+# Recipe: Selective Cross-Cluster Replication
+#
+# Problem: You run prod and DR clusters. You don't want to replicate everything
+#          (test topics, internal topics, old data), and you want to reshape
+#          messages as they cross the boundary.
+#
+# Different from MirrorMaker 2:
+#   - MM2 replicates topics wholesale (all or nothing per topic)
+#   - StreamForge filters and transforms per message, per destination
+#   - Useful when you want content-based selection, not full topic sync
+#   - Does NOT sync consumer group offsets (use MM2 if you need that)
+#
+# Topics: mirrors all prod.* topics to the DR cluster,
+#         filtering out test/internal messages, with DR-specific metadata.
+
+appid: selective-mirror
+bootstrap: kafka-prod:9092
+target_broker: kafka-dr:9092
+input: "^prod\\..*"              # regex: all topics starting with "prod."
+output: "dr.{source_topic}"       # prod.orders → dr.prod.orders
+threads: 4
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+
+filter:
+  # Skip internal/test messages
+  - 'headers["x-env"] != "test"'
+  - 'headers["x-internal"] != "true"'
+  # Only recent messages (within last 10 minutes — skip during catch-up)
+  - '(now_ms() - timestamp) / 1000 < 600'
+
+transform: |
+  msg + #{
+    drReplicatedAt:   now_ms(),
+    drSourceCluster:  "prod",
+    drSourceTopic:    key          # original topic name in key (set by producer)
+  }
+
+key_transform: '/messageId'        # repartition by messageId in DR cluster
+headers:
+  x-replicated-by: "streamforge"
+  x-replica-cluster: "dr"

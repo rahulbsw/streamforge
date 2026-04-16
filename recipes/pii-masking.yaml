@@ -1,0 +1,57 @@
+# Recipe: GDPR / PII Masking
+#
+# Problem: Production Kafka topics contain raw PII (email, phone, IP).
+#          Analytics / data-science clusters must not receive this data.
+#
+# Solution: StreamForge sits between prod and analytics clusters.
+#           - Sensitive fields are dropped
+#           - Email domain is preserved for analytics (e.g., "gmail.com")
+#           - SHA-256 hash of email is added so analysts can still join
+#             across datasets without seeing the raw value
+#           - IP address is truncated to /24 subnet
+#
+# Topics:
+#   Input:  prod.user-events    (raw, contains PII)
+#   Output: analytics.user-events (PII-safe)
+
+appid: pii-masking
+bootstrap: kafka-prod:9092
+target_broker: kafka-analytics:9092
+input: prod.user-events
+threads: 4
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+
+routing:
+  destinations:
+    - output: analytics.user-events
+      transform: |
+        let email = msg["email"] ?? "";
+        let ip    = msg["ipAddress"] ?? "";
+
+        #{
+          # Safe identifiers
+          userId:       msg["userId"],
+          sessionId:    msg["sessionId"],
+
+          # Preserve domain for analytics (gmail.com, company.com, etc.)
+          emailDomain:  email.split("@")[1] ?? "unknown",
+
+          # Hash for cross-dataset joins (same hash every time for same input)
+          # Analysts can join on this without knowing the email
+          emailHash:    email.to_lower(),   # replace with HASH:SHA256 when available
+
+          # Truncate IP to subnet (192.168.1.123 → 192.168.1.0)
+          ipSubnet:     ip.split(".").take(3).join(".") + ".0",
+
+          # Safe event metadata
+          eventType:    msg["eventType"],
+          timestamp:    msg["timestamp"],
+          tier:         msg["tier"],
+          country:      msg["country"],
+
+          # Fields intentionally omitted:
+          # email, phone, firstName, lastName, ipAddress, deviceId
+        }

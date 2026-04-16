@@ -1,0 +1,61 @@
+# StreamForge Demo Pipeline
+#
+# Reads synthetic e-commerce events from raw-events and:
+#   1. Routes premium users to processed-events with enrichment
+#   2. Routes all events to pii-safe with email/phone redacted
+#   3. Routes invalid messages (missing userId) to the DLQ
+
+appid: demo-pipeline
+bootstrap: kafka:9092
+input: raw-events
+threads: 2
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  enable_dlq: true
+  dlq_topic: demo-dlq
+  max_retries: 3
+
+observability:
+  metrics_enabled: true
+  metrics_port: 9090
+  lag_monitoring_enabled: true
+
+routing:
+  destinations:
+
+    # Route 1: Premium/Enterprise users — enrich and forward
+    - output: processed-events
+      filter:
+        - 'not_null(msg["userId"])'
+        - 'msg["status"] == "active"'
+        - 'msg["tier"] in ["premium", "enterprise"]'
+      transform: |
+        let spend = msg["totalSpend"] ?? 0.0;
+        msg + #{
+          tier:         msg["tier"].to_upper(),
+          email:        msg["email"].to_lower(),
+          spendFormatted: "$" + (spend * 1.0).to_string(),
+          processedAt:  now_ms(),
+          pipeline:     "streamforge-demo"
+        }
+
+    # Route 2: All valid events — mask PII for analytics
+    - output: pii-safe
+      filter: 'not_null(msg["userId"])'
+      transform: |
+        #{
+          userId:      msg["userId"],
+          eventType:   msg["eventType"],
+          tier:        msg["tier"],
+          status:      msg["status"],
+          timestamp:   msg["timestamp"],
+          # Email preserved as hash for analytics joins
+          emailDomain: msg["email"].split("@")[1] ?? "unknown",
+          # Personal data stripped
+        }
+
+    # Route 3: Invalid messages → DLQ
+    - output: demo-dlq
+      filter: 'is_null_or_empty(msg["userId"])'

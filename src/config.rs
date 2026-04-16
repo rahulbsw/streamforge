@@ -1,6 +1,48 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// A DSL expression — accepts either a single string or an array of strings.
+///
+/// When used as a **filter**, multiple strings are implicitly ANDed.
+/// When used as a **transform**, strings are applied as a sequential pipeline
+/// where the output of each step becomes the input `msg` of the next.
+///
+/// ```yaml
+/// # Single expression (both forms are equivalent)
+/// filter: 'msg["status"] == "active"'
+/// filter:
+///   - 'msg["status"] == "active"'
+///
+/// # AND filter — all conditions must pass
+/// filter:
+///   - 'msg["status"] == "active"'
+///   - 'msg["score"] > 80'
+///   - 'key.starts_with("user-")'
+///
+/// # Transform pipeline — applied in order, each output feeds the next
+/// transform:
+///   - 'msg + #{ email: msg["email"].to_lower() }'
+///   - 'msg + #{ processed: true }'
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DslExpr {
+    /// A single Rhai expression or script string.
+    Single(String),
+    /// Multiple expressions — ANDed for filters, piped for transforms.
+    Multi(Vec<String>),
+}
+
+impl DslExpr {
+    /// Return all expressions as a flat Vec regardless of variant.
+    pub fn into_parts(self) -> Vec<String> {
+        match self {
+            DslExpr::Single(s) => vec![s],
+            DslExpr::Multi(v) => v,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MirrorMakerConfig {
     /// Application ID
@@ -34,13 +76,11 @@ pub struct MirrorMakerConfig {
     /// Multi-destination routing configuration
     pub routing: Option<RoutingConfig>,
 
-    /// Value transform expression for single-destination mode.
-    ///
-    /// Supports the full transform DSL including `STRING:`, `CACHE_LOOKUP:`,
-    /// `CACHE_PUT:`, `HASH:`, `CONSTRUCT:`, `ARITHMETIC:`, etc.
-    /// Ignored when `routing` is set.
+    /// Transform expression (or pipeline) for single-destination mode.
+    /// Ignored when `routing` is set. Accepts a single Rhai script or an array
+    /// of scripts that are applied in sequence.
     #[serde(default)]
-    pub transform: Option<String>,
+    pub transform: Option<DslExpr>,
 
     /// Consumer properties
     #[serde(default)]
@@ -196,21 +236,34 @@ pub struct DestinationConfig {
     /// Match value for content-based routing
     pub match_value: Option<String>,
 
-    /// Filter expression (simple or composite)
-    /// Simple: "path,operator,value" e.g., "/message/siteId,>,10000"
-    /// Composite JSON for AND/OR/NOT (parsed separately)
+    /// Filter expression — a Rhai boolean expression, or a list of expressions
+    /// that are all ANDed together.
     ///
-    /// New envelope filters:
-    /// - KEY_PREFIX:prefix
-    /// - KEY_MATCHES:regex
-    /// - HEADER:name,op,value
-    /// - TIMESTAMP_AGE:op,seconds
-    pub filter: Option<String>,
+    /// Available scope: `msg` (payload), `key`, `headers`, `timestamp`.
+    ///
+    /// ```yaml
+    /// filter: 'msg["status"] == "active" && msg["score"] > 80'
+    /// # or as an array (ANDed automatically):
+    /// filter:
+    ///   - 'msg["status"] == "active"'
+    ///   - 'msg["score"] > 80'
+    ///   - 'key.starts_with("user-")'
+    /// ```
+    #[serde(default)]
+    pub filter: Option<DslExpr>,
 
-    /// Transform expression for message value
-    /// Simple path: "/message" or "/message/confId"
-    /// Object construction JSON (parsed separately)
-    pub transform: Option<String>,
+    /// Transform expression — a Rhai script that returns the new payload, or
+    /// a list of scripts applied as a pipeline (each output is the next `msg`).
+    ///
+    /// ```yaml
+    /// transform: '#{ id: msg["userId"], email: msg["email"].to_lower() }'
+    /// # or as a pipeline:
+    /// transform:
+    ///   - 'msg + #{ email: msg["email"].to_lower() }'
+    ///   - 'msg + #{ processed: true }'
+    /// ```
+    #[serde(default)]
+    pub transform: Option<DslExpr>,
 
     /// Key transformation expression (NEW)
     ///
@@ -704,7 +757,12 @@ timestamp: "PRESERVE"
         let config: DestinationConfig = serde_yaml::from_str(yaml).unwrap();
 
         assert_eq!(config.output, "test-topic");
-        assert_eq!(config.filter, Some("KEY_PREFIX:user-".to_string()));
+        assert_eq!(
+            config.filter,
+            Some(crate::config::DslExpr::Single(
+                "KEY_PREFIX:user-".to_string()
+            ))
+        );
         assert_eq!(config.key_transform, Some("/user/id".to_string()));
 
         // Check headers
@@ -838,7 +896,9 @@ routing:
         assert_eq!(dest1.output, "premium-users");
         assert_eq!(
             dest1.filter,
-            Some("AND:KEY_PREFIX:premium-:/user/active,==,true".to_string())
+            Some(crate::config::DslExpr::Single(
+                "AND:KEY_PREFIX:premium-:/user/active,==,true".to_string()
+            ))
         );
         assert_eq!(dest1.key_transform, Some("/user/id".to_string()));
         assert_eq!(dest1.timestamp, Some("PRESERVE".to_string()));

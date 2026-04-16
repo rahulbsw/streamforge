@@ -1,0 +1,40 @@
+# Recipe: Topic Namespace Mirror
+#
+# Problem: You have 50+ microservices, each writing to topics under
+#          "prod.<service>.*". You want to mirror all of them to an
+#          analytics cluster under "mirror.<original-topic>" without
+#          writing 50 individual configurations.
+#
+# Solution: Topic regex subscription + output topic template.
+#           One config covers all current AND future topics in the namespace.
+
+appid: namespace-mirror
+bootstrap: kafka-prod:9092
+target_broker: kafka-analytics:9092
+
+# Subscribe to every topic starting with "prod."
+# New topics matching this pattern are picked up automatically.
+input: "^prod\\..*"
+
+# Mirror to analytics cluster with "mirror." prefix
+# prod.orders → mirror.prod.orders
+# prod.payments → mirror.prod.payments
+# prod.user-events → mirror.prod.user-events
+output: "mirror.{source_topic}"
+
+threads: 8
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+
+# Optional: strip internal headers before forwarding
+header_transforms:
+  - header: x-internal-trace-id
+    operation: REMOVE
+  - header: x-debug
+    operation: REMOVE
+
+transform: |
+  # Add mirroring metadata; pass payload through unchanged
+  msg + #{ _mirroredAt: now_ms(), _sourceCluster: "prod" }

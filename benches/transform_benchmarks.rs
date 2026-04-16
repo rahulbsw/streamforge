@@ -1,262 +1,129 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use serde_json::{json, Value};
-use std::collections::HashMap;
-use streamforge::filter::*;
-use streamforge::filter_parser::parse_transform;
+use criterion::{criterion_group, criterion_main, Criterion};
+use serde_json::json;
+use streamforge::rhai_dsl::RhaiEngine;
+use streamforge::MessageEnvelope;
 
-fn create_test_message() -> Value {
-    json!({
-        "message": {
-            "confId": 12345,
-            "siteId": 67890,
-            "status": "active",
-            "timestamp": 1234567890
-        },
-        "order": {
-            "id": 100,
-            "price": 100.00,
-            "tax": 8.00,
-            "discount": 10.00,
-            "items": 5
-        },
-        "users": [
-            {"id": 1, "name": "Alice", "email": "alice@example.com"},
-            {"id": 2, "name": "Bob", "email": "bob@example.com"},
-            {"id": 3, "name": "Charlie", "email": "charlie@example.com"}
-        ],
-        "data": {
-            "nested": {
-                "value": 42
-            }
-        }
-    })
+fn make_engine() -> RhaiEngine {
+    RhaiEngine::new(None)
 }
 
-fn bench_simple_transform(c: &mut Criterion) {
-    let msg = create_test_message();
+pub fn transform_benchmarks(c: &mut Criterion) {
+    let e = make_engine();
 
-    c.bench_function("transform/extract_field", |b| {
-        let transform = JsonPathTransform::new("/message/confId").unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
+    // Field extraction
+    let t_extract = e.compile_transform(r#"msg["user"]"#).unwrap();
+    let env_extract = MessageEnvelope::new(json!({"user": {"id": "u1", "name": "Alice"}}));
+    c.bench_function("transform/field_extract", |b| {
+        b.iter(|| t_extract.transform(&env_extract).unwrap())
     });
 
-    c.bench_function("transform/extract_object", |b| {
-        let transform = JsonPathTransform::new("/message").unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
+    // Object construction — 2 fields
+    let t_construct2 = e
+        .compile_transform(r#"#{ id: msg["userId"], email: msg["email"] }"#)
+        .unwrap();
+    let env_c2 = MessageEnvelope::new(json!({"userId": "u1", "email": "a@b.com"}));
+    c.bench_function("transform/construct_2_fields", |b| {
+        b.iter(|| t_construct2.transform(&env_c2).unwrap())
     });
 
-    c.bench_function("transform/extract_nested", |b| {
-        let transform = JsonPathTransform::new("/data/nested/value").unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
-    });
-}
-
-fn bench_object_construction(c: &mut Criterion) {
-    let msg = create_test_message();
-
-    c.bench_function("transform/construct_small", |b| {
-        let mut fields = HashMap::new();
-        fields.insert("id".to_string(), "/message/confId".to_string());
-        fields.insert("site".to_string(), "/message/siteId".to_string());
-        let transform = ObjectConstructTransform::new(fields).unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
-    });
-
-    c.bench_function("transform/construct_medium", |b| {
-        let mut fields = HashMap::new();
-        fields.insert("id".to_string(), "/message/confId".to_string());
-        fields.insert("site".to_string(), "/message/siteId".to_string());
-        fields.insert("status".to_string(), "/message/status".to_string());
-        fields.insert("timestamp".to_string(), "/message/timestamp".to_string());
-        let transform = ObjectConstructTransform::new(fields).unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
-    });
-
-    c.bench_function("transform/construct_large", |b| {
-        let mut fields = HashMap::new();
-        fields.insert("confId".to_string(), "/message/confId".to_string());
-        fields.insert("siteId".to_string(), "/message/siteId".to_string());
-        fields.insert("status".to_string(), "/message/status".to_string());
-        fields.insert("timestamp".to_string(), "/message/timestamp".to_string());
-        fields.insert("orderId".to_string(), "/order/id".to_string());
-        fields.insert("price".to_string(), "/order/price".to_string());
-        fields.insert("tax".to_string(), "/order/tax".to_string());
-        fields.insert("discount".to_string(), "/order/discount".to_string());
-        let transform = ObjectConstructTransform::new(fields).unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
-    });
-}
-
-fn bench_array_transform(c: &mut Criterion) {
-    let msg = create_test_message();
-
-    c.bench_function("transform/array_map_simple", |b| {
-        let element_transform = Box::new(JsonPathTransform::new("/id").unwrap());
-        let transform = ArrayMapTransform::new("/users", element_transform).unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
-    });
-
-    c.bench_function("transform/array_map_nested", |b| {
-        let element_transform = Box::new(JsonPathTransform::new("/email").unwrap());
-        let transform = ArrayMapTransform::new("/users", element_transform).unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
-    });
-}
-
-fn bench_arithmetic_transform(c: &mut Criterion) {
-    let msg = create_test_message();
-
-    c.bench_function("transform/arithmetic_add", |b| {
-        let transform =
-            ArithmeticTransform::new_with_paths(ArithmeticOp::Add, "/order/price", "/order/tax")
-                .unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
-    });
-
-    c.bench_function("transform/arithmetic_sub", |b| {
-        let transform = ArithmeticTransform::new_with_paths(
-            ArithmeticOp::Sub,
-            "/order/price",
-            "/order/discount",
+    // Object construction — 4 fields
+    let t_construct4 = e
+        .compile_transform(
+            r#"#{ id: msg["userId"], email: msg["email"], name: msg["name"], tier: msg["tier"] }"#,
         )
         .unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
+    let env_c4 = MessageEnvelope::new(
+        json!({"userId": "u1", "email": "a@b.com", "name": "Alice", "tier": "premium"}),
+    );
+    c.bench_function("transform/construct_4_fields", |b| {
+        b.iter(|| t_construct4.transform(&env_c4).unwrap())
     });
 
-    c.bench_function("transform/arithmetic_mul_constant", |b| {
-        let transform =
-            ArithmeticTransform::new_with_constant(ArithmeticOp::Mul, "/order/price", 1.08)
-                .unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
+    // String lower
+    let t_lower = e
+        .compile_transform(r#"msg + #{ email: msg["email"].to_lower() }"#)
+        .unwrap();
+    let env_lower = MessageEnvelope::new(json!({"email": "USER@EXAMPLE.COM"}));
+    c.bench_function("transform/string_lower", |b| {
+        b.iter(|| t_lower.transform(&env_lower).unwrap())
     });
 
-    c.bench_function("transform/arithmetic_div", |b| {
-        let transform =
-            ArithmeticTransform::new_with_paths(ArithmeticOp::Div, "/order/price", "/order/items")
-                .unwrap();
-        b.iter(|| transform.transform(black_box(msg.clone())))
-    });
-}
-
-fn bench_transform_parser(c: &mut Criterion) {
-    c.bench_function("parser/simple_transform", |b| {
-        b.iter(|| parse_transform(black_box("/message/confId")))
+    // Arithmetic
+    let t_arith = e.compile_transform(r#"msg["price"] * 1.08"#).unwrap();
+    let env_arith = MessageEnvelope::new(json!({"price": 100.0}));
+    c.bench_function("transform/arithmetic", |b| {
+        b.iter(|| t_arith.transform(&env_arith).unwrap())
     });
 
-    c.bench_function("parser/construct_transform", |b| {
-        b.iter(|| {
-            parse_transform(black_box(
-                "CONSTRUCT:id=/message/confId:site=/message/siteId",
-            ))
-        })
+    // if/else (conditional)
+    let t_if = e
+        .compile_transform(
+            r#"if msg["score"] > 90 { "A" } else if msg["score"] > 80 { "B" } else { "C" }"#,
+        )
+        .unwrap();
+    let env_if = MessageEnvelope::new(json!({"score": 85}));
+    c.bench_function("transform/if_else", |b| {
+        b.iter(|| t_if.transform(&env_if).unwrap())
     });
 
-    c.bench_function("parser/array_map_transform", |b| {
-        b.iter(|| parse_transform(black_box("ARRAY_MAP:/users,/id")))
+    // switch/CASE
+    let t_switch = e
+        .compile_transform(
+            r#"switch msg["tier"] { "premium" => "GOLD", "basic" => "SILVER", _ => "BRONZE" }"#,
+        )
+        .unwrap();
+    let env_switch = MessageEnvelope::new(json!({"tier": "premium"}));
+    c.bench_function("transform/switch_case", |b| {
+        b.iter(|| t_switch.transform(&env_switch).unwrap())
     });
 
-    c.bench_function("parser/arithmetic_transform", |b| {
-        b.iter(|| parse_transform(black_box("ARITHMETIC:ADD,/price,/tax")))
-    });
-}
-
-fn bench_transform_throughput(c: &mut Criterion) {
-    let mut group = c.benchmark_group("transform/throughput");
-
-    for msg_count in [100, 1000, 10000].iter() {
-        group.throughput(Throughput::Elements(*msg_count as u64));
-
-        group.bench_with_input(
-            BenchmarkId::new("simple", msg_count),
-            msg_count,
-            |b, &count| {
-                let transform = JsonPathTransform::new("/message/confId").unwrap();
-                let msg = create_test_message();
-                b.iter(|| {
-                    for _ in 0..count {
-                        black_box(transform.transform(black_box(msg.clone())).unwrap());
-                    }
-                });
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("construct", msg_count),
-            msg_count,
-            |b, &count| {
-                let mut fields = HashMap::new();
-                fields.insert("id".to_string(), "/message/confId".to_string());
-                fields.insert("site".to_string(), "/message/siteId".to_string());
-                fields.insert("status".to_string(), "/message/status".to_string());
-                let transform = ObjectConstructTransform::new(fields).unwrap();
-                let msg = create_test_message();
-                b.iter(|| {
-                    for _ in 0..count {
-                        black_box(transform.transform(black_box(msg.clone())).unwrap());
-                    }
-                });
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("arithmetic", msg_count),
-            msg_count,
-            |b, &count| {
-                let transform =
-                    ArithmeticTransform::new_with_constant(ArithmeticOp::Mul, "/order/price", 1.08)
-                        .unwrap();
-                let msg = create_test_message();
-                b.iter(|| {
-                    for _ in 0..count {
-                        black_box(transform.transform(black_box(msg.clone())).unwrap());
-                    }
-                });
-            },
-        );
-    }
-
-    group.finish();
-}
-
-fn bench_combined_operations(c: &mut Criterion) {
-    let msg = create_test_message();
-
-    c.bench_function("combined/filter_and_transform", |b| {
-        let filter = JsonPathFilter::new("/message/siteId", ">", "10000").unwrap();
-        let transform = JsonPathTransform::new("/message/confId").unwrap();
-        b.iter(|| {
-            if filter.evaluate(black_box(&msg)).unwrap() {
-                black_box(transform.transform(black_box(msg.clone())).unwrap());
-            }
-        });
+    // Coalesce (??)
+    let t_coalesce = e
+        .compile_transform(r#"msg["preferredName"] ?? msg["displayName"] ?? msg["email"]"#)
+        .unwrap();
+    let env_coal = MessageEnvelope::new(json!({"displayName": "Alice Smith", "email": "a@b.com"}));
+    c.bench_function("transform/coalesce", |b| {
+        b.iter(|| t_coalesce.transform(&env_coal).unwrap())
     });
 
-    c.bench_function("combined/complex_filter_and_construct", |b| {
-        let filter1 = Box::new(JsonPathFilter::new("/message/siteId", ">", "10000").unwrap());
-        let filter2 = Box::new(JsonPathFilter::new("/message/status", "==", "active").unwrap());
-        let filter = AndFilter::new(vec![filter1, filter2]);
+    // Array map
+    let t_arr = e
+        .compile_transform(r#"msg["users"].map(|u| u["id"])"#)
+        .unwrap();
+    let env_arr = MessageEnvelope::new(json!({
+        "users": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}, {"id": 3, "name": "C"}]
+    }));
+    c.bench_function("transform/array_map", |b| {
+        b.iter(|| t_arr.transform(&env_arr).unwrap())
+    });
 
-        let mut fields = HashMap::new();
-        fields.insert("id".to_string(), "/message/confId".to_string());
-        fields.insert("site".to_string(), "/message/siteId".to_string());
-        let transform = ObjectConstructTransform::new(fields).unwrap();
+    // Multi-statement script
+    let t_multi = e
+        .compile_transform(
+            r#"
+            let lower = msg["email"].to_lower();
+            let domain = lower.split("@")[1];
+            #{ email: lower, domain: domain }
+            "#,
+        )
+        .unwrap();
+    let env_multi = MessageEnvelope::new(json!({"email": "User@Example.com"}));
+    c.bench_function("transform/multistatement", |b| {
+        b.iter(|| t_multi.transform(&env_multi).unwrap())
+    });
 
-        b.iter(|| {
-            if filter.evaluate(black_box(&msg)).unwrap() {
-                black_box(transform.transform(black_box(msg.clone())).unwrap());
-            }
-        });
+    // Envelope-aware (reads key in transform)
+    let t_env = e
+        .compile_transform(
+            r#"if key.starts_with("vip-") { msg + #{ tier: "premium" } } else { msg }"#,
+        )
+        .unwrap();
+    let mut env_env = MessageEnvelope::new(json!({"name": "Alice"}));
+    env_env.key = Some(json!("vip-user1"));
+    c.bench_function("transform/envelope_aware", |b| {
+        b.iter(|| t_env.transform(&env_env).unwrap())
     });
 }
 
-criterion_group!(
-    benches,
-    bench_simple_transform,
-    bench_object_construction,
-    bench_array_transform,
-    bench_arithmetic_transform,
-    bench_transform_parser,
-    bench_transform_throughput,
-    bench_combined_operations
-);
+criterion_group!(benches, transform_benchmarks);
 criterion_main!(benches);

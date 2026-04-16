@@ -7,8 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use streamforge::filter::{EnvelopeTransform, Filter, Transform};
 use streamforge::filter_parser::{
-    parse_filter, parse_header_transform, parse_key_transform, parse_static_headers,
-    parse_timestamp_transform, parse_transform_with_cache,
+    parse_header_transform, parse_key_transform, parse_static_headers, parse_timestamp_transform,
 };
 use streamforge::kafka::KafkaSink;
 use streamforge::metrics::{Stats, StatsReporter};
@@ -18,7 +17,8 @@ use streamforge::observability::{
 use streamforge::processor::{
     DestinationProcessor, MessageProcessor, MultiDestinationProcessor, SingleDestinationProcessor,
 };
-use streamforge::{MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result, SyncCacheManager};
+use streamforge::RhaiEngine;
+use streamforge::{MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result};
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
@@ -67,26 +67,16 @@ async fn main() -> Result<()> {
     // Create statistics
     let stats = Arc::new(Stats::new());
 
-    // Shared sync cache manager — used by CACHE_LOOKUP / CACHE_PUT transforms
-    let cache_manager = Arc::new(SyncCacheManager::new());
-
-    // Warn when both routing and transform are set — routing wins, transform is ignored.
-    if config.routing.is_some() && config.transform.is_some() {
-        warn!(
-            "Both 'routing' and 'transform' are set in config. \
-             The top-level 'transform' field is ignored in multi-destination mode. \
-             Use per-destination 'transform' expressions inside 'routing.destinations' instead."
-        );
-    }
-
-    // Build processor based on configuration
+    // Rhai engine — compiles all filter/transform scripts at startup.
+    // Owns the SyncCacheManager; cache_lookup/cache_put are registered on it.
+    let rhai_engine = Arc::new(RhaiEngine::new_with_cache());
     let processor: Arc<dyn MessageProcessor> = if let Some(routing) = &config.routing {
         info!("Multi-destination routing enabled");
-        build_multi_destination_processor(&config, routing, stats.clone(), cache_manager.clone())
+        build_multi_destination_processor(&config, routing, stats.clone(), rhai_engine.clone())
             .await?
     } else {
         info!("Single-destination mode");
-        build_single_destination_processor(&config, stats.clone(), cache_manager.clone()).await?
+        build_single_destination_processor(&config, stats.clone(), rhai_engine.clone()).await?
     };
 
     // Create Kafka consumer
@@ -504,7 +494,7 @@ fn create_consumer(config: &MirrorMakerConfig) -> Result<StreamConsumer> {
 async fn build_single_destination_processor(
     config: &MirrorMakerConfig,
     _stats: Arc<Stats>,
-    cache_manager: Arc<SyncCacheManager>,
+    rhai_engine: Arc<RhaiEngine>,
 ) -> Result<Arc<dyn MessageProcessor>> {
     let output_topic = config
         .output
@@ -513,10 +503,8 @@ async fn build_single_destination_processor(
 
     let sink = Arc::new(KafkaSink::new(config, output_topic, None).await?);
 
-    // Parse optional top-level transform (supports CACHE_LOOKUP, CACHE_PUT, STRING:, etc.)
     if let Some(ref transform_expr) = config.transform {
-        info!("Value transform: {}", transform_expr);
-        let transform = parse_transform_with_cache(transform_expr, Some(cache_manager))?;
+        let transform = rhai_engine.compile_transform_expr(transform_expr)?;
         Ok(Arc::new(SingleDestinationProcessor::with_transform(
             sink, transform,
         )))
@@ -529,7 +517,7 @@ async fn build_multi_destination_processor(
     config: &MirrorMakerConfig,
     routing: &streamforge::RoutingConfig,
     _stats: Arc<Stats>,
-    cache_manager: Arc<SyncCacheManager>,
+    rhai_engine: Arc<RhaiEngine>,
 ) -> Result<Arc<dyn MessageProcessor>> {
     let mut destinations = Vec::new();
 
@@ -539,10 +527,9 @@ async fn build_multi_destination_processor(
         // Create sink
         let sink = KafkaSink::new(config, dest.output.clone(), dest.partition.clone()).await?;
 
-        // Create filter if specified
+        // Compile Rhai filter if specified
         let filter: Option<Arc<dyn Filter>> = if let Some(ref filter_expr) = dest.filter {
-            info!("  Filter: {}", filter_expr);
-            Some(parse_filter(filter_expr)?)
+            Some(rhai_engine.compile_filter_expr(filter_expr)?)
         } else {
             None
         };
@@ -581,15 +568,10 @@ async fn build_multi_destination_processor(
             envelope_transforms.push(parse_timestamp_transform(timestamp_expr)?);
         }
 
-        // Create value transform — cache_manager is threaded through so
-        // CACHE_LOOKUP / CACHE_PUT expressions resolve named stores
+        // Compile Rhai transform if specified
         let transform: Option<Arc<dyn Transform>> = if let Some(ref transform_expr) = dest.transform
         {
-            info!("  Value transform: {}", transform_expr);
-            Some(parse_transform_with_cache(
-                transform_expr,
-                Some(cache_manager.clone()),
-            )?)
+            Some(rhai_engine.compile_transform_expr(transform_expr)?)
         } else {
             None
         };

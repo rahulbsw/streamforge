@@ -1,0 +1,51 @@
+# Recipe: Content-Based Event Router
+#
+# Problem: A single high-volume topic receives all event types.
+#          Different consumers care about different event types,
+#          and separate topics enable independent scaling and retention.
+#
+# Solution: StreamForge fans out one topic to per-type topics.
+#           No consumer group coordination needed — StreamForge reads once
+#           and writes to each destination independently.
+#
+# Topics:
+#   Input:  all-events
+#   Output: payment-events, auth-events, inventory-events,
+#           error-events, all-events-archive
+
+appid: event-router
+bootstrap: kafka:9092
+input: all-events
+threads: 4
+
+routing:
+  destinations:
+
+    - output: payment-events
+      filter: 'msg["eventType"].starts_with("payment.")'
+      # e.g. payment.initiated, payment.completed, payment.failed
+
+    - output: auth-events
+      filter: 'msg["eventType"].starts_with("auth.")'
+      # e.g. auth.login, auth.logout, auth.mfa_challenge
+
+    - output: inventory-events
+      filter: 'msg["eventType"].starts_with("inventory.")'
+
+    - output: error-events
+      filter: 'msg["severity"] in ["error", "fatal", "critical"]'
+      # Note: same message may also appear in type-specific topic above
+
+    - output: high-value-events
+      filter:
+        - 'msg["eventType"] == "purchase.completed"'
+        - 'msg["amount"] > 1000'
+      transform: |
+        msg + #{
+          flaggedAt: now_ms(),
+          flag: "high-value-purchase"
+        }
+
+    - output: all-events-archive
+      # Catch-all — every message goes here regardless of type
+      # Useful for audit trail and replay

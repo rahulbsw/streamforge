@@ -52,6 +52,9 @@ murmur3 = "0.5"
 digest = "0.10"
 hex = "0.4"
 
+# DSL engine
+rhai = { version = "1", features = ["sync", "serde"] }
+
 # Caching
 moka = { version = "0.12", features = ["future", "sync"] }
 dashmap = "6.0"  # Concurrent HashMap

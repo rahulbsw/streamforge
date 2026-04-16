@@ -12,6 +12,7 @@ pub mod metrics;
 pub mod observability;
 pub mod partitioner;
 pub mod processor;
+pub mod rhai_dsl;
 
 pub use cache::{
     CacheConfig, CacheManager, CacheStats, LookupCache, SyncCacheManager, SyncLookupCache,
@@ -25,19 +26,15 @@ pub use config::{
 pub use envelope::MessageEnvelope;
 pub use error::{MirrorMakerError, Result};
 pub use filter::{
-    AndFilter, CacheLookupTransform, CachePutTransform, ConcatPart, ConcatTransform,
-    EnvelopeTransform, Filter, HashTransform, HeaderCopyTransform, HeaderExistsFilter,
-    HeaderFilter, HeaderFromTransform, HeaderRemoveTransform, HeaderSetTransform, JsonPathFilter,
-    JsonPathTransform, KeyConstantTransform, KeyConstructTransform, KeyContainsFilter,
-    KeyExistsFilter, KeyFromTransform, KeyHashTransform, KeyMatchesFilter, KeyPrefixFilter,
-    KeySuffixFilter, KeyTemplateTransform, NotFilter, ObjectConstructTransform, OrFilter, StringOp,
-    StringTransform, TimestampAddTransform, TimestampAfterFilter, TimestampAgeFilter,
-    TimestampBeforeFilter, TimestampCurrentTransform, TimestampFromTransform,
+    EnvelopeTransform, Filter, HeaderCopyTransform, HeaderFromTransform, HeaderRemoveTransform,
+    HeaderSetTransform, IdentityTransform, KeyConstantTransform, KeyConstructTransform,
+    KeyFromTransform, KeyHashTransform, KeyTemplateTransform, PassThroughFilter,
+    TimestampAddTransform, TimestampCurrentTransform, TimestampFromTransform,
     TimestampPreserveTransform, TimestampSubtractTransform, Transform,
 };
 pub use filter_parser::{
-    parse_filter, parse_header_transform, parse_key_transform, parse_static_headers,
-    parse_timestamp_transform, parse_transform, parse_transform_with_cache,
+    parse_header_transform, parse_key_transform, parse_static_headers, parse_timestamp_transform,
 };
 pub use hash::{hash_bytes, hash_value, HashAlgorithm};
 pub use kafka::sink::KafkaSink;
+pub use rhai_dsl::RhaiEngine;

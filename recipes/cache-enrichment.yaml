@@ -1,0 +1,66 @@
+# Recipe: Cache-Based Message Enrichment
+#
+# Problem: Messages contain IDs but not the full entity data.
+#          Downstream consumers need the full context but shouldn't
+#          call a database on every message.
+#
+# Solution: StreamForge loads lookup data into an in-memory cache at startup
+#           (from a Kafka compacted topic or Redis), then enriches each
+#           message during processing with zero external calls.
+#
+# Two approaches shown:
+#   A) Kafka compacted topic as cache (pre-loaded on startup)
+#   B) Multi-level cache (local + Redis)
+
+appid: cache-enrichment
+bootstrap: kafka:9092
+input: orders
+threads: 4
+
+# --- Option A: Kafka compacted topic as cache ---
+# StreamForge consumes the entire compacted topic on startup,
+# then uses the in-memory view for lookups (zero latency).
+cache:
+  backend_type: kafka
+  kafka:
+    bootstrap: kafka:9092
+    topic: customer-profiles     # compacted topic, key=customerId, value=JSON
+    group_id: streamforge-cache-loader
+    key_field: customerId
+    value_field: "."             # store full message as cache value
+    warmup_on_start: true
+
+# --- Option B: Redis (uncomment to use) ---
+# cache:
+#   backend_type: redis
+#   redis:
+#     url: redis://redis:6379/0
+#     key_prefix: "streamforge:"
+#     default_ttl_seconds: 3600
+
+routing:
+  destinations:
+    - output: enriched-orders
+      filter: 'not_null(msg["customerId"])'
+      transform: |
+        let customer = cache_lookup("customers", msg["customerId"]);
+        let product  = cache_lookup("products",  msg["productId"]);
+
+        msg + #{
+          # Customer enrichment
+          customerTier:   customer["tier"]    ?? "standard",
+          customerRegion: customer["region"]  ?? "unknown",
+          customerSince:  customer["joinedAt"] ?? 0,
+
+          # Product enrichment
+          productName:    product["name"]     ?? "unknown",
+          productCategory: product["category"] ?? "uncategorized",
+
+          # Derived fields
+          totalWithTax: msg["amount"] * 1.08,
+          isPriorityCustomer: customer["tier"] == "enterprise",
+        }
+
+    - output: unknown-customer-orders
+      filter: 'is_null(cache_lookup("customers", msg["customerId"]))'
+      # Orders from customers not in the cache → separate topic for review
