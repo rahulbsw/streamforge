@@ -387,7 +387,7 @@ export default function NewPipeline() {
                       placeholder='#{ id: msg["id"], email: msg["user"]["email"] }'
                     />
                     <p className="mt-1 text-sm text-gray-500">
-                      Example: msg["user"]["email"] or #{ id: msg["id"], name: msg["name"] }
+                      {'Example: msg["user"]["email"] or #{ id: msg["id"], name: msg["name"] }'}
                     </p>
                   </div>
                 </div>
