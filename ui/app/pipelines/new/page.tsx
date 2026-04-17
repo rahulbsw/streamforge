@@ -372,7 +372,7 @@ export default function NewPipeline() {
                       placeholder='msg["status"] == "active"'
                     />
                     <p className="mt-1 text-sm text-gray-500">
-                      Example: msg["status"] == "active" or msg["active"] && msg["verified"]
+                      {'Example: msg["status"] == "active" or msg["active"] && msg["verified"]'}
                     </p>
                   </div>
                   <div>
