@@ -362,32 +362,32 @@ export default function NewPipeline() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Filter Expression
+                      Filter Expression (Rhai Script)
                     </label>
                     <input
                       type="text"
                       value={formData.filter}
                       onChange={(e) => setFormData({ ...formData, filter: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
-                      placeholder="/status,==,active"
+                      placeholder='msg["status"] == "active"'
                     />
                     <p className="mt-1 text-sm text-gray-500">
-                      Example: /status,==,active or AND:/active,==,true:/type,==,event
+                      Example: msg["status"] == "active" or msg["active"] && msg["verified"]
                     </p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Transform Expression
+                      Transform Expression (Rhai Script)
                     </label>
                     <input
                       type="text"
                       value={formData.transform}
                       onChange={(e) => setFormData({ ...formData, transform: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
-                      placeholder="EXTRACT:/user/email,userEmail"
+                      placeholder='#{ id: msg["id"], email: msg["user"]["email"] }'
                     />
                     <p className="mt-1 text-sm text-gray-500">
-                      Example: EXTRACT:/user/email,userEmail or CONSTRUCT:output,/id:id,/name:name
+                      Example: msg["user"]["email"] or #{ id: msg["id"], name: msg["name"] }
                     </p>
                   </div>
                 </div>

@@ -88,13 +88,49 @@ kubectl get nodes
 - **Form Mode**: User-friendly form with validation
   - Source Kafka configuration
   - Destination Kafka configuration
-  - Optional filters and transforms
+  - Optional filters and transforms (Rhai DSL syntax)
   - Resource allocation (replicas, threads)
 
 - **YAML Mode**: Direct YAML editing for advanced users
   - Syntax highlighting
   - Live preview
   - Import/export YAML
+
+### Filter and Transform Syntax
+
+StreamForge uses **Rhai** - a JavaScript-like scripting language - for filters and transforms:
+
+**Filter Examples:**
+```rhai
+# Simple comparison
+msg["status"] == "active"
+
+# Boolean logic
+msg["active"] && msg["verified"]
+
+# String operations
+msg["email"].ends_with("@company.com")
+
+# Array operations
+msg["users"].any(|u| u["role"] == "admin")
+```
+
+**Transform Examples:**
+```rhai
+# Extract field
+msg["user"]["email"]
+
+# Build new object
+#{ id: msg["id"], name: msg["name"], email: msg["email"] }
+
+# Array mapping
+msg["users"].map(|u| u["id"])
+```
+
+For complete DSL reference, see:
+- [RHAI_QUICK_REFERENCE.md](../docs/RHAI_QUICK_REFERENCE.md)
+- [ADVANCED_FILTERS.md](../docs/ADVANCED_FILTERS.md)
+- [KEY_AND_HEADER_FILTERING.md](../docs/KEY_AND_HEADER_FILTERING.md)
 
 ### Supported Operations
 
