@@ -771,13 +771,13 @@ impl Default for ObservabilityConfig {
 ///
 /// ```yaml
 /// performance:
-///   # Consumer
-///   consumer_batch_size: 1000        # messages per poll batch (default 500)
-///   consumer_batch_timeout_ms: 50    # max wait to fill batch (default 50ms)
-///   fetch_min_bytes: 131072          # 128KB — broker waits until this much data is ready
-///   fetch_max_wait_ms: 100           # max ms broker waits for fetch.min.bytes
-///   queued_max_messages_kbytes: 524288  # rdkafka pre-fetch buffer = 512MB
-///   parallelism_factor: 10           # concurrent produce futures = threads * factor
+///   # Consumer (showing tuning examples — see constants below for actual defaults)
+///   consumer_batch_size: 1000        # messages per poll batch (default: 500)
+///   consumer_batch_timeout_ms: 50    # max wait to fill batch (default: 50ms)
+///   fetch_min_bytes: 131072          # 128KB for max throughput (default: 64KB)
+///   fetch_max_wait_ms: 100           # 100ms for lower latency (default: 500ms)
+///   queued_max_messages_kbytes: 524288  # rdkafka pre-fetch buffer = 512MB (default: 512MB)
+///   parallelism_factor: 10           # concurrent produce futures = threads * factor (default: 10)
 ///
 ///   # Producer
 ///   producer_acks: "1"               # "all" (safest), "1" (faster), "0" (fastest, lossy)
@@ -808,14 +808,19 @@ pub struct PerformanceConfig {
 
     // ── librdkafka consumer tuning ─────────────────────────────────────────
     /// Minimum bytes the broker accumulates before responding to a fetch request.
-    /// Default 1 means the broker replies immediately even for one message.
-    /// Set to 65536–1048576 to batch broker-side and reduce round-trips.
+    /// Default 64KB batches broker-side to reduce round-trips (3-5x throughput gain).
+    /// Set to 1 for lowest latency (immediate response), or up to 1MB for max throughput.
+    /// **Trade-off**: Higher values improve throughput but add up to `fetch_max_wait_ms`
+    /// latency when load is low and broker has insufficient data to meet the threshold.
     /// Maps to librdkafka `fetch.min.bytes`.
     #[serde(default = "default_fetch_min_bytes")]
     pub fetch_min_bytes: u32,
 
     /// Max milliseconds the broker waits to reach `fetch_min_bytes`.
-    /// Increase when `fetch_min_bytes > 1` to allow batching time.
+    /// Default 500ms allows time for broker-side batching at moderate load.
+    /// Reduce to 100-200ms for lower latency, or increase to 1000ms for maximum batching.
+    /// **Note**: This only affects latency when traffic is sparse — at high load,
+    /// the broker accumulates `fetch_min_bytes` quickly and responds immediately.
     /// Maps to librdkafka `fetch.wait.max.ms`.
     #[serde(default = "default_fetch_max_wait_ms")]
     pub fetch_max_wait_ms: u32,
@@ -866,6 +871,18 @@ pub struct PerformanceConfig {
 }
 
 // Default functions for PerformanceConfig
+//
+// Byte size constants for Kafka consumer fetch tuning:
+// - FETCH_MIN_BYTES_DEFAULT (64KB): Balances throughput and latency.
+//   Below 64KB causes excessive round-trips; 64KB-1MB provides good throughput
+//   with acceptable low-traffic latency (<500ms); above 1MB shows diminishing returns.
+// - FETCH_MAX_WAIT_MS_DEFAULT (500ms): Conservative timeout for broker-side batching.
+//   Allows time to accumulate 64KB at moderate rates while preventing excessive latency
+//   during sparse traffic. At high load, broker fills buffer quickly and this timeout
+//   is rarely hit (typically responds in <100ms).
+const FETCH_MIN_BYTES_DEFAULT: u32 = 65536; // 64KB
+const FETCH_MAX_WAIT_MS_DEFAULT: u32 = 500; // milliseconds
+
 fn default_consumer_batch_size() -> usize {
     500
 }
@@ -876,10 +893,10 @@ fn default_parallelism_factor() -> usize {
     10
 }
 fn default_fetch_min_bytes() -> u32 {
-    1
-} // safe: no additional latency at low load
+    FETCH_MIN_BYTES_DEFAULT
+}
 fn default_fetch_max_wait_ms() -> u32 {
-    100
+    FETCH_MAX_WAIT_MS_DEFAULT
 }
 fn default_max_partition_fetch_bytes() -> u32 {
     1_048_576
