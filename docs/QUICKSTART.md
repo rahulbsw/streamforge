@@ -161,32 +161,24 @@ docker exec -it $(docker ps -qf "name=kafka") \
 
 ### 2. Configure Multi-Destination Routing
 
-Create `config-routing.json`:
+Create `config-routing.yaml`:
 
-```json
-{
-  "appid": "streamforge-routing",
-  "bootstrap": "localhost:9092",
-  "input": "events",
-  "offset": "latest",
-  "threads": 4,
-  "routing": {
-    "routing_type": "content",
-    "path": "/eventType",
-    "destinations": [
-      {
-        "output": "meeting-events",
-        "match_value": "meeting",
-        "partition": "/confId"
-      },
-      {
-        "output": "quality-events",
-        "match_value": "quality",
-        "partition": "/siteId"
-      }
-    ]
-  }
-}
+```yaml
+appid: streamforge-routing
+bootstrap: localhost:9092
+input: events
+offset: latest
+threads: 4
+
+routing:
+  destinations:
+    - output: meeting-events
+      filter: 'msg["eventType"] == "meeting"'
+      partition: '/confId'
+    
+    - output: quality-events
+      filter: 'msg["eventType"] == "quality"'
+      partition: '/siteId'
 ```
 
 ### 3. Run with Routing

@@ -1,19 +1,29 @@
 ---
-title: DSL Reference
+title: Rhai DSL Reference
 nav_order: 5
 ---
 
-# Advanced DSL Guide
+# Advanced Rhai DSL Guide
 
-This guide covers advanced filtering and transformation capabilities including array operations, regular expressions, and arithmetic operations.
+This guide covers advanced filtering and transformation using the **Rhai scripting language** — a lightweight JavaScript-like language embedded in StreamForge.
 
 ## Table of Contents
 
+- [Rhai Basics](#rhai-basics)
+  - [Accessing Message Fields](#accessing-message-fields)
+  - [Comparison and Logic](#comparison-and-logic)
+  - [Type System](#type-system)
+- [String Operations](#string-operations)
 - [Array Operations](#array-operations)
-  - [Array Filters](#array-filters)
-  - [Array Transforms](#array-transforms)
+  - [Array Methods](#array-methods)
+  - [Array Filtering and Mapping](#array-filtering-and-mapping)
 - [Regular Expressions](#regular-expressions)
-- [Arithmetic Operations](#arithmetic-operations)
+- [Arithmetic and Math](#arithmetic-and-math)
+- [Control Flow](#control-flow)
+  - [If/Else Expressions](#ifelse-expressions)
+  - [Switch Expressions](#switch-expressions)
+  - [Functions](#functions)
+- [Built-in StreamForge Functions](#built-in-streamforge-functions)
 - [Envelope Operations](#envelope-operations)
   - [Key Filters](#key-filters)
   - [Key Transforms](#key-transforms)

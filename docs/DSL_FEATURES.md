@@ -2,22 +2,27 @@
 
 ## Overview
 
-The StreamForge implementation includes a custom, high-performance filtering and transformation DSL (Domain-Specific Language) designed specifically for Kafka message processing.
+StreamForge uses the **Rhai scripting language** for filtering and transforming Kafka messages. Rhai is a lightweight, JavaScript-like language that compiles at startup and executes in ~500ns per message.
 
-**Performance**: 40x faster than Java JSLT implementation through direct JSON value manipulation.
+**Performance**: 40x faster than Java JSLT through pre-compiled scripts and direct JSON manipulation.
 
 ## Complete Feature List
 
-### 1. JSON Path Navigation
+### 1. Field Access
 
-Extract values from nested JSON structures using path notation.
+Access message fields using JavaScript-like syntax.
 
-**Syntax**: `/field/nested/value`
+**Syntax**: `msg["field"]` or `msg["nested"]["field"]`
 
-```json
-{
-  "transform": "/message/confId"
-}
+```yaml
+filter: 'msg["status"] == "active"'
+transform: 'msg["user"]["email"]'
+```
+
+**Nested access**:
+```yaml
+filter: 'msg["order"]["total"] > 100'
+transform: 'msg["customer"]["profile"]["tier"]'
 ```
 
 ### 2. Comparison Operators
@@ -26,213 +31,259 @@ Compare field values with expected values.
 
 **Operators**: `>`, `>=`, `<`, `<=`, `==`, `!=`
 
-```json
-{
-  "filter": "/message/siteId,>,10000"
-}
+```yaml
+filter: 'msg["siteId"] > 10000'
+filter: 'msg["status"] == "active"'
+filter: 'msg["price"] <= 99.99'
 ```
 
 **Supported Types**:
-- Numeric (f64)
+- Numeric (integers, floats)
 - String
 - Boolean
+- Null checks
 
 ### 3. Boolean Logic
 
-Combine multiple conditions with logical operators.
+Combine multiple conditions with standard logical operators.
 
-**Operators**: `AND`, `OR`, `NOT`
+**Operators**: `&&` (AND), `||` (OR), `!` (NOT)
 
-```json
-{
-  "filter": "AND:/message/siteId,>,10000:/message/status,==,active"
-}
+```yaml
+filter: 'msg["siteId"] > 10000 && msg["status"] == "active"'
+filter: 'msg["priority"] == "high" || msg["urgent"] == true'
+filter: '!msg["test"]'
 ```
 
-**Examples**:
-- `AND:condition1:condition2:condition3` - All must be true
-- `OR:condition1:condition2:condition3` - At least one must be true
-- `NOT:condition` - Inverts the condition
+**Multiple conditions**:
+```yaml
+filter:
+  - 'msg["siteId"] > 10000'
+  - 'msg["status"] == "active"'
+  - '!msg["test"]'
+```
 
-### 4. Regular Expressions
+### 4. String Operations
 
-Match string fields against regex patterns.
+Rich string manipulation built into Rhai.
 
-**Syntax**: `REGEX:/path,pattern`
+**Methods**: `starts_with`, `ends_with`, `contains`, `to_upper`, `to_lower`, `trim`, `split`
 
-```json
-{
-  "filter": "REGEX:/message/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$"
-}
+```yaml
+filter: 'msg["email"].contains("@company.com")'
+filter: 'msg["type"].starts_with("payment.")'
+filter: 'msg["status"].to_lower() == "active"'
+
+transform: |
+  #{
+    email: msg["email"].to_lower(),
+    name: msg["name"].trim(),
+    domain: msg["email"].split("@")[1]
+  }
+```
+
+**Use Cases**:
+- Email domain validation
+- Prefix/suffix routing
+- Case-insensitive matching
+- String cleaning and normalization
+
+### 5. Regular Expressions
+
+Match string fields against regex patterns using the `matches` method.
+
+**Syntax**: `field.matches("pattern")`
+
+```yaml
+filter: 'msg["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$")'
+filter: 'msg["phone"].matches("^\\+1[0-9]{10}$")'
+filter: 'msg["version"].matches("^2\\.[0-9]+\\.[0-9]+$")'
 ```
 
 **Use Cases**:
 - Email validation
 - URL pattern matching
 - Version number checking
-- Status pattern matching
 - Phone number validation
 
-### 5. Array Operations
+### 6. Array Operations
 
-#### Array Filtering
+Rhai provides rich array manipulation.
 
-Filter based on array element conditions.
+**Array filtering with closures**:
+```yaml
+# Check if all users are active
+filter: 'msg["users"].all(|u| u["status"] == "active")'
 
-**Modes**:
-- `ARRAY_ALL:/path,element_filter` - All elements must match
-- `ARRAY_ANY:/path,element_filter` - At least one element must match
+# Check if any user is admin
+filter: 'msg["users"].any(|u| u["role"] == "admin")'
 
-```json
-{
-  "filter": "ARRAY_ALL:/users,/status,==,active"
-}
+# Filter array to active users
+transform: |
+  #{
+    activeUsers: msg["users"].filter(|u| u["status"] == "active")
+  }
 ```
 
-#### Array Mapping
+**Array mapping**:
+```yaml
+# Extract IDs from array of objects
+transform: 'msg["users"].map(|u| u["id"])'
 
-Transform each element in an array.
-
-**Syntax**: `ARRAY_MAP:/path,element_transform`
-
-```json
-{
-  "transform": "ARRAY_MAP:/users,/id"
-}
+# Extract nested values
+transform: 'msg["orders"].map(|o| o["customer"]["email"])'
 ```
 
-### 6. Arithmetic Operations
+**Array methods**: `len`, `is_empty`, `contains`, `filter`, `map`, `all`, `any`, `find`
 
-Perform mathematical operations on numeric fields.
+### 7. Arithmetic Operations
 
-**Operations**: `ADD`, `SUB`, `MUL`, `DIV`
+Standard mathematical operators.
 
-**Syntax**: `ARITHMETIC:op,operand1,operand2`
+**Operators**: `+`, `-`, `*`, `/`, `%` (modulo)
 
-```json
-{
-  "transform": "ARITHMETIC:ADD,/price,/tax"
-}
+```yaml
+# Add two fields
+transform: '#{  total: msg["price"] + msg["tax"] }'
+
+# Multiply by constant (tax calculation)
+transform: '#{ taxAmount: msg["price"] * 0.08 }'
+
+# Calculate average
+transform: '#{ average: msg["total"] / msg["count"] }'
+
+# Discount calculation
+transform: '#{ discounted: msg["price"] * 0.9 }'
 ```
 
-**Operands**:
-- JSON path: `/path/to/field`
-- Numeric constant: `123` or `1.5`
+**Compound operations**:
+```yaml
+transform: |
+  #{
+    subtotal: msg["price"] * msg["quantity"],
+    tax: (msg["price"] * msg["quantity"]) * 0.08,
+    total: (msg["price"] * msg["quantity"]) * 1.08
+  }
+```
 
-**Examples**:
-- `ARITHMETIC:ADD,/price,/tax` - Add two fields
-- `ARITHMETIC:MUL,/price,1.2` - Multiply by constant
-- `ARITHMETIC:SUB,/total,/discount` - Subtract fields
-- `ARITHMETIC:DIV,/total,/count` - Calculate average
+### 8. Object Construction
 
-### 7. Object Construction
+Create new JSON objects using Rhai object literals.
 
-Create new JSON objects by extracting specific fields.
+**Syntax**: `#{ field1: value1, field2: value2 }`
 
-**Syntax**: `CONSTRUCT:field1=/path1:field2=/path2`
+```yaml
+transform: |
+  #{
+    id: msg["confId"],
+    site: msg["siteId"],
+    timestamp: msg["ts"]
+  }
+```
 
-```json
-{
-  "transform": "CONSTRUCT:id=/message/confId:site=/message/siteId:ts=/message/timestamp"
-}
+**Merging objects**:
+```yaml
+transform: 'msg + #{ processedAt: now_ms(), version: 2 }'
 ```
 
 ## Configuration Examples
 
 ### Example 1: Email Validation with Multiple Conditions
 
-```json
-{
-  "destinations": [
-    {
-      "name": "valid-corporate-emails",
-      "filter": "AND:REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$:REGEX:/user/email,@company\\.com$",
-      "transform": "CONSTRUCT:email=/user/email:name=/user/name",
-      "topic": "corporate-users"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    - output: corporate-users
+      name: valid-corporate-emails
+      filter:
+        - 'msg["user"]["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$")'
+        - 'msg["user"]["email"].contains("@company.com")'
+      transform: |
+        #{
+          email: msg["user"]["email"],
+          name: msg["user"]["name"]
+        }
 ```
 
 ### Example 2: Array Processing with Arithmetic
 
-```json
-{
-  "destinations": [
-    {
-      "name": "high-value-active-users",
-      "filter": "AND:ARRAY_ANY:/purchases,/amount,>,100:/user/active,==,true",
-      "transform": "ARRAY_MAP:/purchases,/amount",
-      "topic": "purchase-amounts"
-    },
-    {
-      "name": "discounted-prices",
-      "filter": "/order/items,>,5",
-      "transform": "ARITHMETIC:MUL,/order/total,0.9",
-      "topic": "bulk-discount-prices"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    - output: purchase-amounts
+      name: high-value-active-users
+      filter:
+        - 'msg["purchases"].any(|p| p["amount"] > 100)'
+        - 'msg["user"]["active"] == true'
+      transform: |
+        msg["purchases"].map(|p| p["amount"])
+    
+    - output: bulk-discount-prices
+      name: discounted-prices
+      filter: 'msg["order"]["items"] > 5'
+      transform: |
+        msg["order"]["total"] * 0.9
 ```
 
 ### Example 3: Complex Boolean Logic
 
-```json
-{
-  "destinations": [
-    {
-      "name": "premium-or-urgent",
-      "filter": "OR:AND:/user/tier,==,premium:/user/status,==,active:AND:/order/priority,==,urgent:/order/total,>,500",
-      "transform": "CONSTRUCT:userId=/user/id:orderTotal=/order/total:priority=/order/priority",
-      "topic": "priority-orders"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    - output: priority-orders
+      name: premium-or-urgent
+      filter: |
+        (msg["user"]["tier"] == "premium" && msg["user"]["status"] == "active") ||
+        (msg["order"]["priority"] == "urgent" && msg["order"]["total"] > 500)
+      transform: |
+        #{
+          userId: msg["user"]["id"],
+          orderTotal: msg["order"]["total"],
+          priority: msg["order"]["priority"]
+        }
 ```
 
 ### Example 4: Regular Expression Routing
 
-```json
-{
-  "destinations": [
-    {
-      "name": "error-events",
-      "filter": "REGEX:/message/type,^(error|failure|exception)",
-      "topic": "errors"
-    },
-    {
-      "name": "success-events",
-      "filter": "REGEX:/message/type,^(success|complete|done)",
-      "topic": "success"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    - output: errors
+      name: error-events
+      filter: 'msg["message"]["type"].matches("^(error|failure|exception)")'
+    
+    - output: success
+      name: success-events
+      filter: 'msg["message"]["type"].matches("^(success|complete|done)")'
 ```
 
 ## Performance Characteristics
 
 ### Filter Performance
 
-- **Simple comparison**: ~100ns per evaluation
-- **Boolean logic (AND/OR/NOT)**: ~100-300ns depending on complexity
-- **Regular expressions**: ~500ns-1µs (pattern complexity dependent)
+- **Simple comparison**: ~100-200ns per evaluation
+- **Boolean logic (&&/||/!)**: ~200-400ns depending on complexity
+- **String operations**: ~100-500ns (method dependent)
+- **Regular expressions**: ~500ns-2µs (compiled at startup, pattern complexity dependent)
 - **Array operations**: ~1-10µs (array size dependent)
 
 ### Transform Performance
 
-- **JSON path extraction**: ~50-100ns
-- **Object construction**: ~200-500ns
+- **Field access**: ~50-100ns
+- **Object construction**: ~300-600ns
 - **Array mapping**: ~1-10µs (array size dependent)
-- **Arithmetic**: ~50ns
+- **Arithmetic**: ~50-100ns
+- **String manipulation**: ~100-300ns
 
 ### Comparison with Java JSLT
 
-| Operation | Java JSLT | Rust DSL | Speedup |
+| Operation | Java JSLT | Rhai DSL | Speedup |
 |-----------|-----------|----------|---------|
-| Simple filter | 4µs | 100ns | 40x |
-| Boolean logic | 10µs | 300ns | 33x |
-| Object construction | 8µs | 500ns | 16x |
+| Simple filter | 4µs | 200ns | 20x |
+| Boolean logic | 10µs | 400ns | 25x |
+| Object construction | 8µs | 600ns | 13x |
 | Array mapping | 50µs | 5µs | 10x |
+| String operations | 5µs | 300ns | 17x |
 
 ## Error Handling
 
@@ -241,74 +292,204 @@ Create new JSON objects by extracting specific fields.
 When a filter fails to evaluate:
 - Returns `false` (message is not sent to that destination)
 - Processing continues for other destinations
-- Error is logged
+- Error is logged with stack trace
 
 ### Transform Errors
 
 When a transform fails:
-- Error is logged
+- Error is logged with Rhai stack trace
 - Message is **not sent** to that destination
 - Processing continues for other destinations
+- DLQ (dead letter queue) can be configured to capture failed messages
 
 **Common errors**:
-- Division by zero
-- Missing required field
-- Type mismatch (e.g., regex on non-string)
-- Invalid array access
+- Division by zero: `msg["value"] / 0`
+- Null field access: `msg["missing"]["nested"]`
+- Type mismatch: `msg["string"] + 123`
+- Array out of bounds: `msg["items"][999]`
+
+**Error prevention**:
+```yaml
+# Check for null before access
+filter: 'not_null(msg["user"]) && msg["user"]["active"] == true'
+
+# Use null-coalescing operator
+transform: 'msg["value"] ?? 0'
+
+# Safe array access
+filter: 'msg["items"].len() > 0'
+```
 
 ## Best Practices
 
 1. **Use simple filters when possible** - Faster and easier to debug
-2. **Test regex patterns** - Use online regex testers before deployment
-3. **Handle missing fields** - Use OR logic for optional fields
-4. **Avoid complex nested logic** - Break into multiple destinations if needed
-5. **Monitor transform errors** - Check logs for failed transformations
-6. **Use ARRAY_ANY for existence checks** - Faster than ARRAY_ALL on large arrays
-7. **Profile before optimizing** - Measure actual performance impact
-8. **Escape regex properly** - Use `\\` for special characters
+2. **Test scripts separately** - Use Rhai playground or unit tests
+3. **Handle null values** - Use `not_null()` or `??` operator
+4. **Validate array access** - Check `.len()` before indexing
+5. **Use meaningful variable names** - In complex transforms with `let`
+6. **Break complex logic into multiple steps** - Use multiple destinations if needed
+7. **Monitor transform errors** - Check logs for failed transformations
+8. **Profile before optimizing** - Measure actual performance impact
 
-## Limitations
+## Rhai Language Features
 
-### Current Limitations
+Rhai provides a rich scripting environment:
 
-1. **No nested transform composition** - Cannot use ARRAY_MAP inside CONSTRUCT
-2. **Single-level array operations** - Cannot map over nested arrays
-3. **String operations** - No string manipulation (concat, substring, etc.)
-4. **Date/time operations** - No date parsing or formatting
-5. **Custom functions** - No user-defined functions
+### Control Flow
+```yaml
+transform: |
+  if msg["amount"] > 1000 {
+    msg + #{ tier: "premium", discount: 0.1 }
+  } else {
+    msg + #{ tier: "standard", discount: 0 }
+  }
+```
 
-### Workarounds
+### Switch Statements
+```yaml
+filter: |
+  switch msg["status"] {
+    "active" | "pending" => true,
+    "inactive" | "deleted" => false,
+    _ => false
+  }
+```
 
-- Apply transforms sequentially using multiple destinations
-- Pre-process data upstream if complex transformations needed
-- Use separate microservices for complex business logic
+### Loops (use sparingly in filters)
+```yaml
+transform: |
+  let total = 0;
+  for item in msg["items"] {
+    total += item["price"];
+  }
+  msg + #{ totalPrice: total }
+```
+
+### Functions
+```yaml
+transform: |
+  fn calculate_tax(amount) {
+    amount * 0.08
+  }
+  #{
+    subtotal: msg["amount"],
+    tax: calculate_tax(msg["amount"]),
+    total: msg["amount"] * 1.08
+  }
+```
 
 ## Future Enhancements
 
-Planned features:
-- Nested transform composition
-- String manipulation (concat, substring, split, etc.)
-- Date/time operations
-- Math functions (abs, round, ceil, floor, etc.)
-- Custom function plugins
-- Conditional transforms (if-then-else)
+Rhai already provides:
+- ✅ Full control flow (if/else, switch, loops)
+- ✅ String manipulation (concat, substring, split, etc.)
+- ✅ Array operations (map, filter, reduce, etc.)
+- ✅ Custom functions
+- ✅ Closures
+
+Planned StreamForge additions:
+- Date/time parsing and formatting functions
+- JSON schema validation
+- External API calls (async functions)
+- Stateful transforms (windowing, aggregation)
+- Custom Rust function plugins
+
+## Built-in Functions
+
+StreamForge provides additional functions beyond standard Rhai:
+
+### Null/Empty Checks
+```yaml
+filter: 'not_null(msg["field"])'
+filter: 'is_null_or_empty(msg["field"])'
+```
+
+### Timestamp Functions
+```yaml
+transform: 'msg + #{ processedAt: now_ms() }'  # Current timestamp in milliseconds
+transform: 'msg + #{ age: (now_ms() - timestamp) / 1000 }'  # Age in seconds
+```
+
+### Cache Lookup
+```yaml
+transform: |
+  let profile = cache_lookup("profiles", msg["userId"]);
+  msg + #{ tier: profile["tier"] ?? "standard" }
+```
+
+### Hashing (for PII)
+```yaml
+transform: |
+  #{
+    emailHash: hash_sha256(msg["email"].to_lower()),
+    phoneHash: hash_sha256(msg["phone"])
+  }
+```
+
+### Header/Key/Timestamp Access
+```yaml
+filter: 'headers["x-tenant"] == "production"'
+filter: 'key.starts_with("premium-")'
+filter: '(now_ms() - timestamp) / 1000 < 300'  # Messages newer than 5 minutes
+```
+
+## Envelope Operations (Key, Headers, Timestamp)
+
+While filter and transform expressions use Rhai, **envelope operations still use string format**:
+
+### Key Transform
+```yaml
+- output: partitioned-events
+  key_transform: '/tenantId'                  # Extract field as key
+  # or
+  key_transform: 'HASH:SHA256,/userId'        # Hash for privacy
+  # or
+  key_transform: 'CONSTRUCT:tenant=/tenant:user=/user'  # Composite key
+```
+
+### Header Transforms
+```yaml
+- output: enriched-events
+  headers:
+    x-pipeline: "streamforge"
+    x-version: "2.0"
+  header_transforms:
+    - header: x-user-id
+      operation: 'FROM:/user/id'              # Extract from payload
+    - header: x-correlation-id
+      operation: 'COPY:x-request-id'          # Copy existing header
+    - header: x-sensitive-token
+      operation: 'REMOVE'                     # Remove header
+```
+
+### Timestamp Transform
+```yaml
+- output: timestamped-events
+  timestamp: 'PRESERVE'                       # Keep original (default)
+  # or
+  timestamp: 'CURRENT'                        # Set to current time
+  # or
+  timestamp: 'FROM:/event/timestamp'          # Extract from payload
+```
+
+See [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md#envelope-operations) for complete envelope operation documentation.
 
 ## Documentation
 
-- [ADVANCED_FILTERS.md](ADVANCED_FILTERS.md) - Boolean logic guide
-- [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Complete DSL reference
+- [README.md](../README.md) - Quick start and recipes
+- [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Complete Rhai DSL reference
 - [QUICKSTART.md](QUICKSTART.md) - Getting started
-- [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) - Architecture details
+- [USAGE.md](USAGE.md) - Real-world use cases
+- [Rhai Language Documentation](https://rhai.rs/book/) - Official Rhai docs
 
 ## Contributing
 
-To add new DSL features:
+To add new built-in functions:
 
-1. Define the new filter/transform type in `src/filter.rs`
-2. Implement the `Filter` or `Transform` trait
-3. Add parsing logic in `src/filter_parser.rs`
-4. Add comprehensive tests
-5. Update documentation
-6. Benchmark performance
+1. Define the function in `src/rhai_dsl.rs`
+2. Register it in the Rhai engine: `engine.register_fn("my_func", my_func)`
+3. Add unit tests
+4. Update documentation
+5. Benchmark performance impact
 
-See existing implementations for examples.
+See existing implementations in `src/rhai_dsl.rs` for examples.

@@ -1,11 +1,6 @@
----
-title: Usage Guide
-nav_order: 3
----
-
 # Usage Guide
 
-Complete guide covering various use cases for StreamForge implementation.
+Complete guide covering various use cases for StreamForge.
 
 ## Table of Contents
 
@@ -41,14 +36,14 @@ cargo build --release
 ### Running
 
 ```bash
-# Using default config location
-CONFIG_FILE=config.json ./target/release/streamforge
+# Using config file
+CONFIG_FILE=config.yaml ./target/release/streamforge
 
 # With logging
-RUST_LOG=info CONFIG_FILE=config.json ./target/release/streamforge
+RUST_LOG=info CONFIG_FILE=config.yaml ./target/release/streamforge
 
 # With debug logging
-RUST_LOG=debug CONFIG_FILE=config.json ./target/release/streamforge
+RUST_LOG=debug CONFIG_FILE=config.yaml ./target/release/streamforge
 ```
 
 ### Docker
@@ -59,8 +54,8 @@ docker build -t streamforge:latest .
 
 # Run with config
 docker run -d \
-  --name mirrormaker \
-  -v $(pwd)/config.json:/app/config/config.json:ro \
+  --name streamforge \
+  -v $(pwd)/config.yaml:/app/config/config.yaml:ro \
   -e RUST_LOG=info \
   streamforge:latest
 ```
@@ -73,20 +68,18 @@ docker run -d \
 
 **Configuration:**
 
-```json
-{
-  "appid": "simple-mirror",
-  "bootstrap": "cluster-a:9092",
-  "target_broker": "cluster-b:9092",
-  "input": "source-topic",
-  "output": "destination-topic",
-  "offset": "latest",
-  "threads": 4,
-  "compression": {
-    "compression_type": "raw",
-    "compression_algo": "gzip"
-  }
-}
+```yaml
+appid: simple-mirror
+bootstrap: cluster-a:9092
+target_broker: cluster-b:9092
+input: source-topic
+output: destination-topic
+offset: latest
+threads: 4
+
+compression:
+  compression_type: raw
+  compression_algo: gzip
 ```
 
 **Use When:**
@@ -96,19 +89,17 @@ docker run -d \
 - Backup/archive purposes
 
 **Performance Tuning:**
-```json
-{
-  "threads": 8,
-  "consumer_properties": {
-    "fetch.min.bytes": "1048576",
-    "fetch.wait.max.ms": "500"
-  },
-  "producer_properties": {
-    "batch.size": "65536",
-    "linger.ms": "10",
-    "compression.type": "gzip"
-  }
-}
+```yaml
+threads: 8
+
+consumer_properties:
+  fetch.min.bytes: "1048576"
+  fetch.wait.max.ms: "500"
+
+producer_properties:
+  batch.size: "65536"
+  linger.ms: "10"
+  compression.type: "gzip"
 ```
 
 ### Use Case 2: Content-Based Routing
@@ -117,45 +108,49 @@ docker run -d \
 
 **Configuration:**
 
-```json
-{
-  "appid": "content-router",
-  "bootstrap": "kafka:9092",
-  "target_broker": "kafka:9092",
-  "input": "events",
-  "routing": {
-    "routing_type": "content",
-    "path": "/eventType",
-    "destinations": [
-      {
-        "name": "user-events",
-        "output": "users",
-        "filter": "REGEX:/eventType,^user\\.",
-        "transform": "/payload",
-        "partition": "/userId"
-      },
-      {
-        "name": "order-events",
-        "output": "orders",
-        "filter": "REGEX:/eventType,^order\\.",
-        "transform": "CONSTRUCT:orderId=/orderId:amount=/amount:status=/status",
-        "partition": "/orderId"
-      },
-      {
-        "name": "payment-events",
-        "output": "payments",
-        "filter": "REGEX:/eventType,^payment\\.",
-        "transform": "/payload",
-        "partition": "/paymentId"
-      },
-      {
-        "name": "audit-all",
-        "output": "audit-log",
-        "transform": "CONSTRUCT:eventType=/eventType:timestamp=/timestamp:userId=/userId"
-      }
-    ]
-  }
-}
+```yaml
+appid: content-router
+bootstrap: kafka:9092
+target_broker: kafka:9092
+input: events
+
+routing:
+  destinations:
+    # User events
+    - name: user-events
+      output: users
+      filter: 'msg["eventType"].starts_with("user.")'
+      transform: 'msg["payload"]'
+      partition: '/userId'
+    
+    # Order events with structured output
+    - name: order-events
+      output: orders
+      filter: 'msg["eventType"].starts_with("order.")'
+      transform: |
+        #{
+          orderId: msg["orderId"],
+          amount: msg["amount"],
+          status: msg["status"]
+        }
+      partition: '/orderId'
+    
+    # Payment events
+    - name: payment-events
+      output: payments
+      filter: 'msg["eventType"].starts_with("payment.")'
+      transform: 'msg["payload"]'
+      partition: '/paymentId'
+    
+    # Audit trail (all events)
+    - name: audit-all
+      output: audit-log
+      transform: |
+        #{
+          eventType: msg["eventType"],
+          timestamp: msg["timestamp"],
+          userId: msg["userId"]
+        }
 ```
 
 **Use When:**
@@ -170,38 +165,53 @@ docker run -d \
 
 **Configuration:**
 
-```json
-{
-  "appid": "validator",
-  "bootstrap": "kafka:9092",
-  "input": "raw-data",
-  "routing": {
-    "routing_type": "content",
-    "destinations": [
-      {
-        "name": "valid-emails",
-        "output": "validated-users",
-        "filter": "AND:REGEX:/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$:/name,!=,:/age,>,0",
-        "transform": "CONSTRUCT:id=/id:email=/email:name=/name:age=/age",
-        "partition": "/id"
-      },
-      {
-        "name": "invalid-email-format",
-        "output": "validation-errors",
-        "filter": "NOT:REGEX:/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$",
-        "transform": "CONSTRUCT:error=email_format_invalid:record=/",
-        "partition": "/id"
-      },
-      {
-        "name": "missing-required-fields",
-        "output": "validation-errors",
-        "filter": "OR:/name,==,:/email,==,:/age,<=,0",
-        "transform": "CONSTRUCT:error=missing_required_fields:record=/",
-        "partition": "/id"
-      }
-    ]
-  }
-}
+```yaml
+appid: validator
+bootstrap: kafka:9092
+input: raw-data
+
+routing:
+  destinations:
+    # Valid emails with all required fields
+    - name: valid-emails
+      output: validated-users
+      filter:
+        - 'msg["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$")'
+        - 'not_null(msg["name"]) && msg["name"] != ""'
+        - 'msg["age"] > 0'
+      transform: |
+        #{
+          id: msg["id"],
+          email: msg["email"].to_lower(),
+          name: msg["name"],
+          age: msg["age"]
+        }
+      partition: '/id'
+    
+    # Invalid email format
+    - name: invalid-email-format
+      output: validation-errors
+      filter: '!msg["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$")'
+      transform: |
+        #{
+          error: "email_format_invalid",
+          record: msg
+        }
+      partition: '/id'
+    
+    # Missing required fields
+    - name: missing-required-fields
+      output: validation-errors
+      filter: |
+        is_null_or_empty(msg["name"]) ||
+        is_null_or_empty(msg["email"]) ||
+        msg["age"] <= 0
+      transform: |
+        #{
+          error: "missing_required_fields",
+          record: msg
+        }
+      partition: '/id'
 ```
 
 **Use When:**
@@ -216,32 +226,40 @@ docker run -d \
 
 **Configuration:**
 
-```json
-{
-  "appid": "prod-to-staging",
-  "bootstrap": "prod-kafka:9092",
-  "target_broker": "staging-kafka:9092",
-  "input": "production-events",
-  "routing": {
-    "routing_type": "content",
-    "destinations": [
-      {
-        "name": "staging-safe-data",
-        "output": "staging-events",
-        "filter": "NOT:/sensitive,==,true",
-        "transform": "CONSTRUCT:id=/id:type=/type:timestamp=/timestamp:data=/nonSensitiveData",
-        "partition": "/id"
-      },
-      {
-        "name": "test-sample",
-        "output": "test-events",
-        "filter": "AND:NOT:/sensitive,==,true:/testFlag,==,true",
-        "transform": "/",
-        "partition": "/id"
-      }
-    ]
-  }
-}
+```yaml
+appid: prod-to-staging
+bootstrap: prod-kafka:9092
+target_broker: staging-kafka:9092
+input: production-events
+
+routing:
+  destinations:
+    # Staging with PII masked
+    - name: staging-safe-data
+      output: staging-events
+      filter: '!msg["sensitive"]'
+      transform: |
+        #{
+          id: msg["id"],
+          type: msg["type"],
+          timestamp: msg["timestamp"],
+          # Mask PII
+          emailHash: hash_sha256(msg["email"].to_lower()),
+          phoneHash: hash_sha256(msg["phone"]),
+          # Non-sensitive data preserved
+          data: msg["nonSensitiveData"]
+        }
+      partition: '/id'
+    
+    # Test sample (small subset)
+    - name: test-sample
+      output: test-events
+      filter: |
+        !msg["sensitive"] &&
+        msg["testFlag"] == true &&
+        msg["id"] % 100 == 0
+      transform: 'msg'
+      partition: '/id'
 ```
 
 **Use When:**
@@ -256,47 +274,60 @@ docker run -d \
 
 **Configuration:**
 
-```json
-{
-  "appid": "event-bus",
-  "bootstrap": "central-kafka:9092",
-  "input": "event-stream",
-  "routing": {
-    "routing_type": "content",
-    "destinations": [
-      {
-        "name": "analytics",
-        "output": "analytics-events",
-        "filter": "ARRAY_ANY:/tags,/value,==,analytics",
-        "transform": "CONSTRUCT:eventId=/eventId:type=/type:userId=/userId:timestamp=/timestamp:metrics=/metrics"
-      },
-      {
-        "name": "notifications",
-        "output": "notification-queue",
-        "filter": "OR:/priority,==,high:/priority,==,urgent",
-        "transform": "CONSTRUCT:userId=/userId:message=/message:type=/notificationType"
-      },
-      {
-        "name": "billing",
-        "output": "billing-events",
-        "filter": "REGEX:/type,^(usage|subscription|payment)",
-        "transform": "CONSTRUCT:userId=/userId:amount=/amount:type=/type:timestamp=/timestamp"
-      },
-      {
-        "name": "audit",
-        "output": "audit-trail",
-        "filter": "REGEX:/action,^(create|update|delete)",
-        "transform": "/"
-      },
-      {
-        "name": "ml-features",
-        "output": "ml-training",
-        "filter": "/mlRelevant,==,true",
-        "transform": "ARRAY_MAP:/features,/value"
-      }
-    ]
-  }
-}
+```yaml
+appid: event-bus
+bootstrap: central-kafka:9092
+input: event-stream
+
+routing:
+  destinations:
+    # Analytics events
+    - name: analytics
+      output: analytics-events
+      filter: 'msg["tags"].any(|t| t == "analytics")'
+      transform: |
+        #{
+          eventId: msg["eventId"],
+          type: msg["type"],
+          userId: msg["userId"],
+          timestamp: msg["timestamp"],
+          metrics: msg["metrics"]
+        }
+    
+    # High priority notifications
+    - name: notifications
+      output: notification-queue
+      filter: 'msg["priority"] == "high" || msg["priority"] == "urgent"'
+      transform: |
+        #{
+          userId: msg["userId"],
+          message: msg["message"],
+          type: msg["notificationType"]
+        }
+    
+    # Billing events
+    - name: billing
+      output: billing-events
+      filter: 'msg["type"].matches("^(usage|subscription|payment)")'
+      transform: |
+        #{
+          userId: msg["userId"],
+          amount: msg["amount"],
+          type: msg["type"],
+          timestamp: msg["timestamp"]
+        }
+    
+    # Audit trail for state changes
+    - name: audit
+      output: audit-trail
+      filter: 'msg["action"].matches("^(create|update|delete)")'
+      transform: 'msg'
+    
+    # ML feature extraction
+    - name: ml-features
+      output: ml-training
+      filter: 'msg["mlRelevant"] == true'
+      transform: 'msg["features"].map(|f| f["value"])'
 ```
 
 **Use When:**
@@ -311,41 +342,56 @@ docker run -d \
 
 **Configuration:**
 
-```json
-{
-  "appid": "data-lake-ingestion",
-  "bootstrap": "kafka:9092",
-  "input": "application-events",
-  "routing": {
-    "routing_type": "content",
-    "destinations": [
-      {
-        "name": "raw-archive",
-        "output": "datalake-raw",
-        "transform": "/",
-        "comment": "Archive everything"
-      },
-      {
-        "name": "processed-metrics",
-        "output": "datalake-metrics",
-        "filter": "/metrics,>,0",
-        "transform": "CONSTRUCT:timestamp=/timestamp:source=/source:metrics=/metrics"
-      },
-      {
-        "name": "realtime-high-priority",
-        "output": "realtime-processing",
-        "filter": "AND:/priority,==,high:/processingTime,<,1000",
-        "transform": "CONSTRUCT:id=/id:priority=/priority:data=/data"
-      },
-      {
-        "name": "anomaly-detection",
-        "output": "anomaly-queue",
-        "filter": "OR:/errorRate,>,0.1:/responseTime,>,5000",
-        "transform": "CONSTRUCT:source=/source:metric=/metricName:value=/metricValue:threshold=/threshold"
-      }
-    ]
-  }
-}
+```yaml
+appid: data-lake-ingestion
+bootstrap: kafka:9092
+input: application-events
+
+routing:
+  destinations:
+    # Raw archive (everything)
+    - name: raw-archive
+      output: datalake-raw
+      transform: 'msg'
+    
+    # Processed metrics
+    - name: processed-metrics
+      output: datalake-metrics
+      filter: 'msg["metrics"] != () && msg["metrics"].len() > 0'
+      transform: |
+        #{
+          timestamp: msg["timestamp"],
+          source: msg["source"],
+          metrics: msg["metrics"]
+        }
+    
+    # Real-time high priority
+    - name: realtime-high-priority
+      output: realtime-processing
+      filter: |
+        msg["priority"] == "high" &&
+        msg["processingTime"] < 1000
+      transform: |
+        #{
+          id: msg["id"],
+          priority: msg["priority"],
+          data: msg["data"]
+        }
+    
+    # Anomaly detection
+    - name: anomaly-detection
+      output: anomaly-queue
+      filter: |
+        msg["errorRate"] > 0.1 ||
+        msg["responseTime"] > 5000 ||
+        msg["statusCode"] >= 500
+      transform: |
+        #{
+          source: msg["source"],
+          metric: msg["metricName"],
+          value: msg["metricValue"],
+          threshold: msg["threshold"]
+        }
 ```
 
 **Use When:**
@@ -360,45 +406,53 @@ docker run -d \
 
 **Configuration:**
 
-```json
-{
-  "appid": "realtime-analytics",
-  "bootstrap": "kafka:9092",
-  "input": "raw-metrics",
-  "routing": {
-    "routing_type": "content",
-    "destinations": [
-      {
-        "name": "revenue-total",
-        "output": "revenue-metrics",
-        "filter": "/order/status,==,completed",
-        "transform": "ARITHMETIC:ADD,/order/amount,/order/tax",
-        "partition": "/order/customerId"
-      },
-      {
-        "name": "conversion-rate",
-        "output": "conversion-metrics",
-        "filter": "AND:/visits,>,0:/conversions,>,0",
-        "transform": "ARITHMETIC:DIV,/conversions,/visits",
-        "partition": "/campaignId"
-      },
-      {
-        "name": "user-engagement",
-        "output": "engagement-metrics",
-        "filter": "ARRAY_ANY:/sessions,/duration,>,300",
-        "transform": "CONSTRUCT:userId=/userId:sessions=ARRAY_MAP:/sessions,/duration",
-        "partition": "/userId"
-      },
-      {
-        "name": "error-rates",
-        "output": "error-metrics",
-        "filter": "AND:/requests,>,0:/errors,>,0",
-        "transform": "ARITHMETIC:DIV,/errors,/requests",
-        "partition": "/serviceId"
-      }
-    ]
-  }
-}
+```yaml
+appid: realtime-analytics
+bootstrap: kafka:9092
+input: raw-metrics
+
+routing:
+  destinations:
+    # Revenue calculation
+    - name: revenue-total
+      output: revenue-metrics
+      filter: 'msg["order"]["status"] == "completed"'
+      transform: |
+        msg["order"]["amount"] + msg["order"]["tax"]
+      partition: '/order/customerId'
+    
+    # Conversion rate
+    - name: conversion-rate
+      output: conversion-metrics
+      filter: 'msg["visits"] > 0 && msg["conversions"] > 0'
+      transform: |
+        msg["conversions"] / msg["visits"]
+      partition: '/campaignId'
+    
+    # User engagement
+    - name: user-engagement
+      output: engagement-metrics
+      filter: 'msg["sessions"].any(|s| s["duration"] > 300)'
+      transform: |
+        #{
+          userId: msg["userId"],
+          sessionDurations: msg["sessions"].map(|s| s["duration"]),
+          totalTime: msg["sessions"].map(|s| s["duration"]).sum()
+        }
+      partition: '/userId'
+    
+    # Error rates
+    - name: error-rates
+      output: error-metrics
+      filter: 'msg["requests"] > 0 && msg["errors"] > 0'
+      transform: |
+        #{
+          serviceId: msg["serviceId"],
+          errorRate: msg["errors"] / msg["requests"],
+          errors: msg["errors"],
+          requests: msg["requests"]
+        }
+      partition: '/serviceId'
 ```
 
 **Use When:**
@@ -413,50 +467,71 @@ docker run -d \
 
 **Configuration:**
 
-```json
-{
-  "appid": "microservices-hub",
-  "bootstrap": "kafka:9092",
-  "input": "service-events",
-  "routing": {
-    "routing_type": "content",
-    "destinations": [
-      {
-        "name": "user-service",
-        "output": "user-service-events",
-        "filter": "REGEX:/aggregate,^User",
-        "transform": "CONSTRUCT:aggregateId=/aggregateId:eventType=/eventType:payload=/payload",
-        "partition": "/aggregateId"
-      },
-      {
-        "name": "order-service",
-        "output": "order-service-events",
-        "filter": "REGEX:/aggregate,^Order",
-        "transform": "CONSTRUCT:aggregateId=/aggregateId:eventType=/eventType:payload=/payload",
-        "partition": "/aggregateId"
-      },
-      {
-        "name": "inventory-service",
-        "output": "inventory-service-events",
-        "filter": "REGEX:/aggregate,^(Inventory|Product)",
-        "transform": "CONSTRUCT:aggregateId=/aggregateId:eventType=/eventType:payload=/payload",
-        "partition": "/aggregateId"
-      },
-      {
-        "name": "notification-service",
-        "output": "notification-events",
-        "filter": "ARRAY_ANY:/tags,/value,==,notify",
-        "transform": "CONSTRUCT:userId=/userId:message=/message:channels=ARRAY_MAP:/channels,/type"
-      },
-      {
-        "name": "cross-service-saga",
-        "output": "saga-coordinator",
-        "filter": "/sagaId,!=,",
-        "transform": "CONSTRUCT:sagaId=/sagaId:step=/step:status=/status:data=/data"
-      }
-    ]
-  }
-}
+```yaml
+appid: microservices-hub
+bootstrap: kafka:9092
+input: service-events
+
+routing:
+  destinations:
+    # User service events
+    - name: user-service
+      output: user-service-events
+      filter: 'msg["aggregate"].starts_with("User")'
+      transform: |
+        #{
+          aggregateId: msg["aggregateId"],
+          eventType: msg["eventType"],
+          payload: msg["payload"]
+        }
+      partition: '/aggregateId'
+    
+    # Order service events
+    - name: order-service
+      output: order-service-events
+      filter: 'msg["aggregate"].starts_with("Order")'
+      transform: |
+        #{
+          aggregateId: msg["aggregateId"],
+          eventType: msg["eventType"],
+          payload: msg["payload"]
+        }
+      partition: '/aggregateId'
+    
+    # Inventory service events
+    - name: inventory-service
+      output: inventory-service-events
+      filter: 'msg["aggregate"].matches("^(Inventory|Product)")'
+      transform: |
+        #{
+          aggregateId: msg["aggregateId"],
+          eventType: msg["eventType"],
+          payload: msg["payload"]
+        }
+      partition: '/aggregateId'
+    
+    # Notification service (based on tags)
+    - name: notification-service
+      output: notification-events
+      filter: 'msg["tags"].any(|t| t == "notify")'
+      transform: |
+        #{
+          userId: msg["userId"],
+          message: msg["message"],
+          channels: msg["channels"].map(|c| c["type"])
+        }
+    
+    # Saga coordinator
+    - name: cross-service-saga
+      output: saga-coordinator
+      filter: 'not_null(msg["sagaId"]) && msg["sagaId"] != ""'
+      transform: |
+        #{
+          sagaId: msg["sagaId"],
+          step: msg["step"],
+          status: msg["status"],
+          data: msg["data"]
+        }
 ```
 
 **Use When:**
@@ -471,94 +546,107 @@ docker run -d \
 
 Send the same message to multiple topics with different transformations:
 
-```json
-{
-  "destinations": [
-    {
-      "name": "full-archive",
-      "output": "archive",
-      "transform": "/"
-    },
-    {
-      "name": "minimal-log",
-      "output": "logs",
-      "transform": "CONSTRUCT:id=/id:timestamp=/timestamp:level=/level"
-    },
-    {
-      "name": "error-only",
-      "output": "errors",
-      "filter": "REGEX:/level,^(ERROR|FATAL)",
-      "transform": "CONSTRUCT:id=/id:error=/error:stackTrace=/stackTrace"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    # Full archive
+    - name: full-archive
+      output: archive
+      transform: 'msg'
+    
+    # Minimal log
+    - name: minimal-log
+      output: logs
+      transform: |
+        #{
+          id: msg["id"],
+          timestamp: msg["timestamp"],
+          level: msg["level"]
+        }
+    
+    # Errors only
+    - name: error-only
+      output: errors
+      filter: 'msg["level"].matches("^(ERROR|FATAL)")'
+      transform: |
+        #{
+          id: msg["id"],
+          error: msg["error"],
+          stackTrace: msg["stackTrace"]
+        }
 ```
 
 ### Pattern 2: Conditional Routing
 
 Route based on complex conditions:
 
-```json
-{
-  "destinations": [
-    {
-      "name": "premium-fast-lane",
-      "output": "premium-queue",
-      "filter": "AND:/user/tier,==,premium:/priority,==,high",
-      "transform": "/"
-    },
-    {
-      "name": "standard-processing",
-      "output": "standard-queue",
-      "filter": "NOT:AND:/user/tier,==,premium:/priority,==,high",
-      "transform": "/"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    # Premium fast lane
+    - name: premium-fast-lane
+      output: premium-queue
+      filter: |
+        msg["user"]["tier"] == "premium" &&
+        msg["priority"] == "high"
+      transform: 'msg'
+    
+    # Standard processing
+    - name: standard-processing
+      output: standard-queue
+      filter: |
+        !(msg["user"]["tier"] == "premium" && msg["priority"] == "high")
+      transform: 'msg'
 ```
 
 ### Pattern 3: Data Enrichment
 
 Add calculated fields:
 
-```json
-{
-  "destinations": [
-    {
-      "name": "with-total",
-      "output": "enriched-orders",
-      "transform": "CONSTRUCT:orderId=/orderId:subtotal=/subtotal:tax=ARITHMETIC:MUL,/subtotal,0.08:total=ARITHMETIC:MUL,/subtotal,1.08"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    - name: enriched-orders
+      output: orders-enriched
+      transform: |
+        let subtotal = msg["subtotal"];
+        let tax = subtotal * 0.08;
+        let total = subtotal + tax;
+        #{
+          orderId: msg["orderId"],
+          subtotal: subtotal,
+          tax: tax,
+          total: total,
+          items: msg["items"]
+        }
 ```
-
-Note: Nested transforms not yet supported; apply sequentially.
 
 ### Pattern 4: Filter Pipeline
 
 Progressive filtering:
 
-```json
-{
-  "destinations": [
-    {
-      "name": "stage1-valid-format",
-      "output": "stage1",
-      "filter": "REGEX:/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$"
-    },
-    {
-      "name": "stage2-corporate",
-      "output": "stage2",
-      "filter": "AND:REGEX:/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$:REGEX:/email,@company\\.com$"
-    },
-    {
-      "name": "stage3-active",
-      "output": "stage3",
-      "filter": "AND:REGEX:/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$:REGEX:/email,@company\\.com$:/active,==,true"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    # Stage 1: Valid format
+    - name: stage1-valid-format
+      output: stage1
+      filter: 'msg["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$")'
+    
+    # Stage 2: Corporate emails
+    - name: stage2-corporate
+      output: stage2
+      filter: |
+        msg["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$") &&
+        msg["email"].ends_with("@company.com")
+    
+    # Stage 3: Active corporate emails
+    - name: stage3-active
+      output: stage3
+      filter: |
+        msg["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$") &&
+        msg["email"].ends_with("@company.com") &&
+        msg["active"] == true
 ```
 
 ## Troubleshooting
@@ -572,7 +660,7 @@ Progressive filtering:
 **Check:**
 ```bash
 # Enable debug logging
-RUST_LOG=debug CONFIG_FILE=config.json ./streamforge
+RUST_LOG=debug CONFIG_FILE=config.yaml ./streamforge
 ```
 
 **Common Causes:**
@@ -581,16 +669,15 @@ RUST_LOG=debug CONFIG_FILE=config.json ./streamforge
 - All destinations filtered out
 
 **Solution:**
-```json
-{
-  "destinations": [
-    {
-      "name": "catchall",
-      "output": "unrouted",
-      "comment": "No filter = accepts all"
-    }
-  ]
-}
+```yaml
+# Add catchall destination for debugging
+routing:
+  destinations:
+    # Your filtered destinations...
+    
+    # Catchall (no filter = accepts all)
+    - name: catchall
+      output: unrouted
 ```
 
 #### 2. Performance Issues
@@ -603,18 +690,16 @@ RUST_LOG=debug CONFIG_FILE=config.json ./streamforge
 - Network latency
 
 **Solution:**
-```json
-{
-  "threads": 8,
-  "consumer_properties": {
-    "fetch.min.bytes": "1048576",
-    "max.poll.records": "500"
-  },
-  "producer_properties": {
-    "batch.size": "65536",
-    "linger.ms": "10"
-  }
-}
+```yaml
+threads: 8
+
+consumer_properties:
+  fetch.min.bytes: "1048576"
+  max.poll.records: "500"
+
+producer_properties:
+  batch.size: "65536"
+  linger.ms: "10"
 ```
 
 #### 3. Memory Usage High
@@ -627,13 +712,10 @@ RUST_LOG=debug CONFIG_FILE=config.json ./streamforge
 - Batch sizes
 
 **Solution:**
-```json
-{
-  "consumer_properties": {
-    "max.poll.records": "100",
-    "fetch.max.bytes": "52428800"
-  }
-}
+```yaml
+consumer_properties:
+  max.poll.records: "100"
+  fetch.max.bytes: "52428800"
 ```
 
 #### 4. Connection Failures
@@ -649,7 +731,7 @@ nc -zv kafka-broker 9092
 nslookup kafka-broker
 
 # Check config
-cat config.json | grep bootstrap
+cat config.yaml | grep bootstrap
 ```
 
 **Solution:**
@@ -662,37 +744,35 @@ cat config.json | grep bootstrap
 **Symptoms**: Expected messages not matching filter.
 
 **Debug:**
-```json
-{
-  "destinations": [
-    {
-      "name": "debug-all",
-      "output": "debug-topic",
-      "transform": "/",
-      "comment": "Send all to debug topic"
-    }
-  ]
-}
+```yaml
+# Send all to debug topic
+routing:
+  destinations:
+    - name: debug-all
+      output: debug-topic
+      transform: 'msg'
 ```
 
 **Check:**
 - Field paths (case-sensitive)
 - Value types (string vs number)
-- Regex escaping (`\\` for special chars)
+- Null values
+- Regex escaping
 
 ### Debugging Tips
 
 1. **Start Simple**: Begin with no filter, add complexity gradually
 2. **Use Debug Logs**: `RUST_LOG=debug` shows filter evaluation
 3. **Test Regex Separately**: Use online regex testers
-4. **Validate JSON Paths**: Check field names and nesting
+4. **Validate Field Access**: Check field names and nesting
 5. **Monitor Metrics**: Watch filtered vs completed counts
 
 ### Getting Help
 
-- Check `ADVANCED_DSL_GUIDE.md` for DSL syntax
-- See `PERFORMANCE.md` for tuning tips
-- Review example configs in `config*.example.json`
+- Check [RHAI_QUICK_REFERENCE.md](RHAI_QUICK_REFERENCE.md) for Rhai syntax
+- See [ADVANCED_FILTERS.md](ADVANCED_FILTERS.md) for filter examples
+- Review [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) for complete guide
+- Check [PERFORMANCE.md](PERFORMANCE.md) for tuning tips
 - Enable debug logging for detailed troubleshooting
 
 ## Next Steps
@@ -700,3 +780,4 @@ cat config.json | grep bootstrap
 - [PERFORMANCE.md](PERFORMANCE.md) - Performance optimization
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Contributing guide
 - [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Complete DSL reference
+- [RHAI_QUICK_REFERENCE.md](RHAI_QUICK_REFERENCE.md) - Quick syntax reference

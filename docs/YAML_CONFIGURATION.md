@@ -121,29 +121,41 @@ consumer_properties:
 **YAML** (Much More Readable!):
 ```yaml
 routing:
-  routing_type: content
   destinations:
     # Validated users only
     - output: validated-users
       description: Users with valid email format
-      filter: "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$"
-      transform: "CONSTRUCT:email=/user/email:name=/user/name:id=/user/id"
-      partition: /user/id
+      filter: 'msg["user"]["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$")'
+      transform: |
+        #{
+          email: msg["user"]["email"],
+          name: msg["user"]["name"],
+          id: msg["user"]["id"]
+        }
+      partition: '/user/id'
 
     # High-value orders
     - output: premium-orders
       description: Orders over $500 that are confirmed
-      filter: "AND:/order/total,>,500:/order/status,==,confirmed"
+      filter:
+        - 'msg["order"]["total"] > 500'
+        - 'msg["order"]["status"] == "confirmed"'
       transform: |
-        CONSTRUCT:orderId=/order/id:total=/order/total:customer=/customer/email
-      partition: /order/id
+        #{
+          orderId: msg["order"]["id"],
+          total: msg["order"]["total"],
+          customer: msg["customer"]["email"]
+        }
+      partition: '/order/id'
 
     # Bulk discount calculation
     - output: discounted-prices
       description: Apply 10% discount for bulk orders
-      filter: "AND:/order/items,>=,10:/order/total,>,100"
-      transform: "ARITHMETIC:MUL,/order/total,0.9"
-      partition: /order/id
+      filter:
+        - 'msg["order"]["items"] >= 10'
+        - 'msg["order"]["total"] > 100'
+      transform: 'msg["order"]["total"] * 0.9'
+      partition: '/order/id'
 ```
 
 **JSON** (Harder to Read):
@@ -185,18 +197,24 @@ routing:
 - output: premium-or-bulk
   description: Premium users OR bulk orders
   filter: |
-    OR:AND:/user/tier,==,premium:/user/status,==,active:AND:/order/items,>=,10:/order/total,>,500
+    (msg["user"]["tier"] == "premium" && msg["user"]["status"] == "active") ||
+    (msg["order"]["items"] >= 10 && msg["order"]["total"] > 500)
   transform: |
-    CONSTRUCT:userId=/user/id:tier=/user/tier:orderTotal=/order/total:itemCount=/order/items
+    #{
+      userId: msg["user"]["id"],
+      tier: msg["user"]["tier"],
+      orderTotal: msg["order"]["total"],
+      itemCount: msg["order"]["items"]
+    }
 ```
 
-**JSON**:
+**JSON** (for comparison):
 ```json
 {
   "output": "premium-or-bulk",
   "description": "Premium users OR bulk orders",
-  "filter": "OR:AND:/user/tier,==,premium:/user/status,==,active:AND:/order/items,>=,10:/order/total,>,500",
-  "transform": "CONSTRUCT:userId=/user/id:tier=/user/tier:orderTotal=/order/total:itemCount=/order/items"
+  "filter": "(msg[\"user\"][\"tier\"] == \"premium\" && msg[\"user\"][\"status\"] == \"active\") || (msg[\"order\"][\"items\"] >= 10 && msg[\"order\"][\"total\"] > 500)",
+  "transform": "#{ userId: msg[\"user\"][\"id\"], tier: msg[\"user\"][\"tier\"], orderTotal: msg[\"order\"][\"total\"], itemCount: msg[\"order\"][\"items\"] }"
 }
 ```
 
@@ -217,9 +235,13 @@ routing:
     # Email validation pipeline
     - output: validated-users
       # Uses regex to validate email format
-      filter: "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$"
+      filter: 'msg["user"]["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$")'
       # Extract only essential fields
-      transform: "CONSTRUCT:email=/user/email:name=/user/name"
+      transform: |
+        #{
+          email: msg["user"]["email"],
+          name: msg["user"]["name"]
+        }
 ```
 
 ### 2. Multi-line Strings
@@ -227,7 +249,9 @@ routing:
 **With `|` (preserve newlines):**
 ```yaml
 filter: |
-  AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true
+  msg["event"]["type"].matches("^(create|update|delete)$") &&
+  (msg["event"]["source"] == "api" || msg["event"]["source"] == "web") &&
+  !msg["event"]["test"]
 ```
 
 **With `>` (fold newlines):**
@@ -248,11 +272,11 @@ destinations:
 
   - output: active-users
     description: Active users only
-    filter: "/user/active,==,true"
+    filter: 'msg["user"]["active"] == true'
 
   - output: premium-users
     description: Premium tier users
-    filter: "/user/tier,==,premium"
+    filter: 'msg["user"]["tier"] == "premium"'
 
   # ============================================
   # ORDER PROCESSING
@@ -260,7 +284,7 @@ destinations:
 
   - output: high-value-orders
     description: Orders over $1000
-    filter: "/order/total,>,1000"
+    filter: 'msg["order"]["total"] > 1000'
 ```
 
 ### 4. Anchors and Aliases (Advanced)
@@ -292,7 +316,7 @@ producer_properties:
 ```yaml
 # Optional fields can be omitted
 - output: simple-destination
-  filter: "/field,==,value"
+  filter: 'msg["field"] == "value"'
   # No transform, no partition - that's OK!
 ```
 
@@ -316,27 +340,31 @@ python3 -c "import json, yaml, sys; yaml.dump(json.load(sys.stdin), sys.stdout, 
 # Add descriptive comments
 - output: validated-users
   description: Users with valid email format  # This shows in logs
-  filter: "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$"
+  filter: 'msg["user"]["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$")'
 ```
 
 ### Step 3: Use Multi-line for Complex Filters
 
-**Before:**
+**Single line (harder to read):**
 ```yaml
-filter: "AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true"
+filter: 'msg["event"]["type"].matches("^(create|update|delete)$") && (msg["event"]["source"] == "api" || msg["event"]["source"] == "web") && !msg["event"]["test"]'
 ```
 
-**After:**
+**Better - Multi-line:**
 ```yaml
 filter: |
-  AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true
+  msg["event"]["type"].matches("^(create|update|delete)$") &&
+  (msg["event"]["source"] == "api" || msg["event"]["source"] == "web") &&
+  !msg["event"]["test"]
 ```
 
-Even better with comments:
+**Even better - With comments:**
 ```yaml
 # Match CRUD operations from API or web sources, excluding tests
 filter: |
-  AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true
+  msg["event"]["type"].matches("^(create|update|delete)$") &&
+  (msg["event"]["source"] == "api" || msg["event"]["source"] == "web") &&
+  !msg["event"]["test"]
 ```
 
 ### Step 4: Organize with Sections
@@ -364,9 +392,16 @@ routing:
 ```yaml
 - output: premium-orders
   # Business rule: Orders over $500 require manual review
-  filter: "AND:/order/total,>,500:/order/status,==,confirmed"
+  filter:
+    - 'msg["order"]["total"] > 500'
+    - 'msg["order"]["status"] == "confirmed"'
   # Extract fields needed for review dashboard
-  transform: "CONSTRUCT:orderId=/order/id:total=/order/total:customer=/customer/email"
+  transform: |
+    #{
+      orderId: msg["order"]["id"],
+      total: msg["order"]["total"],
+      customer: msg["customer"]["email"]
+    }
 ```
 
 ### 2. Group Related Destinations
@@ -407,7 +442,9 @@ destinations:
   # 2. From API or web sources
   # 3. Excluding test events
   filter: |
-    AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true
+    msg["event"]["type"].matches("^(create|update|delete)$") &&
+    (msg["event"]["source"] == "api" || msg["event"]["source"] == "web") &&
+    !msg["event"]["test"]
 ```
 
 ### 5. Consistent Indentation
@@ -418,28 +455,44 @@ Use 2 spaces (YAML standard):
 routing:
   destinations:
     - output: topic1
-      filter: "..."
-      transform: "..."
+      filter: 'msg["field"] == "value"'
+      transform: 'msg["field"]'
 ```
 
 ### 6. Multi-line for Long Expressions
 
-**Hard to read:**
+**Hard to read (single line):**
 ```yaml
-transform: "CONSTRUCT:userId=/user/id:userName=/user/name:userEmail=/user/email:userTier=/user/tier:orderTotal=/order/total:orderStatus=/order/status"
+transform: '#{ userId: msg["user"]["id"], userName: msg["user"]["name"], userEmail: msg["user"]["email"], userTier: msg["user"]["tier"], orderTotal: msg["order"]["total"], orderStatus: msg["order"]["status"] }'
 ```
 
-**Better:**
+**Better (multi-line):**
 ```yaml
 transform: |
-  CONSTRUCT:userId=/user/id:userName=/user/name:userEmail=/user/email:userTier=/user/tier:orderTotal=/order/total:orderStatus=/order/status
+  #{
+    userId: msg["user"]["id"],
+    userName: msg["user"]["name"],
+    userEmail: msg["user"]["email"],
+    userTier: msg["user"]["tier"],
+    orderTotal: msg["order"]["total"],
+    orderStatus: msg["order"]["status"]
+  }
 ```
 
-**Even better with structure:**
+**Even better with comments:**
 ```yaml
 # Extract user and order summary
 transform: |
-  CONSTRUCT:userId=/user/id:userName=/user/name:userEmail=/user/email:userTier=/user/tier:orderTotal=/order/total:orderStatus=/order/status
+  #{
+    # User fields
+    userId: msg["user"]["id"],
+    userName: msg["user"]["name"],
+    userEmail: msg["user"]["email"],
+    userTier: msg["user"]["tier"],
+    # Order fields
+    orderTotal: msg["order"]["total"],
+    orderStatus: msg["order"]["status"]
+  }
 ```
 
 ## Example Configurations
@@ -481,20 +534,24 @@ compression:
   compression_algo: snappy  # Fast compression for production
 
 routing:
-  routing_type: content
   destinations:
     # Production destinations with business logic
     - output: validated-users
       description: Production user validation pipeline
       filter: |
-        AND:REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$:NOT:REGEX:/user/email,@(test|temp)\\.
-      transform: "CONSTRUCT:id=/user/id:email=/user/email"
-      partition: /user/id
+        msg["user"]["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$") &&
+        !msg["user"]["email"].matches("@(test|temp)\\.")
+      transform: |
+        #{
+          id: msg["user"]["id"],
+          email: msg["user"]["email"]
+        }
+      partition: '/user/id'
 
     # Audit trail for compliance
     - output: audit-trail
       description: Complete audit trail for compliance
-      transform: /
+      transform: 'msg'
 
 # Production Kafka settings
 consumer_properties:

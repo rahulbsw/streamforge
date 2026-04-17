@@ -49,36 +49,41 @@ threads: 4
 
 **Auto-detected** by file extension (`.yaml`, `.yml`, `.json`)
 
-## DSL Syntax Reference
+## Rhai DSL Syntax Reference
 
-### Filters
+StreamForge uses **Rhai** - a JavaScript-like scripting language - for filters and transforms.
+
+### Filters (return true/false)
 
 | Syntax | Example | Description |
 |--------|---------|-------------|
-| Simple | `/path,op,value` | `/message/id,>,1000` |
-| AND | `AND:cond1:cond2` | `AND:/id,>,0:/status,==,active` |
-| OR | `OR:cond1:cond2` | `OR:/priority,==,high:/priority,==,urgent` |
-| NOT | `NOT:condition` | `NOT:/test,==,true` |
-| REGEX | `REGEX:/path,pattern` | `REGEX:/email,^[\\w]+@[\\w]+\\.\\w+$` |
-| ARRAY_ALL | `ARRAY_ALL:/path,filter` | `ARRAY_ALL:/users,/status,==,active` |
-| ARRAY_ANY | `ARRAY_ANY:/path,filter` | `ARRAY_ANY:/users,/admin,==,true` |
+| Simple | `msg["field"] op value` | `msg["id"] > 1000` |
+| Boolean AND | `cond1 && cond2` | `msg["id"] > 0 && msg["status"] == "active"` |
+| Boolean OR | `cond1 \|\| cond2` | `msg["priority"] == "high" \|\| msg["urgent"]` |
+| Boolean NOT | `!condition` | `!msg["test"]` |
+| Regex | `field.matches("pattern")` | `msg["email"].matches("^[\\w]+@.*")` |
+| Array All | `array.all(\|x\| condition)` | `msg["users"].all(\|u\| u["active"])` |
+| Array Any | `array.any(\|x\| condition)` | `msg["users"].any(\|u\| u["admin"])` |
 
 ### Operators
 
-`>` `>=` `<` `<=` `==` `!=`
+**Comparison**: `==` `!=` `>` `>=` `<` `<=`  
+**Logical**: `&&` (AND)  `||` (OR)  `!` (NOT)  
+**Arithmetic**: `+` `-` `*` `/` `%`
 
-### Transforms
+### Transforms (return new value)
 
 | Syntax | Example | Description |
 |--------|---------|-------------|
-| Extract | `/path` | `/message/id` |
-| Construct | `CONSTRUCT:f1=/p1:f2=/p2` | `CONSTRUCT:id=/user/id:name=/user/name` |
-| Array Map | `ARRAY_MAP:/path,transform` | `ARRAY_MAP:/users,/id` |
-| Arithmetic | `ARITHMETIC:op,a,b` | `ARITHMETIC:ADD,/price,/tax` |
+| Extract | `msg["path"]` | `msg["user"]["id"]` |
+| Object | `#{ f1: v1, f2: v2 }` | `#{ id: msg["id"], name: msg["name"] }` |
+| Array Map | `array.map(\|x\| expr)` | `msg["users"].map(\|u\| u["id"])` |
+| Arithmetic | `expr op expr` | `msg["price"] + msg["tax"]` |
+| String Ops | `string.method()` | `msg["email"].to_lower()` |
 
-### Arithmetic Operations
+### String Methods
 
-`ADD` `SUB` `MUL` `DIV`
+`to_upper()` `to_lower()` `trim()` `split()` `replace()` `starts_with()` `ends_with()` `contains()` `matches()`
 
 ## Configuration Patterns
 
@@ -95,54 +100,38 @@ threads: 4
 
 ### Content Routing
 
-```json
-{
-  "input": "events",
-  "routing": {
-    "destinations": [
-      {
-        "filter": "REGEX:/type,^user",
-        "output": "user-events"
-      },
-      {
-        "filter": "REGEX:/type,^order",
-        "output": "order-events"
-      }
-    ]
-  }
-}
+```yaml
+input: events
+routing:
+  destinations:
+    - output: user-events
+      filter: 'msg["type"].starts_with("user")'
+    
+    - output: order-events
+      filter: 'msg["type"].starts_with("order")'
 ```
 
 ### Data Validation
 
-```json
-{
-  "destinations": [
-    {
-      "filter": "REGEX:/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$",
-      "output": "valid",
-      "transform": "/user"
-    },
-    {
-      "filter": "NOT:REGEX:/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$",
-      "output": "invalid"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    - output: valid
+      filter: 'msg["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$")'
+      transform: 'msg["user"]'
+    
+    - output: invalid
+      filter: '!msg["email"].matches("^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$")'
 ```
 
 ### Calculate Metrics
 
-```json
-{
-  "destinations": [
-    {
-      "filter": "/price,>,0",
-      "transform": "ARITHMETIC:MUL,/price,1.08",
-      "output": "with-tax"
-    }
-  ]
-}
+```yaml
+routing:
+  destinations:
+    - output: with-tax
+      filter: 'msg["price"] > 0'
+      transform: 'msg["price"] * 1.08'
 ```
 
 ## Performance Tuning
@@ -295,38 +284,42 @@ cargo test -- --nocapture
 
 ### Filter by Field Value
 
-```json
-"filter": "/status,==,active"
+```yaml
+filter: 'msg["status"] == "active"'
 ```
 
 ### Filter with Boolean Logic
 
-```json
-"filter": "AND:/status,==,active:/tier,==,premium"
+```yaml
+filter: 'msg["status"] == "active" && msg["tier"] == "premium"'
 ```
 
 ### Extract Nested Field
 
-```json
-"transform": "/user/profile/email"
+```yaml
+transform: 'msg["user"]["profile"]["email"]'
 ```
 
 ### Build New Object
 
-```json
-"transform": "CONSTRUCT:id=/user/id:email=/user/email"
+```yaml
+transform: |
+  #{
+    id: msg["user"]["id"],
+    email: msg["user"]["email"]
+  }
 ```
 
 ### Calculate Total
 
-```json
-"transform": "ARITHMETIC:ADD,/price,/tax"
+```yaml
+transform: 'msg["price"] + msg["tax"]'
 ```
 
 ### Extract Array IDs
 
-```json
-"transform": "ARRAY_MAP:/users,/id"
+```yaml
+transform: 'msg["users"].map(|u| u["id"])'
 ```
 
 ## Compression Options
