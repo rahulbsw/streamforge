@@ -344,59 +344,41 @@ spec:
                   - us-west-1a
 ```
 
-## Filter and Transform Syntax (Rhai)
-
-StreamForge uses **Rhai** - a JavaScript-like scripting language for filters and transforms.
-
-### Filter Examples
+## Filter DSL Syntax
 
 ```yaml
 # Simple comparison
-filter: 'msg["status"] == "active"'
+filter: "/status,==,active"
 
 # Boolean logic
-filter: 'msg["amount"] > 100 && msg["country"] == "US"'
-filter: 'msg["priority"] == "high" || msg["priority"] == "urgent"'
-filter: '!msg["inactive"]'
+filter: "AND:/amount,>,100:/country,==,US"
+filter: "OR:/priority,==,high:/priority,==,urgent"
+filter: "NOT:/status,==,inactive"
 
 # Regular expressions
-filter: 'msg["email"].matches("^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$")'
+filter: "REGEX:/email,^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$"
 
 # Array operations
-filter: 'msg["orders"].all(|o| o["status"] == "completed")'
-filter: 'msg["tags"].any(|t| t == "important")'
-
-# Key and header filtering
-filter: 'key.starts_with("premium-")'
-filter: 'headers["x-tenant"] == "production"'
+filter: "ARRAY_ALL:/orders,/status,==,completed"
+filter: "ARRAY_ANY:/tags,/name,==,important"
 ```
 
-### Transform Examples
+## Transform DSL Syntax
 
 ```yaml
-# Extract field
-transform: 'msg["user"]["email"]'
+# Extract fields
+transform: "EXTRACT:/user/email,userEmail"
 
 # Construct object
-transform: |
-  #{
-    userId: msg["id"],
-    userName: msg["name"],
-    userEmail: msg["email"]
-  }
+transform: "CONSTRUCT:output,/id:userId,/name:userName,/email:userEmail"
 
 # Array map
-transform: 'msg["items"].map(|item| item["price"])'
+transform: "ARRAY_MAP:/items,/price,itemPrices"
 
 # Arithmetic
-transform: 'msg["price"] + msg["tax"]'
-transform: 'msg["quantity"] * msg["price"]'
+transform: "ADD:/price,/tax,totalPrice"
+transform: "MUL:/quantity,/price,totalCost"
 ```
-
-**See also:**
-- [RHAI_QUICK_REFERENCE.md](../../docs/RHAI_QUICK_REFERENCE.md)
-- [ADVANCED_FILTERS.md](../../docs/ADVANCED_FILTERS.md)
-- [KEY_AND_HEADER_FILTERING.md](../../docs/KEY_AND_HEADER_FILTERING.md)
 
 ## Monitoring
 

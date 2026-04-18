@@ -439,7 +439,7 @@ Access: http://localhost:8080
 ┌────────────────────────────────────────┐
 │      Streamforge UI (Next.js)          │
 │  • Pipeline form builder                │
-│  • Rhai DSL syntax editor               │
+│  • DSL syntax editor                    │
 │  • Real-time status monitoring          │
 │  • Pod log viewer                       │
 └────────────────────────────────────────┘
