@@ -73,6 +73,9 @@ tower-http = { version = "0.5", features = ["trace"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+testcontainers = "0.15"
+uuid = { version = "1.6", features = ["v4"] }
+serial_test = "3.0"
 
 [[bin]]
 name = "streamforge"

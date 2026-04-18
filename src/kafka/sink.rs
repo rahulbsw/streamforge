@@ -375,6 +375,8 @@ mod tests {
             commit_strategy: CommitStrategyConfig::default(),
             cache: None,
             observability: Default::default(),
+            retry: Default::default(),
+            dlq: Default::default(),
         }
     }
 

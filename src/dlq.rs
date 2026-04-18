@@ -10,7 +10,7 @@ use std::time::Duration;
 use tracing::{debug, error, warn};
 
 /// DLQ configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DlqConfig {
     /// Enable DLQ (if false, errors will cause pipeline to halt)
     pub enabled: bool,

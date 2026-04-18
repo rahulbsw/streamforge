@@ -13,6 +13,7 @@ pub mod metrics;
 pub mod observability;
 pub mod partitioner;
 pub mod processor;
+pub mod processor_with_retry;
 pub mod retry;
 
 pub use cache::{

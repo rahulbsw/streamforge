@@ -9,7 +9,7 @@ use tokio::time::sleep;
 use tracing::{debug, warn};
 
 /// Retry configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RetryConfig {
     /// Maximum number of retry attempts
     pub max_attempts: u32,

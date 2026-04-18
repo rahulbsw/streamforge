@@ -18,7 +18,8 @@ use streamforge::observability::{
 use streamforge::processor::{
     DestinationProcessor, MessageProcessor, MultiDestinationProcessor, SingleDestinationProcessor,
 };
-use streamforge::{MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result, SyncCacheManager};
+use streamforge::processor_with_retry::ProcessorWithRetry;
+use streamforge::{DeadLetterQueue, MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result, RetryPolicy, SyncCacheManager};
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
@@ -80,7 +81,7 @@ async fn main() -> Result<()> {
     }
 
     // Build processor based on configuration
-    let processor: Arc<dyn MessageProcessor> = if let Some(routing) = &config.routing {
+    let base_processor: Arc<dyn MessageProcessor> = if let Some(routing) = &config.routing {
         info!("Multi-destination routing enabled");
         build_multi_destination_processor(&config, routing, stats.clone(), cache_manager.clone())
             .await?
@@ -88,6 +89,33 @@ async fn main() -> Result<()> {
         info!("Single-destination mode");
         build_single_destination_processor(&config, stats.clone(), cache_manager.clone()).await?
     };
+
+    // Wrap processor with retry and DLQ support
+    let retry_policy = RetryPolicy::new(config.retry.clone());
+    let dlq = if config.dlq.enabled {
+        info!(
+            "DLQ enabled: topic={}, max_retries={}",
+            config.dlq.topic, config.dlq.max_dlq_retries
+        );
+        Some(Arc::new(DeadLetterQueue::new(config.dlq.clone(), &config.bootstrap)?))
+    } else {
+        info!("DLQ disabled - errors will halt pipeline");
+        None
+    };
+
+    let processor = Arc::new(ProcessorWithRetry::new(
+        base_processor,
+        retry_policy,
+        dlq,
+        config.appid.clone(),
+    )) as Arc<dyn MessageProcessor>;
+
+    info!(
+        "Retry policy: max_attempts={}, initial_delay={}ms, max_delay={}ms",
+        config.retry.max_attempts,
+        config.retry.initial_delay_ms,
+        config.retry.max_delay_ms
+    );
 
     // Create Kafka consumer
     let consumer = create_consumer(&config)?;
@@ -468,6 +496,8 @@ fn create_default_config() -> MirrorMakerConfig {
         commit_strategy: Default::default(),
         cache: None,
         observability: Default::default(),
+        retry: Default::default(),
+        dlq: Default::default(),
     }
 }
 

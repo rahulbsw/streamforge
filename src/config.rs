@@ -65,6 +65,14 @@ pub struct MirrorMakerConfig {
     /// Observability configuration (metrics, monitoring)
     #[serde(default)]
     pub observability: ObservabilityConfig,
+
+    /// Retry configuration for transient failures
+    #[serde(default)]
+    pub retry: crate::retry::RetryConfig,
+
+    /// Dead letter queue configuration for failed messages
+    #[serde(default)]
+    pub dlq: crate::dlq::DlqConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
