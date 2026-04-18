@@ -136,14 +136,15 @@
 - Performance regression tests
 
 **Deliverables:**
-- ✅ src/error.rs refactored with typed errors (14+ types, recovery actions)
+- ✅ src/error.rs refactored with typed errors (14+ types, recovery actions, Clone support)
+- ✅ src/retry.rs module (exponential backoff, 7 tests passing)
+- ✅ src/dlq.rs module (DLQ handler with error metadata headers, 3 tests passing)
+- ✅ docs/DELIVERY_GUARANTEES.md (22 KB, 4 commit strategies, 7 failure scenarios)
+- ✅ docs/ERROR_HANDLING.md (23 KB, complete error taxonomy with recovery actions)
 - [ ] src/processor.rs with explicit commit logic
-- [ ] src/retry.rs + src/dlq.rs modules
 - [ ] tests/integration/ directory with 10+ scenarios
-- [ ] docs/DELIVERY_GUARANTEES.md
-- [ ] docs/ERROR_HANDLING.md
 
-**Progress:** 1/6 deliverables complete (error type system)
+**Progress:** 5/7 deliverables complete (71%)
 
 ### Phase 2: DSL Stabilization
 **Goal:** Formal grammar, validation, stable API
@@ -379,9 +380,14 @@ Assuming continuous execution:
 ---
 
 **Started:** 2026-04-18  
-**Status:** In Progress - Phase 1 (1/6 deliverables)  
+**Status:** In Progress - Phase 1 (5/7 deliverables, 71%)  
 **Last Updated:** 2026-04-18  
 **Phase 0 Completed:** 2026-04-18 (2 commits)  
-**Phase 1 Progress:** Error type system complete (1 commit)  
-**Phase 3 Design:** Typed envelope specification complete (1 commit)  
-**Total Commits:** 4
+**Phase 1 Progress:** 
+  - ✅ Error type system (commit 2a76a6e)
+  - ✅ Documentation (commit 1ab77a9)  
+  - ✅ Retry/DLQ modules (commit 0733d49)
+  - 🚧 Processor updates (in progress)
+  - 🚧 Integration tests (pending)
+**Phase 3 Design:** Typed envelope specification complete (commit 2b44809)  
+**Total Commits:** 7
