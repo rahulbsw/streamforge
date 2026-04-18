@@ -1,0 +1,64 @@
+{{- if and .Values.ui.enabled .Values.ui.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.ui.serviceAccount.name }}
+  labels:
+    {{- include "streamforge-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+  {{- with .Values.ui.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+---
+{{- if and .Values.ui.enabled .Values.ui.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "streamforge-operator.fullname" . }}-ui
+  labels:
+    {{- include "streamforge-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+rules:
+  # Access to StreamforgePipeline CRDs
+  - apiGroups: ["streaming.streamforge.dev"]
+    resources: ["streamforgepipelines"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Access to pods for log viewing
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+
+  # Access to namespaces for listing
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+
+  # Access to deployments for pipeline status
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+
+  # Access to services (if needed)
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "streamforge-operator.fullname" . }}-ui
+  labels:
+    {{- include "streamforge-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "streamforge-operator.fullname" . }}-ui
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.ui.serviceAccount.name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

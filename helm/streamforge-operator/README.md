@@ -185,8 +185,65 @@ helm install streamforge-operator . \
   --namespace streamforge-system \
   --set operator.replicas=2 \
   --set defaults.image.tag=0.3.1 \
-  --set monitoring.enabled=true
+  --set monitoring.enabled=true \
+  --set ui.enabled=true
 ```
+
+### UI Configuration
+
+Enable the web UI for managing pipelines:
+
+```yaml
+ui:
+  enabled: true  # Enable UI deployment
+  
+  image:
+    repository: ghcr.io/rahulbsw/streamforge-ui
+    tag: "latest"
+  
+  replicas: 1
+  
+  service:
+    type: NodePort  # or LoadBalancer, ClusterIP
+    port: 3001
+    nodePort: 30001
+  
+  # JWT secret for authentication (change in production!)
+  jwtSecret: "your-secure-random-secret-here"
+  
+  # Ingress configuration
+  ingress:
+    enabled: false
+    className: nginx
+    hosts:
+      - host: streamforge.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+```
+
+**Install with UI:**
+```bash
+helm install streamforge-operator . \
+  --namespace streamforge-system \
+  --create-namespace \
+  --set ui.enabled=true
+```
+
+**Access UI:**
+```bash
+# Minikube
+minikube service streamforge-operator-ui -n streamforge-system
+
+# Port-forward
+kubectl port-forward -n streamforge-system svc/streamforge-operator-ui 3001:3001
+```
+
+**Default credentials:**
+- Username: `admin`
+- Password: `admin`
+
+⚠️ **Change in production!**
 
 ## Pipeline Examples
 
@@ -287,41 +344,59 @@ spec:
                   - us-west-1a
 ```
 
-## Filter DSL Syntax
+## Filter and Transform Syntax (Rhai)
+
+StreamForge uses **Rhai** - a JavaScript-like scripting language for filters and transforms.
+
+### Filter Examples
 
 ```yaml
 # Simple comparison
-filter: "/status,==,active"
+filter: 'msg["status"] == "active"'
 
 # Boolean logic
-filter: "AND:/amount,>,100:/country,==,US"
-filter: "OR:/priority,==,high:/priority,==,urgent"
-filter: "NOT:/status,==,inactive"
+filter: 'msg["amount"] > 100 && msg["country"] == "US"'
+filter: 'msg["priority"] == "high" || msg["priority"] == "urgent"'
+filter: '!msg["inactive"]'
 
 # Regular expressions
-filter: "REGEX:/email,^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$"
+filter: 'msg["email"].matches("^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$")'
 
 # Array operations
-filter: "ARRAY_ALL:/orders,/status,==,completed"
-filter: "ARRAY_ANY:/tags,/name,==,important"
+filter: 'msg["orders"].all(|o| o["status"] == "completed")'
+filter: 'msg["tags"].any(|t| t == "important")'
+
+# Key and header filtering
+filter: 'key.starts_with("premium-")'
+filter: 'headers["x-tenant"] == "production"'
 ```
 
-## Transform DSL Syntax
+### Transform Examples
 
 ```yaml
-# Extract fields
-transform: "EXTRACT:/user/email,userEmail"
+# Extract field
+transform: 'msg["user"]["email"]'
 
 # Construct object
-transform: "CONSTRUCT:output,/id:userId,/name:userName,/email:userEmail"
+transform: |
+  #{
+    userId: msg["id"],
+    userName: msg["name"],
+    userEmail: msg["email"]
+  }
 
 # Array map
-transform: "ARRAY_MAP:/items,/price,itemPrices"
+transform: 'msg["items"].map(|item| item["price"])'
 
 # Arithmetic
-transform: "ADD:/price,/tax,totalPrice"
-transform: "MUL:/quantity,/price,totalCost"
+transform: 'msg["price"] + msg["tax"]'
+transform: 'msg["quantity"] * msg["price"]'
 ```
+
+**See also:**
+- [RHAI_QUICK_REFERENCE.md](../../docs/RHAI_QUICK_REFERENCE.md)
+- [ADVANCED_FILTERS.md](../../docs/ADVANCED_FILTERS.md)
+- [KEY_AND_HEADER_FILTERING.md](../../docs/KEY_AND_HEADER_FILTERING.md)
 
 ## Monitoring
 
