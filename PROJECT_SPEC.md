@@ -347,34 +347,261 @@ The end result should feel like a compact rule language for replication pipeline
 
 ## 9. Envelope and Transformation Contract
 
-The product must define a deterministic order for mutation.
+The product must define a deterministic order for mutation with explicit type-safe envelope transformations.
+
+### Typed Envelope Design (v1.0+)
+
+**Core Principle:** The envelope type signature determines what operations are valid.
+
+#### Generic Envelope Type
+
+```rust
+pub struct Envelope<K, V> {
+    pub key: Option<K>,
+    pub value: V,
+    pub headers: HashMap<String, Vec<u8>>,
+    pub timestamp: Option<i64>,
+    pub partition: Option<i32>,
+    pub offset: Option<i64>,
+    pub topic: Option<String>,
+}
+```
+
+Where `K` and `V` can be:
+- `Bytes` (raw bytes, no deserialization)
+- `String` (UTF-8 validated string)
+- `Json` (parsed JSON Value)
+
+#### Type-Driven Pipeline
+
+**1. Passthrough / Header-only operations**
+```
+Envelope<Bytes, Bytes>
+```
+- **Use case:** High-performance forwarding with header-based routing
+- **Valid operations:** Header filters, header transforms, timestamp control
+- **Invalid operations:** JSON path filters, value transforms (compile error)
+- **Performance:** Zero deserialization overhead
+
+**2. Key-based routing (regex, prefix, suffix)**
+```
+Envelope<String, Bytes>
+```
+- **Use case:** Route by key pattern without parsing value
+- **Valid operations:** Key regex filters, key prefix/suffix filters, header operations
+- **Invalid operations:** Value JSON filters, value transforms
+- **Performance:** Key deserialized to UTF-8, value stays as bytes
+
+**3. Key-based JSON filtering**
+```
+Envelope<Json, Bytes>
+```
+- **Use case:** Route by key JSON fields (e.g., `/tenantId` in key)
+- **Valid operations:** JSON path filters on key, key transforms, header operations
+- **Invalid operations:** Value JSON filters
+- **Performance:** Key parsed as JSON, value stays as bytes
+
+**4. Value-only JSON processing (most common)**
+```
+Envelope<Bytes, Json>
+```
+- **Use case:** Filter/transform message payload, key passthrough
+- **Valid operations:** All JSON filters/transforms on value, header operations
+- **Invalid operations:** JSON operations on key
+- **Performance:** Value parsed as JSON, key stays as bytes (typical case)
+
+**5. Full JSON processing (key + value)**
+```
+Envelope<Json, Json>
+```
+- **Use case:** Complex routing based on both key and value JSON
+- **Valid operations:** All JSON filters/transforms on both key and value
+- **Invalid operations:** None (most powerful, most expensive)
+- **Performance:** Both key and value parsed as JSON
+
+#### Type Transitions
+
+Pipeline stages transition between envelope types:
+
+```rust
+// Initial consumption: raw bytes
+Envelope<Bytes, Bytes>
+
+// Deserialize value for filtering
+→ Envelope<Bytes, Json>  // deserialize_value()
+
+// Apply JSON filter on value
+→ Envelope<Bytes, Json>  // filter still has same type
+
+// Extract key from value
+→ Envelope<Json, Json>   // key_from_value("/userId")
+
+// Serialize key back for production
+→ Envelope<Bytes, Json>  // serialize_key()
+
+// Produce to Kafka
+→ (raw bytes sent)
+```
+
+#### DSL Type Requirements
+
+Filters and transforms declare their type requirements:
+
+```yaml
+# Type: Envelope<Bytes, Bytes> → Envelope<Bytes, Bytes>
+filter: "HEADER:x-tenant,==,production"
+
+# Type: Envelope<String, _> → Envelope<String, _>
+filter: "KEY_PREFIX:user-"
+
+# Type: Envelope<_, Json> → Envelope<_, Json>
+filter: "/status,==,active"
+
+# Type: Envelope<Json, _> → Envelope<Json, _>
+filter: "KEY:/tenantId,==,prod"
+
+# Type: Envelope<_, Json> → Envelope<_, Json>
+transform: "EXTRACT:/user/email,userEmail"
+
+# Type: Envelope<Bytes, Json> → Envelope<Json, Json>
+key_transform: "/userId"  // deserializes key
+```
+
+#### Type Safety Benefits
+
+1. **Compile-time guarantees:** Can't apply JSON filters on `Bytes` type
+2. **Performance transparency:** Type signature shows deserialization cost
+3. **Clear semantics:** `Envelope<Bytes, Json>` means "key passthrough, value parsed"
+4. **Optimization opportunities:** Skip deserialization when not needed
+5. **Better error messages:** "Cannot apply JSON filter on Envelope<Bytes, _>"
+
+#### Performance Characteristics by Envelope Type
+
+| Envelope Type | Deserialization Cost | Typical Throughput | Use When |
+|---------------|---------------------|-------------------|----------|
+| `Envelope<Bytes, Bytes>` | Zero | ~100K+ msg/s | Header-only routing, passthrough mirroring |
+| `Envelope<String, Bytes>` | Key only (~100ns) | ~80K msg/s | Key regex routing, partition by key pattern |
+| `Envelope<Json, Bytes>` | Key only (~500ns) | ~60K msg/s | Route by key JSON fields (rare) |
+| `Envelope<Bytes, Json>` | Value only (~800ns) | ~35K msg/s | **Most common**: filter/transform payload |
+| `Envelope<Json, Json>` | Both (~1.3µs) | ~25K msg/s | Complex routing on key+value |
+
+**Rule of thumb:** Use the least powerful type that satisfies your requirements.
+
+#### Common Pipeline Patterns
+
+**Pattern 1: High-throughput passthrough**
+```yaml
+# Envelope<Bytes, Bytes> → no deserialization
+routing_type: header
+destinations:
+  - filter: "HEADER:x-tenant,==,prod"
+    output: prod-events
+  - filter: "HEADER:x-tenant,==,staging"
+    output: staging-events
+```
+**Throughput:** ~100K msg/s (header-only filtering)
+
+**Pattern 2: Key-based routing**
+```yaml
+# Envelope<String, Bytes> → deserialize key only
+routing_type: filter
+destinations:
+  - filter: "KEY_PREFIX:user-"
+    output: user-events
+  - filter: "KEY_PREFIX:admin-"
+    output: admin-events
+```
+**Throughput:** ~80K msg/s (key string matching)
+
+**Pattern 3: Standard JSON filtering (most common)**
+```yaml
+# Envelope<Bytes, Json> → deserialize value only
+routing_type: filter
+destinations:
+  - filter: "/status,==,active"
+    transform: "EXTRACT:/user/email,userEmail"
+    output: active-users
+```
+**Throughput:** ~35K msg/s (JSON parsing + filtering)
+
+**Pattern 4: Complex key+value routing**
+```yaml
+# Envelope<Json, Json> → deserialize both
+routing_type: filter
+destinations:
+  - filter: "AND:KEY:/tenantId,==,prod:/status,==,active"
+    output: prod-active-events
+```
+**Throughput:** ~25K msg/s (double JSON parsing)
+
+#### Migration Path from Current Implementation
+
+**Current (v0.4.0):**
+```rust
+pub struct MessageEnvelope {
+    pub key: Option<Value>,  // always JSON if present
+    pub value: Value,        // always JSON
+    // ...
+}
+```
+**Problem:** Always deserializes key+value as JSON, even for passthrough
+
+**Future (v1.0+):**
+```rust
+pub struct Envelope<K, V> {
+    pub key: Option<K>,      // can be Bytes, String, or Json
+    pub value: V,            // can be Bytes, String, or Json
+    // ...
+}
+```
+**Benefit:** Pay deserialization cost only when needed
 
 ### Required mutation order
 
 Recommended order:
 
-1. parse input payload
-2. evaluate filter
-3. compute derived fields
-4. perform enrichment/cache lookup
-5. construct new payload
-6. mutate key
-7. mutate headers
-8. mutate timestamp
-9. select destination topic/partitioning info
-10. produce
+1. consume raw message → `Envelope<Bytes, Bytes>`
+2. deserialize key/value as needed → `Envelope<K, V>` (typed)
+3. evaluate filter (type-checked at compile time)
+4. compute derived fields
+5. perform enrichment/cache lookup
+6. construct new payload (may change type)
+7. mutate key (may change type)
+8. mutate headers
+9. mutate timestamp
+10. serialize key/value → `Envelope<Bytes, Bytes>`
+11. select destination topic/partitioning info
+12. produce
 
 ### Required policies
 
 Define explicit behavior for:
 
-* missing field access
-* null values
-* invalid types
-* transform failures
-* header overwrite behavior
-* timestamp override behavior
-* key derivation failure
+* missing field access → error vs default vs skip
+* null values → passthrough vs error vs default
+* invalid types → error (compile-time for type mismatches)
+* transform failures → skip message, send to DLQ, or halt
+* header overwrite behavior → last-write-wins vs error on duplicate
+* timestamp override behavior → explicit vs preserve vs current
+* key derivation failure → error vs null key
+* deserialization failures → skip message and send to DLQ
+
+### Implementation Strategy
+
+**Phase 1 (v1.0-alpha.2):**
+- Keep current `MessageEnvelope` (key: Option<Value>, value: Value)
+- Document type requirements in DSL_SPEC.md
+- Add validation: error if JSON filter applied but value not parseable
+
+**Phase 2 (v1.0-beta.1):**
+- Implement `Envelope<K, V>` generic type
+- Add type transitions (deserialize_key, deserialize_value)
+- Refactor DSL parser to track type requirements
+
+**Phase 3 (v1.0):**
+- Full type-safe pipeline with compile-time checks
+- Optimize: skip deserialization when type is `Bytes`
+- Performance testing: measure overhead of type system
 
 ---
 
@@ -602,19 +829,30 @@ Exit criteria:
 
 Goals:
 
-* define mutation order
+* implement typed envelope system `Envelope<K, V>`
+* define type transitions (Bytes → String → Json)
+* optimize deserialization (skip when type is Bytes)
+* define mutation order with type safety
 * finalize cache semantics
 * finalize routing precedence
 * define missing/null handling
+* document envelope type requirements for all DSL operations
 
 Deliverables:
 
-* documented envelope contract
-* enrichment tests
+* `src/envelope.rs` refactored to `Envelope<K, V>` generic type
+* type transition functions (deserialize_key, deserialize_value, serialize_key, serialize_value)
+* DSL type requirements documented in DSL_SPEC.md
+* performance benchmarks (deserialization overhead by envelope type)
+* documented envelope contract and mutation order
+* enrichment tests with type-safe lookups
 * route precedence tests
 
 Exit criteria:
 
+* typed envelope system implemented and tested
+* DSL operations enforce type requirements
+* performance optimizations validated (skip deserialization for Envelope<Bytes, Bytes>)
 * advanced runtime behavior is deterministic and documented
 
 ### Phase 4 — Operability and deployment
