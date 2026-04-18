@@ -1,12 +1,12 @@
 use thiserror::Error;
 
 /// StreamForge error types with context and recovery actions
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 #[allow(clippy::enum_variant_names)]
 pub enum MirrorMakerError {
     // ========== Kafka Errors ==========
     #[error("Kafka error: {0}")]
-    Kafka(#[from] rdkafka::error::KafkaError),
+    Kafka(String),  // Store as String for Clone
 
     #[error("Kafka producer error: {message}")]
     KafkaProducer {
@@ -33,11 +33,8 @@ pub enum MirrorMakerError {
     },
 
     // ========== Serialization Errors ==========
-    #[error("JSON serialization error: {source}")]
-    Serialization {
-        #[from]
-        source: serde_json::Error,
-    },
+    #[error("JSON serialization error: {0}")]
+    Serialization(String),  // Store as String for Clone
 
     #[error("Message deserialization failed: {message}")]
     MessageDeserialization {
@@ -151,11 +148,8 @@ pub enum MirrorMakerError {
     },
 
     // ========== I/O Errors ==========
-    #[error("IO error: {source}")]
-    Io {
-        #[from]
-        source: std::io::Error,
-    },
+    #[error("IO error: {0}")]
+    Io(String),  // Store as String for Clone
 
     // ========== Retry and DLQ Errors ==========
     #[error("Retry exhausted: {message}")]
@@ -176,6 +170,25 @@ pub enum MirrorMakerError {
     Generic(String),
 }
 
+// From implementations for error types converted to String for Clone
+impl From<rdkafka::error::KafkaError> for MirrorMakerError {
+    fn from(e: rdkafka::error::KafkaError) -> Self {
+        MirrorMakerError::Kafka(e.to_string())
+    }
+}
+
+impl From<serde_json::Error> for MirrorMakerError {
+    fn from(e: serde_json::Error) -> Self {
+        MirrorMakerError::Serialization(e.to_string())
+    }
+}
+
+impl From<std::io::Error> for MirrorMakerError {
+    fn from(e: std::io::Error) -> Self {
+        MirrorMakerError::Io(e.to_string())
+    }
+}
+
 impl MirrorMakerError {
     /// Returns true if the error is likely transient and can be retried
     pub fn is_recoverable(&self) -> bool {
@@ -186,7 +199,7 @@ impl MirrorMakerError {
             MirrorMakerError::OffsetCommit { .. } => true, // Always retry commits
 
             // Network/IO errors are often transient
-            MirrorMakerError::Io { .. } => true,
+            MirrorMakerError::Io(_) => true,
             MirrorMakerError::Redis { .. } => true,
             MirrorMakerError::Cache { .. } => true,
 
@@ -208,14 +221,6 @@ impl MirrorMakerError {
             MirrorMakerError::TransformEvaluation { .. } => false,
             MirrorMakerError::JsonPathNotFound { .. } => false,
 
-            // Default: check underlying errors
-            MirrorMakerError::Kafka(source) => {
-                use rdkafka::error::KafkaError;
-                matches!(
-                    source,
-                    KafkaError::MessageProduction(_) | KafkaError::Global(_)
-                )
-            }
             _ => false,
         }
     }

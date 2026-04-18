@@ -44,6 +44,8 @@ config = "0.14"
 async-trait = "0.1"
 bytes = "1.7"
 regex = "1.10"  # Regular expressions
+rand = "0.8"    # Random number generation for jitter
+chrono = "0.4"  # Date/time for timestamps
 
 # Hashing functions
 md-5 = "0.10"

@@ -306,7 +306,7 @@ impl KafkaSink {
                     "Failed to flush producer for '{}': {}",
                     self.output_template, e
                 );
-                MirrorMakerError::Kafka(e)
+                MirrorMakerError::Kafka(e.to_string())
             })
     }
 }

@@ -288,7 +288,7 @@ async fn main() -> Result<()> {
                             error!("Kafka consumer error: {}", e);
                             stats.error();
                             METRICS.processing_errors.with_label_values(&[labels::ERROR_TYPE_KAFKA]).inc();
-                            Err(MirrorMakerError::Kafka(e))
+                            Err(MirrorMakerError::Kafka(e.to_string()))
                         }
                     }
                 }
@@ -330,7 +330,7 @@ async fn main() -> Result<()> {
                                 error!("CRITICAL: Unable to commit offsets after {} attempts. \
                                         Halting to prevent data loss. Manual intervention required.",
                                         MAX_COMMIT_RETRIES);
-                                return Err(MirrorMakerError::Kafka(e));
+                                return Err(MirrorMakerError::Kafka(e.to_string()));
                             }
 
                             // Exponential backoff

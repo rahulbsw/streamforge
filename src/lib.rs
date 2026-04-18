@@ -2,6 +2,7 @@ pub mod cache;
 pub mod cache_backend;
 pub mod compression;
 pub mod config;
+pub mod dlq;
 pub mod envelope;
 pub mod error;
 pub mod filter;
@@ -12,6 +13,7 @@ pub mod metrics;
 pub mod observability;
 pub mod partitioner;
 pub mod processor;
+pub mod retry;
 
 pub use cache::{
     CacheConfig, CacheManager, CacheStats, LookupCache, SyncCacheManager, SyncLookupCache,
@@ -22,8 +24,10 @@ pub use config::{
     HeaderTransformConfig, KafkaCacheConfig, LocalCacheConfig, MirrorMakerConfig, RedisCacheConfig,
     RoutingConfig,
 };
+pub use dlq::{DeadLetterQueue, DlqConfig, DlqMessage};
 pub use envelope::MessageEnvelope;
-pub use error::{MirrorMakerError, Result};
+pub use error::{MirrorMakerError, RecoveryAction, Result};
+pub use retry::{retry_with_backoff, RetryConfig, RetryPolicy};
 pub use filter::{
     AndFilter, CacheLookupTransform, CachePutTransform, ConcatPart, ConcatTransform,
     EnvelopeTransform, Filter, HashTransform, HeaderCopyTransform, HeaderExistsFilter,
