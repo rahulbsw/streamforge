@@ -13,9 +13,9 @@ StreamForge is a high-performance Kafka streaming toolkit written in Rust. It pr
 
 | | |
 |---|---|
-| **Version** | 0.4.0 |
-| **Status** | Production Ready ✅ |
-| **Last Updated** | 2026-04-04 |
+| **Version** | 1.0.0-alpha.1 |
+| **Status** | v1.0 Hardening Phase 🚧 |
+| **Last Updated** | 2026-04-18 |
 | **License** | Apache 2.0 |
 | **Repository** | [github.com/rahulbsw/streamforge](https://github.com/rahulbsw/streamforge) |
 

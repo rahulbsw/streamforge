@@ -90,18 +90,27 @@ Streamforge is a high-performance Kafka streaming toolkit that mirrors, filters,
 
 ### 2. Custom DSL (No External Dependencies)
 
-**Decision:** Build custom filtering/transformation DSL instead of using JSLT/JavaScript
+**Decision:** Build custom string-based filtering/transformation DSL instead of using JSLT/JavaScript/Rhai
 
 **Rationale:**
 - JSLT (Java) and JavaScript engines have significant overhead
+- Rhai (Rust scripting) adds ~300KB binary size and runtime complexity
 - Custom DSL optimized for message streaming patterns
 - Sub-microsecond performance critical for throughput
-- Compile-time validation and type safety
+- Explicit syntax matches Kafka streaming patterns
 
 **Results:**
 - Simple filters: 44-50ns (vs ~2,000ns for JSLT)
 - Transforms: 810-1,633ns (vs ~40,000ns for JSLT)
 - Zero external dependencies for core DSL
+- Colon-delimited syntax (e.g., `/path,==,value`, `AND:cond1:cond2`)
+
+**v1.0 Gaps:**
+- ❌ No formal grammar (EBNF)
+- ❌ Parser lacks validation layer (errors found at runtime)
+- ❌ No AST representation
+- ❌ Error messages lack context
+- ⏭️ Planned: Separate parser/AST/validator/evaluator in Phase 2
 
 ### 3. Async/Await Architecture
 
@@ -147,6 +156,11 @@ PARALLELISM_FACTOR = 10         // threads × 10 = concurrency
 commit_strategy:
   manual_commit: true    # At-least-once
   commit_mode: sync      # Async or Sync
+
+dead_letter_queue:
+  enabled: true
+  topic: streamforge-dlq
+  max_retries: 3
 ```
 
 **Rationale:**
@@ -157,6 +171,13 @@ commit_strategy:
 **Performance:**
 - At-least-once: 10,933 msg/s with full durability
 - At-most-once: 11,200 msg/s (~3% overhead for guarantees)
+
+**v1.0 Gaps:**
+- ❌ Commit semantics not formally documented
+- ❌ Retry backoff policy undefined
+- ❌ DLQ message format unspecified
+- ❌ No integration tests for failure scenarios
+- ⏭️ Planned: docs/DELIVERY_GUARANTEES.md + tests in Phase 1
 
 ### 6. Multi-Destination Routing
 
@@ -463,24 +484,130 @@ Deployment
 
 ---
 
-## Future Architecture Considerations
+## Module Organization (v1.0.0-alpha.1)
+
+```
+src/
+├── main.rs                    # Entry point, tokio runtime setup
+├── lib.rs                     # Public API exports
+├── config.rs                  # YAML/JSON configuration parsing
+├── error.rs                   # Error types (⚠️ currently string-based)
+│
+├── processor.rs               # Message processing traits (~500 lines)
+├── filter_parser.rs           # DSL parser (~1800 lines)
+│
+├── filter/
+│   ├── mod.rs                 # Filter and Transform traits
+│   ├── envelope_filter.rs     # Envelope-aware filters
+│   └── envelope_transform.rs  # Envelope transformations
+│
+├── kafka/
+│   ├── mod.rs                 # Kafka client abstractions
+│   └── sink.rs                # Producer wrapper (~300 lines)
+│
+├── envelope.rs                # MessageEnvelope struct
+├── partitioner.rs             # Partitioning strategies
+├── compression.rs             # Compression codec support
+│
+├── cache.rs                   # Cache trait
+├── cache_backend.rs           # Cache implementations (~600 lines)
+├── hash.rs                    # Hashing functions (MD5/SHA/Murmur)
+│
+└── observability/
+    ├── mod.rs                 # Observability exports
+    ├── metrics.rs             # Prometheus metric definitions
+    ├── server.rs              # HTTP metrics endpoint
+    └── lag_monitor.rs         # Consumer lag tracking
+```
+
+**Total:** ~15,638 lines of Rust code (as of v0.4.0)
+
+### Key Module Dependencies
+
+- **filter_parser.rs** → serde_json, regex (no AST layer yet)
+- **processor.rs** → filter/, kafka/sink
+- **kafka/sink.rs** → rdkafka, compression
+- **observability/** → prometheus, axum
+- **cache_backend.rs** → moka, redis (optional), dashmap
+
+## v1.0 Roadmap and Known Gaps
+
+### Phase 1: Core Engine Hardening (IN PROGRESS)
+
+**Critical gaps blocking v1.0:**
+
+1. **Error Type System** (`src/error.rs`)
+   - Currently: String-based errors (`anyhow::Error`)
+   - Needed: Typed error hierarchy with context
+   - Deliverable: Refactored `src/error.rs` + `docs/ERROR_HANDLING.md`
+
+2. **Delivery Semantics** (`src/processor.rs`)
+   - Currently: At-least-once implicit, no tests
+   - Needed: Explicit commit strategies, offset management tests
+   - Deliverable: `docs/DELIVERY_GUARANTEES.md` + integration tests
+
+3. **Retry and DLQ** (`src/retry.rs`, `src/dlq.rs`)
+   - Currently: Basic implementation, semantics undefined
+   - Needed: Retry policy (count, backoff), DLQ format
+   - Deliverable: Modules + metrics + tests
+
+4. **Integration Tests** (`tests/integration/`)
+   - Currently: Only unit tests (92 passing)
+   - Needed: End-to-end tests with Testcontainers
+   - Deliverable: 10+ integration scenarios, failure injection
+
+### Phase 2: DSL Stabilization
+
+**DSL gaps:**
+
+5. **Formal Grammar** (`docs/DSL_SPEC.md`)
+   - Currently: Informal syntax examples
+   - Needed: EBNF grammar, operator precedence, escaping rules
+   - Deliverable: Complete DSL specification
+
+6. **Parser Refactor** (`src/dsl/`)
+   - Currently: `filter_parser.rs` monolith
+   - Needed: Separate parser/AST/validator/evaluator
+   - Deliverable: `src/dsl/ast.rs`, `src/dsl/parser.rs`, `src/dsl/validator.rs`
+
+7. **Config Validation** (`src/bin/validate.rs`)
+   - Currently: No pre-deploy validation
+   - Needed: CLI tool to validate config files
+   - Deliverable: `streamforge validate config.yaml` command
+
+### Phase 3-6: See V1_PLAN.md
+
+**Phases:**
+- Phase 3: Envelope/Enrichment/Runtime Maturity
+- Phase 4: Operability and Deployment
+- Phase 5: UI/Operator Polish
+- Phase 6: v1.0 Release Readiness
+
+**Estimated total:** ~30 hours of autonomous execution
+
+## Future Architecture Considerations (Post v1.0)
 
 ### Planned Improvements
 
-1. **Dynamic Reconfiguration**
+1. **Exactly-Once Semantics**
+   - Transactional producers (Kafka 3.3+)
+   - Idempotent writes
+   - EOS integration tests
+
+2. **Dynamic Reconfiguration**
    - Reload config without restart
    - Add/remove destinations at runtime
 
-2. **Advanced Routing**
+3. **Advanced Routing**
    - Content-based routing with complex rules
    - Priority queues for message ordering
 
-3. **Enhanced Observability**
-   - Prometheus metrics export
+4. **Enhanced Observability**
+   - Distributed tracing with trace IDs
    - OpenTelemetry integration
-   - Distributed tracing
+   - Grafana dashboard templates
 
-4. **Advanced Caching**
+5. **Advanced Caching**
    - Additional cache backends (Memcached, DynamoDB)
    - TTL-based expiration
    - Cache warming strategies
@@ -507,4 +634,4 @@ Deployment
 ---
 
 **Last Updated:** April 2026  
-**Version:** 0.3.0
+**Version:** 1.0.0-alpha.1

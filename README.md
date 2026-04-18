@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0--alpha.1-orange.svg)](CHANGELOG.md)
 [![CI](https://github.com/rahulbsw/streamforge/workflows/CI/badge.svg)](https://github.com/rahulbsw/streamforge/actions)
 [![Tests](https://img.shields.io/badge/tests-92%20passing-brightgreen.svg)](https://github.com/rahulbsw/streamforge/actions)
 [![CVEs](https://img.shields.io/badge/CVEs-0-brightgreen.svg)](https://github.com/rahulbsw/streamforge)
