@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-**Current Version:** 0.4.0  
+**Current Version:** 1.0.0-alpha.1  
 **Target Version:** 1.0.0  
 **Branch:** `improvement`  
 **Execution Mode:** Continuous autonomous flow through defined phases
@@ -86,22 +86,26 @@
 
 ## Phase Execution Plan
 
-### Phase 0: Repository Coherence (IN PROGRESS)
+### Phase 0: Repository Coherence (COMPLETE ✅)
 **Goal:** Clean scope, establish baseline, create tracking
 
 - [x] Analyze current codebase structure
 - [x] Document current state and gaps
-- [ ] Clean up stale branches and PRs
-- [ ] Create V1_PLAN.md (this file)
-- [ ] Update Cargo.toml to 1.0.0-alpha.1
-- [ ] Create ARCHITECTURE.md from code
-- [ ] Audit and fix all doc inconsistencies
+- [x] Clean up merged branches (feat/observability, feat/v0.5-mm2)
+- [x] Create V1_PLAN.md (this file)
+- [x] Update Cargo.toml to 1.0.0-alpha.1
+- [x] Update ARCHITECTURE.md with v1.0 context
+- [x] Audit and fix doc version inconsistencies
+- [x] Create DSL simplification inventory
 
 **Deliverables:**
-- V1_PLAN.md
-- ARCHITECTURE.md
-- Clean branch state
-- Version bumped to 1.0.0-alpha.1
+- ✅ V1_PLAN.md (comprehensive 6-phase roadmap)
+- ✅ ARCHITECTURE.md (updated with v1.0 gaps and module breakdown)
+- ✅ Clean branch state (improvement branch active)
+- ✅ Version bumped to 1.0.0-alpha.1
+- ✅ docs/DSL_SIMPLIFICATION_INVENTORY.md
+- ✅ docs/CHANGELOG.md updated
+- ✅ docs/PROJECT_SUMMARY.md updated
 
 ### Phase 1: Core Engine Hardening
 **Goal:** Deterministic, testable, documented data plane
@@ -308,8 +312,11 @@
 ## Current Phase Status
 
 **Phase 0: Repository Coherence**  
-Status: ✅ 50% complete  
-Next: Clean branches, version bump, architecture doc
+Status: ✅ 100% complete (2026-04-18)  
+
+**Phase 1: Core Engine Hardening**  
+Status: 🚧 Starting next  
+Focus: Error types, delivery semantics, retry/DLQ, integration tests
 
 ## Execution Principles
 
@@ -347,5 +354,7 @@ Assuming continuous execution:
 ---
 
 **Started:** 2026-04-18  
-**Status:** In Progress - Phase 0  
-**Last Updated:** 2026-04-18 (Phase 0 - Initial Plan)
+**Status:** In Progress - Phase 1  
+**Last Updated:** 2026-04-18  
+**Phase 0 Completed:** 2026-04-18  
+**Commits:** 2 (version bump + DSL inventory)
