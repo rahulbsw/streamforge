@@ -1,5 +1,6 @@
 mod envelope_filter;
 mod envelope_transform;
+mod string_transforms;
 
 pub use envelope_filter::{
     HeaderExistsFilter, HeaderFilter, KeyContainsFilter, KeyExistsFilter, KeyMatchesFilter,
@@ -12,6 +13,12 @@ pub use envelope_transform::{
     HeaderSetTransform, KeyConstantTransform, KeyConstructTransform, KeyFromTransform,
     KeyHashTransform, KeyTemplateTransform, TimestampAddTransform, TimestampCurrentTransform,
     TimestampFromTransform, TimestampPreserveTransform, TimestampSubtractTransform,
+};
+
+pub use string_transforms::{
+    JoinTransform, PadLeftTransform, PadRightTransform, ReplaceTransform, SplitTransform,
+    StringLengthTransform, SubstringTransform, ToFloatTransform, ToIntTransform,
+    ToStringTransform, TrimEndTransform, TrimStartTransform,
 };
 
 use crate::cache::SyncLookupCache;

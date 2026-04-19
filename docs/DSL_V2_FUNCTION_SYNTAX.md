@@ -29,6 +29,50 @@ filter: "or(
 
 ### Filters
 
+#### Dollar Syntax ($) - Shorthand for Field Access
+
+The `$` symbol provides a concise alternative to `field()` for JSON path access:
+
+```javascript
+// Simple field access
+$status == 'active'              // Equivalent to: field('/status') == 'active'
+$count > 100                     // Equivalent to: field('/count') > 100
+
+// Dot notation for nested paths
+$user.email == 'admin@example.com'     // Equivalent to: field('/user/email') == ...
+$data.user.profile.age > 18            // Equivalent to: field('/data/user/profile/age') > 18
+
+// Explicit form for special characters (when $ is part of the path name)
+$('/field$1/name') == 'test'           // Path contains $ character
+$('/field-with-dash') == 'value'       // Path contains dash
+$('/field.with.dots') == 'value'       // Path contains dots
+$('/field:colon') == 'value'           // Path contains colon
+
+// Use in boolean logic
+and($status == 'active', $count > 10)
+or($user.active == true, $user.status == 'trial')
+
+// All comparison operators supported
+$value == 10
+$value != 10
+$value > 10
+$value >= 10
+$value < 10
+$value <= 10
+
+// Boolean and null literals
+$active == true
+$inactive == false
+$deleted_at == null
+```
+
+**When to use `$` vs `field()`:**
+- Use `$` for concise, readable expressions with simple paths
+- Use `field()` when you need explicit method chaining (future feature)
+- Use `$('/explicit/path')` when the path contains special characters like `$`, `-`, `.`, or `:`
+
+#### Traditional Field Comparisons
+
 ```javascript
 // Boolean logic
 and(expr1, expr2, ...)

@@ -96,6 +96,8 @@ enum Token {
     Colon,    // :
     Arrow,    // =>
     Question, // ??
+    Dollar,   // $
+    Dot,      // .
 
     // Delimiters
     LParen,   // (
@@ -376,6 +378,20 @@ impl Lexer {
                     ));
                 }
             }
+            '$' => {
+                self.advance();
+                Token::Dollar
+            }
+            '.' => {
+                // Check if it's part of a number (e.g., .5) or a dot operator
+                if self.peek_char(1).map_or(false, |c| c.is_ascii_digit()) {
+                    // It's a number like .5
+                    Token::Number(self.read_number())
+                } else {
+                    self.advance();
+                    Token::Dot
+                }
+            }
             '\'' | '"' => Token::String(self.read_string(ch)?),
             _ if ch.is_ascii_digit() => Token::Number(self.read_number()),
             _ if ch.is_alphabetic() || ch == '_' => {
@@ -530,6 +546,7 @@ impl ParserV2 {
             Token::Or => self.parse_or_filter()?,
             Token::Not => self.parse_not_filter()?,
             Token::Field => self.parse_field_comparison()?,
+            Token::Dollar => self.parse_dollar_comparison()?,
             Token::Exists => self.parse_exists_filter()?,
             Token::NotExists => self.parse_not_exists_filter()?,
             Token::IsNull => self.parse_is_null_filter()?,
@@ -623,6 +640,92 @@ impl ParserV2 {
             _ => {
                 return Err(ParseError::new(
                     "Expected comparison operator after field()",
+                    self.current_span(),
+                    &self.input,
+                ));
+            }
+        };
+        self.advance()?;
+
+        // Parse value
+        let value = self.parse_literal()?;
+
+        Ok(FilterExpr::JsonPath { path, op, value })
+    }
+
+    fn parse_dollar_comparison(&mut self) -> Result<FilterExpr, ParseError> {
+        self.expect(Token::Dollar)?;
+
+        // Check if it's $(...) or $identifier
+        let path = if self.current_token == Token::LParen {
+            // $('/explicit/path') form
+            self.advance()?;
+            let path = match &self.current_token {
+                Token::String(s) => s.clone(),
+                _ => {
+                    return Err(ParseError::new(
+                        "Expected string path in $()",
+                        self.current_span(),
+                        &self.input,
+                    ));
+                }
+            };
+            self.advance()?;
+            self.expect(Token::RParen)?;
+            path
+        } else {
+            // $identifier or $identifier.field.subfield form
+            let mut parts = vec![];
+
+            // Read first identifier
+            match &self.current_token {
+                Token::Identifier(id) => {
+                    parts.push(id.clone());
+                    self.advance()?;
+                }
+                _ => {
+                    return Err(ParseError::new(
+                        "Expected identifier after $",
+                        self.current_span(),
+                        &self.input,
+                    ));
+                }
+            }
+
+            // Check for dot notation: $field.subfield.name
+            while self.current_token == Token::Dot {
+                self.advance()?; // Skip dot
+
+                match &self.current_token {
+                    Token::Identifier(id) => {
+                        parts.push(id.clone());
+                        self.advance()?;
+                    }
+                    _ => {
+                        return Err(ParseError::new(
+                            "Expected identifier after .",
+                            self.current_span(),
+                            &self.input,
+                        ));
+                    }
+                }
+            }
+
+            // Convert $field.subfield to /field/subfield
+            format!("/{}", parts.join("/"))
+        };
+
+        // Now expect comparison operator
+        let op = match &self.current_token {
+            Token::Eq => ComparisonOp::Eq,
+            Token::Ne => ComparisonOp::Ne,
+            Token::Gt => ComparisonOp::Gt,
+            Token::Ge => ComparisonOp::Ge,
+            Token::Lt => ComparisonOp::Lt,
+            Token::Le => ComparisonOp::Le,
+            _ => {
+                return Err(ParseError::new(
+                    "Expected comparison operator after $field",
                     self.current_span(),
                     &self.input,
                 ));

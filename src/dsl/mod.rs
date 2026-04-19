@@ -19,6 +19,9 @@ mod parser_comprehensive_tests;
 #[cfg(test)]
 mod parser_v2_integration_tests;
 
+#[cfg(test)]
+mod dollar_syntax_tests;
+
 // Re-exports for convenience
 pub use ast::{
     ArithmeticOp, ArithmeticOperand, ComparisonOp, DslExpr, FilterExpr, HashAlgorithm,

@@ -109,7 +109,7 @@ pub fn parse_filter_expr(input: &str) -> Result<Node<FilterExpr>, ParseError> {
     let trimmed = input.trim();
 
     // Check for function-style syntax (v2)
-    // Function-style starts with: and(, or(, not(, field(, exists(, is_null(, etc.
+    // Function-style starts with: and(, or(, not(, field(, exists(, is_null(, $(, $identifier, etc.
     if trimmed.starts_with("and(") ||
        trimmed.starts_with("or(") ||
        trimmed.starts_with("not(") ||
@@ -121,7 +121,9 @@ pub fn parse_filter_expr(input: &str) -> Result<Node<FilterExpr>, ParseError> {
        trimmed.starts_with("is_empty(") ||
        trimmed.starts_with("is_not_empty(") ||
        trimmed.starts_with("is_blank(") ||
-       trimmed.starts_with("regex(") {
+       trimmed.starts_with("regex(") ||
+       trimmed.starts_with("$(") ||
+       (trimmed.starts_with('$') && trimmed.len() > 1 && trimmed.chars().nth(1).unwrap().is_alphabetic()) {
         // Use v2 parser (function-style)
         return super::parser_v2::parse_filter_expr_v2(input);
     }

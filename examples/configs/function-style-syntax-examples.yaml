@@ -10,6 +10,58 @@ threads: 2
 routing:
   routing_type: "filter"
   destinations:
+    # ====================================================================
+    # $ SHORTHAND SYNTAX - Concise field access (v2.1)
+    # ====================================================================
+
+    # Example 1a: Simple field with $ syntax
+    - output: "active-users-v2"
+      filter: "$status == 'active'"
+      transform: "field('/user/id')"
+
+    # Example 1b: Dot notation for nested paths
+    - output: "verified-emails"
+      filter: "$user.email_verified == true"
+      transform: "$user.id"
+
+    # Example 1c: Deep nested paths with dots
+    - output: "adults"
+      filter: "$data.user.profile.age >= 18"
+      transform: "field('/data')"
+
+    # Example 1d: Boolean logic with $ syntax
+    - output: "active-premium"
+      filter: "and($status == 'active', $tier == 'premium')"
+      transform: "$user.id"
+
+    # Example 1e: Complex nested with OR
+    - output: "active-or-trial"
+      filter: |
+        and(
+          $user.email_verified == true,
+          or($status == 'active', $status == 'trial')
+        )
+      transform: "$user.id"
+
+    # Example 1f: Explicit form for special characters
+    - output: "special-field-names"
+      filter: "$('/field$1/name-with-dash') == 'test'"
+      transform: "field('/data')"
+
+    # Example 1g: All comparison operators with $
+    - output: "score-ranges"
+      filter: "and($score > 80, $score <= 100, $attempts != 0)"
+      transform: "field('/data')"
+
+    # Example 1h: Boolean and null literals
+    - output: "active-not-deleted"
+      filter: "and($active == true, $deleted_at == null)"
+      transform: "$user.id"
+
+    # ====================================================================
+    # TRADITIONAL FIELD() SYNTAX - Explicit function calls (v2.0)
+    # ====================================================================
+
     # Example 1: Simple field comparison (v2 syntax)
     - output: "active-users"
       filter: "field('/status') == 'active'"
