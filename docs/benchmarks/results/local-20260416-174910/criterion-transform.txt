@@ -1,0 +1,117 @@
+    Finished `bench` profile [optimized] target(s) in 0.27s
+     Running benches/transform_benchmarks.rs (target/release/deps/transform_benchmarks-4e918ca6779ae582)
+Gnuplot not found, using plotters backend
+Benchmarking transform/field_extract
+Benchmarking transform/field_extract: Warming up for 3.0000 s
+Benchmarking transform/field_extract: Collecting 100 samples in estimated 5.0024 s (5.7M iterations)
+Benchmarking transform/field_extract: Analyzing
+transform/field_extract time:   [869.64 ns 872.95 ns 876.71 ns]
+                        change: [-0.7279% -0.2274% +0.2766%] (p = 0.36 > 0.05)
+                        No change in performance detected.
+Found 10 outliers among 100 measurements (10.00%)
+  9 (9.00%) high mild
+  1 (1.00%) high severe
+
+Benchmarking transform/construct_2_fields
+Benchmarking transform/construct_2_fields: Warming up for 3.0000 s
+Benchmarking transform/construct_2_fields: Collecting 100 samples in estimated 5.0032 s (6.4M iterations)
+Benchmarking transform/construct_2_fields: Analyzing
+transform/construct_2_fields
+                        time:   [778.87 ns 783.01 ns 786.83 ns]
+                        change: [-1.6883% -1.2039% -0.7277%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+
+Benchmarking transform/construct_4_fields
+Benchmarking transform/construct_4_fields: Warming up for 3.0000 s
+Benchmarking transform/construct_4_fields: Collecting 100 samples in estimated 5.0026 s (4.0M iterations)
+Benchmarking transform/construct_4_fields: Analyzing
+transform/construct_4_fields
+                        time:   [1.2485 µs 1.2551 µs 1.2617 µs]
+                        change: [-2.1403% -1.5446% -0.9858%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+
+Benchmarking transform/string_lower
+Benchmarking transform/string_lower: Warming up for 3.0000 s
+Benchmarking transform/string_lower: Collecting 100 samples in estimated 5.0016 s (5.2M iterations)
+Benchmarking transform/string_lower: Analyzing
+transform/string_lower  time:   [959.51 ns 963.59 ns 967.78 ns]
+                        change: [-1.6838% -1.2203% -0.6774%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+
+Benchmarking transform/arithmetic
+Benchmarking transform/arithmetic: Warming up for 3.0000 s
+Benchmarking transform/arithmetic: Collecting 100 samples in estimated 5.0001 s (12M iterations)
+Benchmarking transform/arithmetic: Analyzing
+transform/arithmetic    time:   [429.49 ns 431.56 ns 433.74 ns]
+                        change: [-0.1752% +0.5218% +1.2113%] (p = 0.14 > 0.05)
+                        No change in performance detected.
+
+Benchmarking transform/if_else
+Benchmarking transform/if_else: Warming up for 3.0000 s
+Benchmarking transform/if_else: Collecting 100 samples in estimated 5.0008 s (8.6M iterations)
+Benchmarking transform/if_else: Analyzing
+transform/if_else       time:   [577.42 ns 579.91 ns 582.83 ns]
+                        change: [-1.2873% -0.7375% -0.1526%] (p = 0.01 < 0.05)
+                        Change within noise threshold.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high severe
+
+Benchmarking transform/switch_case
+Benchmarking transform/switch_case: Warming up for 3.0000 s
+Benchmarking transform/switch_case: Collecting 100 samples in estimated 5.0012 s (11M iterations)
+Benchmarking transform/switch_case: Analyzing
+transform/switch_case   time:   [472.55 ns 474.09 ns 475.72 ns]
+                        change: [-0.2950% +0.1747% +0.6651%] (p = 0.48 > 0.05)
+                        No change in performance detected.
+Found 7 outliers among 100 measurements (7.00%)
+  2 (2.00%) high mild
+  5 (5.00%) high severe
+
+Benchmarking transform/coalesce
+Benchmarking transform/coalesce: Warming up for 3.0000 s
+Benchmarking transform/coalesce: Collecting 100 samples in estimated 5.0004 s (8.2M iterations)
+Benchmarking transform/coalesce: Analyzing
+transform/coalesce      time:   [607.31 ns 610.14 ns 612.88 ns]
+                        change: [+0.6093% +1.4193% +2.3266%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 10 outliers among 100 measurements (10.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  6 (6.00%) high severe
+
+Benchmarking transform/array_map
+Benchmarking transform/array_map: Warming up for 3.0000 s
+Benchmarking transform/array_map: Collecting 100 samples in estimated 5.0046 s (2.2M iterations)
+Benchmarking transform/array_map: Analyzing
+transform/array_map     time:   [2.2377 µs 2.2449 µs 2.2518 µs]
+                        change: [-0.5731% +0.0494% +0.7604%] (p = 0.89 > 0.05)
+                        No change in performance detected.
+Found 7 outliers among 100 measurements (7.00%)
+  1 (1.00%) high mild
+  6 (6.00%) high severe
+
+Benchmarking transform/multistatement
+Benchmarking transform/multistatement: Warming up for 3.0000 s
+Benchmarking transform/multistatement: Collecting 100 samples in estimated 5.0050 s (4.3M iterations)
+Benchmarking transform/multistatement: Analyzing
+transform/multistatement
+                        time:   [1.1593 µs 1.1628 µs 1.1664 µs]
+                        change: [-2.3780% -1.7120% -1.0007%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 5 outliers among 100 measurements (5.00%)
+  3 (3.00%) high mild
+  2 (2.00%) high severe
+
+Benchmarking transform/envelope_aware
+Benchmarking transform/envelope_aware: Warming up for 3.0000 s
+Benchmarking transform/envelope_aware: Collecting 100 samples in estimated 5.0021 s (5.1M iterations)
+Benchmarking transform/envelope_aware: Analyzing
+transform/envelope_aware
+                        time:   [986.37 ns 990.41 ns 994.98 ns]
+                        change: [-2.8197% -1.9527% -1.2107%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 7 outliers among 100 measurements (7.00%)
+  7 (7.00%) high mild
+

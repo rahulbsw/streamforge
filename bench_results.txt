@@ -1,0 +1,261 @@
+    Finished `bench` profile [optimized] target(s) in 0.33s
+     Running benches/filter_benchmarks.rs (target/release/deps/filter_benchmarks-553f599229e7718a)
+Gnuplot not found, using plotters backend
+Benchmarking filter/simple_numeric_gt
+Benchmarking filter/simple_numeric_gt: Warming up for 3.0000 s
+Benchmarking filter/simple_numeric_gt: Collecting 100 samples in estimated 5.0001 s (101M iterations)
+Benchmarking filter/simple_numeric_gt: Analyzing
+filter/simple_numeric_gt
+                        time:   [48.203 ns 48.524 ns 48.860 ns]
+                        change: [+5.2842% +6.0854% +6.9360%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+Benchmarking filter/simple_string_eq
+Benchmarking filter/simple_string_eq: Warming up for 3.0000 s
+Benchmarking filter/simple_string_eq: Collecting 100 samples in estimated 5.0002 s (94M iterations)
+Benchmarking filter/simple_string_eq: Analyzing
+filter/simple_string_eq time:   [51.553 ns 51.920 ns 52.289 ns]
+                        change: [+4.4850% +5.5002% +6.4289%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+
+Benchmarking filter/simple_boolean
+Benchmarking filter/simple_boolean: Warming up for 3.0000 s
+Benchmarking filter/simple_boolean: Collecting 100 samples in estimated 5.0001 s (90M iterations)
+Benchmarking filter/simple_boolean: Analyzing
+filter/simple_boolean   time:   [47.978 ns 50.348 ns 53.551 ns]
+                        change: [+17.752% +31.256% +47.904%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 10 outliers among 100 measurements (10.00%)
+  10 (10.00%) high severe
+
+Benchmarking filter/and_two_conditions
+Benchmarking filter/and_two_conditions: Warming up for 3.0000 s
+Benchmarking filter/and_two_conditions: Collecting 100 samples in estimated 5.0001 s (46M iterations)
+Benchmarking filter/and_two_conditions: Analyzing
+filter/and_two_conditions
+                        time:   [106.07 ns 106.82 ns 107.66 ns]
+                        change: [+9.2785% +15.457% +24.271%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 8 outliers among 100 measurements (8.00%)
+  2 (2.00%) high mild
+  6 (6.00%) high severe
+
+Benchmarking filter/and_three_conditions
+Benchmarking filter/and_three_conditions: Warming up for 3.0000 s
+Benchmarking filter/and_three_conditions: Collecting 100 samples in estimated 5.0004 s (32M iterations)
+Benchmarking filter/and_three_conditions: Analyzing
+filter/and_three_conditions
+                        time:   [154.55 ns 155.50 ns 156.47 ns]
+                        change: [+6.1240% +6.9030% +7.7731%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) low severe
+  3 (3.00%) high mild
+
+Benchmarking filter/or_two_conditions
+Benchmarking filter/or_two_conditions: Warming up for 3.0000 s
+Benchmarking filter/or_two_conditions: Collecting 100 samples in estimated 5.0000 s (100M iterations)
+Benchmarking filter/or_two_conditions: Analyzing
+filter/or_two_conditions
+                        time:   [49.825 ns 50.137 ns 50.470 ns]
+                        change: [+3.7042% +4.7349% +5.7922%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+Benchmarking filter/not_condition
+Benchmarking filter/not_condition: Warming up for 3.0000 s
+Benchmarking filter/not_condition: Collecting 100 samples in estimated 5.0001 s (81M iterations)
+Benchmarking filter/not_condition: Analyzing
+filter/not_condition    time:   [50.220 ns 50.637 ns 51.072 ns]
+                        change: [+1.9647% +3.0061% +4.0020%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+Benchmarking filter/regex_simple
+Benchmarking filter/regex_simple: Warming up for 3.0000 s
+Benchmarking filter/regex_simple: Collecting 100 samples in estimated 5.0002 s (83M iterations)
+Benchmarking filter/regex_simple: Analyzing
+filter/regex_simple     time:   [58.795 ns 59.226 ns 59.690 ns]
+                        change: [+8.3091% +11.292% +15.273%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) high mild
+  4 (4.00%) high severe
+
+Benchmarking filter/regex_email
+Benchmarking filter/regex_email: Warming up for 3.0000 s
+Benchmarking filter/regex_email: Collecting 100 samples in estimated 5.0001 s (99M iterations)
+Benchmarking filter/regex_email: Analyzing
+filter/regex_email      time:   [51.160 ns 51.798 ns 52.591 ns]
+                        change: [+3.4755% +4.5682% +5.8954%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 7 outliers among 100 measurements (7.00%)
+  2 (2.00%) high mild
+  5 (5.00%) high severe
+
+Benchmarking filter/regex_version
+Benchmarking filter/regex_version: Warming up for 3.0000 s
+Benchmarking filter/regex_version: Collecting 100 samples in estimated 5.0000 s (102M iterations)
+Benchmarking filter/regex_version: Analyzing
+filter/regex_version    time:   [48.350 ns 48.947 ns 49.692 ns]
+                        change: [+7.2314% +8.5432% +9.8693%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 9 outliers among 100 measurements (9.00%)
+  6 (6.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking filter/array_all
+Benchmarking filter/array_all: Warming up for 3.0000 s
+Benchmarking filter/array_all: Collecting 100 samples in estimated 5.0004 s (45M iterations)
+Benchmarking filter/array_all: Analyzing
+filter/array_all        time:   [110.97 ns 115.20 ns 121.78 ns]
+                        change: [+9.2881% +11.430% +14.255%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking filter/array_any
+Benchmarking filter/array_any: Warming up for 3.0000 s
+Benchmarking filter/array_any: Collecting 100 samples in estimated 5.0003 s (80M iterations)
+Benchmarking filter/array_any: Analyzing
+filter/array_any        time:   [62.306 ns 62.614 ns 62.940 ns]
+                        change: [+7.6830% +8.3457% +9.0030%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+Benchmarking parser/simple_filter
+Benchmarking parser/simple_filter: Warming up for 3.0000 s
+Benchmarking parser/simple_filter: Collecting 100 samples in estimated 5.0001 s (43M iterations)
+Benchmarking parser/simple_filter: Analyzing
+parser/simple_filter    time:   [107.41 ns 108.10 ns 108.85 ns]
+                        change: [+6.0055% +7.4729% +9.2625%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking parser/and_filter
+Benchmarking parser/and_filter: Warming up for 3.0000 s
+Benchmarking parser/and_filter: Collecting 100 samples in estimated 5.0004 s (14M iterations)
+Benchmarking parser/and_filter: Analyzing
+parser/and_filter       time:   [343.91 ns 345.61 ns 347.25 ns]
+                        change: [+4.0124% +4.6196% +5.2965%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) low mild
+  1 (1.00%) high mild
+
+Benchmarking parser/regex_filter
+Benchmarking parser/regex_filter: Warming up for 3.0000 s
+Benchmarking parser/regex_filter: Collecting 100 samples in estimated 6.3389 s (15k iterations)
+Benchmarking parser/regex_filter: Analyzing
+parser/regex_filter     time:   [419.96 µs 423.85 µs 429.04 µs]
+                        change: [+1.0206% +2.8159% +4.8428%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 8 outliers among 100 measurements (8.00%)
+  1 (1.00%) high mild
+  7 (7.00%) high severe
+
+Benchmarking parser/array_filter
+Benchmarking parser/array_filter: Warming up for 3.0000 s
+Benchmarking parser/array_filter: Collecting 100 samples in estimated 5.0012 s (20M iterations)
+Benchmarking parser/array_filter: Analyzing
+parser/array_filter     time:   [238.96 ns 241.68 ns 245.04 ns]
+                        change: [+3.7359% +4.6232% +5.5912%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+
+Benchmarking filter/throughput/simple/100
+Benchmarking filter/throughput/simple/100: Warming up for 3.0000 s
+Benchmarking filter/throughput/simple/100: Collecting 100 samples in estimated 5.0140 s (1.0M iterations)
+Benchmarking filter/throughput/simple/100: Analyzing
+filter/throughput/simple/100
+                        time:   [4.8693 µs 4.8994 µs 4.9326 µs]
+                        thrpt:  [20.273 Melem/s 20.411 Melem/s 20.537 Melem/s]
+                 change:
+                        time:   [+6.7380% +8.4114% +10.298%] (p = 0.00 < 0.05)
+                        thrpt:  [-9.3363% -7.7588% -6.3126%]
+                        Performance has regressed.
+Found 5 outliers among 100 measurements (5.00%)
+  5 (5.00%) high severe
+Benchmarking filter/throughput/complex/100
+Benchmarking filter/throughput/complex/100: Warming up for 3.0000 s
+Benchmarking filter/throughput/complex/100: Collecting 100 samples in estimated 5.0155 s (313k iterations)
+Benchmarking filter/throughput/complex/100: Analyzing
+filter/throughput/complex/100
+                        time:   [15.648 µs 15.830 µs 16.030 µs]
+                        thrpt:  [6.2384 Melem/s 6.3171 Melem/s 6.3906 Melem/s]
+                 change:
+                        time:   [+5.0705% +7.3960% +10.401%] (p = 0.00 < 0.05)
+                        thrpt:  [-9.4214% -6.8866% -4.8258%]
+                        Performance has regressed.
+Found 15 outliers among 100 measurements (15.00%)
+  1 (1.00%) low severe
+  8 (8.00%) low mild
+  2 (2.00%) high mild
+  4 (4.00%) high severe
+Benchmarking filter/throughput/simple/1000
+Benchmarking filter/throughput/simple/1000: Warming up for 3.0000 s
+Benchmarking filter/throughput/simple/1000: Collecting 100 samples in estimated 5.1186 s (106k iterations)
+Benchmarking filter/throughput/simple/1000: Analyzing
+filter/throughput/simple/1000
+                        time:   [47.743 µs 48.125 µs 48.574 µs]
+                        thrpt:  [20.587 Melem/s 20.779 Melem/s 20.945 Melem/s]
+                 change:
+                        time:   [+5.2192% +6.3989% +7.7638%] (p = 0.00 < 0.05)
+                        thrpt:  [-7.2045% -6.0141% -4.9603%]
+                        Performance has regressed.
+Found 8 outliers among 100 measurements (8.00%)
+  4 (4.00%) high mild
+  4 (4.00%) high severe
+Benchmarking filter/throughput/complex/1000
+Benchmarking filter/throughput/complex/1000: Warming up for 3.0000 s
+Benchmarking filter/throughput/complex/1000: Collecting 100 samples in estimated 5.5417 s (35k iterations)
+Benchmarking filter/throughput/complex/1000: Analyzing
+filter/throughput/complex/1000
+                        time:   [157.05 µs 158.32 µs 159.58 µs]
+                        thrpt:  [6.2665 Melem/s 6.3164 Melem/s 6.3676 Melem/s]
+                 change:
+                        time:   [+6.0839% +7.2724% +8.5307%] (p = 0.00 < 0.05)
+                        thrpt:  [-7.8602% -6.7794% -5.7350%]
+                        Performance has regressed.
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking filter/throughput/simple/10000
+Benchmarking filter/throughput/simple/10000: Warming up for 3.0000 s
+Benchmarking filter/throughput/simple/10000: Collecting 100 samples in estimated 7.2910 s (15k iterations)
+Benchmarking filter/throughput/simple/10000: Analyzing
+filter/throughput/simple/10000
+                        time:   [471.57 µs 473.65 µs 475.73 µs]
+                        thrpt:  [21.020 Melem/s 21.113 Melem/s 21.206 Melem/s]
+                 change:
+                        time:   [+2.4477% +3.4867% +4.5240%] (p = 0.00 < 0.05)
+                        thrpt:  [-4.3282% -3.3693% -2.3892%]
+                        Performance has regressed.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking filter/throughput/complex/10000
+Benchmarking filter/throughput/complex/10000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 7.9s, enable flat sampling, or reduce sample count to 50.
+Benchmarking filter/throughput/complex/10000: Collecting 100 samples in estimated 7.8803 s (5050 iterations)
+Benchmarking filter/throughput/complex/10000: Analyzing
+filter/throughput/complex/10000
+                        time:   [1.5421 ms 1.5501 ms 1.5584 ms]
+                        thrpt:  [6.4168 Melem/s 6.4513 Melem/s 6.4848 Melem/s]
+                 change:
+                        time:   [+3.9625% +4.6469% +5.3128%] (p = 0.00 < 0.05)
+                        thrpt:  [-5.0448% -4.4406% -3.8115%]
+                        Performance has regressed.
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+

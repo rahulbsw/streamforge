@@ -1,0 +1,94 @@
+# Production config: Multi-tenant event filtering
+# Use case: Route events to tenant-specific topics
+# Throughput: ~30K msg/s
+# Resource requirements: 2 CPU / 4 Gi memory per replica
+
+appid: "multi-tenant-router"
+bootstrap: "kafka:9092"
+input: "shared-events"
+offset: "latest"
+threads: 4
+
+# Performance tuning
+performance:
+  fetch_min_bytes: 5120
+  fetch_max_wait_ms: 100
+  batch_size: 2000
+  linger_ms: 20
+  compression: "zstd"
+
+commit_strategy: "time-based"
+commit_interval_ms: 1000
+
+retry:
+  max_attempts: 3
+  initial_delay_ms: 100
+  max_delay_ms: 30000
+  jitter: true
+
+dlq:
+  enabled: true
+  topic: "multi-tenant-dlq"
+  include_error_headers: true
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Enterprise tier tenants (SLA: low latency)
+    - output: "events-enterprise"
+      filter: "AND:/tenant/tier,==,enterprise:/tenant/active,==,true"
+      transform: "/data"
+      key_transform: "/tenant/id"
+      partitioning: "hash"
+      headers:
+        x-pipeline: "multi-tenant-router"
+        x-tier: "enterprise"
+
+    # Professional tier tenants
+    - output: "events-professional"
+      filter: "AND:/tenant/tier,==,professional:/tenant/active,==,true"
+      transform: "/data"
+      key_transform: "/tenant/id"
+      partitioning: "hash"
+      headers:
+        x-pipeline: "multi-tenant-router"
+        x-tier: "professional"
+
+    # Free tier tenants (lower priority)
+    - output: "events-free"
+      filter: "AND:/tenant/tier,==,free:/tenant/active,==,true"
+      transform: "/data"
+      key_transform: "/tenant/id"
+      partitioning: "random"  # Spread load evenly
+      headers:
+        x-pipeline: "multi-tenant-router"
+        x-tier: "free"
+
+    # Inactive tenants (for audit/compliance)
+    - output: "events-inactive"
+      filter: "/tenant/active,==,false"
+      transform: "CONSTRUCT:tenant_id=/tenant/id:timestamp=/timestamp:event_type=/event_type"
+      key_transform: "/tenant/id"
+      headers:
+        x-pipeline: "multi-tenant-router"
+        x-status: "inactive"
+
+    # Specific high-value customer (dedicated topic)
+    - output: "events-acme-corp"
+      filter: "/tenant/id,==,acme-corp-12345"
+      transform: "/data"
+      key_transform: "/event/id"
+      headers:
+        x-pipeline: "multi-tenant-router"
+        x-tenant: "acme-corp"
+
+# Cache tenant metadata for enrichment
+cache:
+  enabled: true
+  type: "local"
+  ttl_seconds: 600  # 10 minutes
+  max_entries: 50000
+
+metrics:
+  enabled: true
+  port: 8080

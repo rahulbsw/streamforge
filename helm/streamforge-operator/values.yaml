@@ -141,3 +141,84 @@ crds:
 
   # Keep CRDs on chart uninstall
   keep: true
+
+# UI Configuration (optional web interface)
+ui:
+  # Enable UI deployment
+  enabled: false
+
+  image:
+    repository: ghcr.io/rahulbsw/streamforge-ui
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Service configuration
+  service:
+    type: NodePort
+    port: 3001
+    nodePort: 30001
+
+  # JWT secret for authentication (change in production!)
+  jwtSecret: "streamforge-secret-key-change-in-production"
+
+  # Service account
+  serviceAccount:
+    create: true
+    name: streamforge-ui
+    annotations: {}
+
+  # RBAC settings
+  rbac:
+    create: true
+
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+
+  # Ingress configuration (optional)
+  ingress:
+    enabled: false
+    className: nginx
+    annotations: {}
+      # nginx.ingress.kubernetes.io/rewrite-target: /
+    hosts:
+      - host: streamforge.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity
+  affinity: {}
+
+  # Environment variables
+  env:
+    - name: NODE_ENV
+      value: production
+    - name: PORT
+      value: "3001"

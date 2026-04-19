@@ -185,8 +185,65 @@ helm install streamforge-operator . \
   --namespace streamforge-system \
   --set operator.replicas=2 \
   --set defaults.image.tag=0.3.1 \
-  --set monitoring.enabled=true
+  --set monitoring.enabled=true \
+  --set ui.enabled=true
 ```
+
+### UI Configuration
+
+Enable the web UI for managing pipelines:
+
+```yaml
+ui:
+  enabled: true  # Enable UI deployment
+  
+  image:
+    repository: ghcr.io/rahulbsw/streamforge-ui
+    tag: "latest"
+  
+  replicas: 1
+  
+  service:
+    type: NodePort  # or LoadBalancer, ClusterIP
+    port: 3001
+    nodePort: 30001
+  
+  # JWT secret for authentication (change in production!)
+  jwtSecret: "your-secure-random-secret-here"
+  
+  # Ingress configuration
+  ingress:
+    enabled: false
+    className: nginx
+    hosts:
+      - host: streamforge.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+```
+
+**Install with UI:**
+```bash
+helm install streamforge-operator . \
+  --namespace streamforge-system \
+  --create-namespace \
+  --set ui.enabled=true
+```
+
+**Access UI:**
+```bash
+# Minikube
+minikube service streamforge-operator-ui -n streamforge-system
+
+# Port-forward
+kubectl port-forward -n streamforge-system svc/streamforge-operator-ui 3001:3001
+```
+
+**Default credentials:**
+- Username: `admin`
+- Password: `admin`
+
+⚠️ **Change in production!**
 
 ## Pipeline Examples
 

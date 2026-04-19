@@ -1,0 +1,24 @@
+# Config with deprecated syntax to test warnings
+appid: "deprecated-test"
+bootstrap: "localhost:9092"
+input: "test-input"
+offset: "latest"
+threads: 4
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Uses deprecated KEY_SUFFIX
+    - output: "prod-keys"
+      filter: "KEY_SUFFIX:-prod"
+      transform: "/data"
+
+    # Uses deprecated KEY_CONTAINS
+    - output: "test-keys"
+      filter: "KEY_CONTAINS:test"
+      transform: "/data"
+
+    # Valid modern syntax
+    - output: "user-keys"
+      filter: "KEY_PREFIX:user-"
+      transform: "/data"

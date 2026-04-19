@@ -1,6 +1,6 @@
 [package]
 name = "streamforge"
-version = "0.4.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Rahul Jain <rahul.oracle.db@gmail.com>"]
 description = "High-performance Kafka streaming toolkit with advanced filtering and transformation"
@@ -44,6 +44,9 @@ config = "0.14"
 async-trait = "0.1"
 bytes = "1.7"
 regex = "1.10"  # Regular expressions
+rand = "0.8"    # Random number generation for jitter
+chrono = "0.4"  # Date/time for timestamps
+structopt = "0.3"  # CLI argument parsing
 
 # Hashing functions
 md-5 = "0.10"
@@ -71,10 +74,17 @@ tower-http = { version = "0.5", features = ["trace"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+testcontainers = "0.15"
+uuid = { version = "1.6", features = ["v4"] }
+serial_test = "3.0"
 
 [[bin]]
 name = "streamforge"
 path = "src/main.rs"
+
+[[bin]]
+name = "streamforge-validate"
+path = "src/bin/validate.rs"
 
 [[bench]]
 name = "filter_benchmarks"
@@ -82,6 +92,10 @@ harness = false
 
 [[bench]]
 name = "transform_benchmarks"
+harness = false
+
+[[bench]]
+name = "end_to_end_benchmark"
 harness = false
 
 [features]

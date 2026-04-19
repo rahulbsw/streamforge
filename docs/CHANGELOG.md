@@ -10,6 +10,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.0-alpha.1] - 2026-04-18 - v1.0 Hardening Phase
+
+### Changed
+- **Version bumped to 1.0.0-alpha.1** - Start of v1.0 completion plan
+- **DSL Strategy Finalized** - Keeping custom string-based DSL, removing Rhai
+- **Branch Reorganization** - Created `improvement` branch for v1.0 work
+
+### Added
+- **V1_PLAN.md** - Comprehensive 6-phase v1.0 completion roadmap
+- **ARCHITECTURE.md Updates** - Added module organization and v1.0 gap analysis
+- **Kubernetes UI Integration** - Helm chart now includes Web UI deployment
+- **UI RBAC** - ClusterRole, ServiceAccount, and RoleBinding for UI
+
+### Planned (In Progress)
+- Phase 0: Repository coherence (in progress)
+- Phase 1: Core engine hardening (delivery semantics, retry/DLQ, error types)
+- Phase 2: DSL stabilization (formal grammar, parser refactor, validation)
+- Phase 3-6: See V1_PLAN.md for complete roadmap
+
+---
+
 ## [0.4.0] - 2026-04-03 - Observability, Envelopes & Release Pipeline
 
 ### Added

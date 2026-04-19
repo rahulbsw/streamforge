@@ -1,0 +1,473 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://streamforge.io/schemas/config/v1.json",
+  "title": "StreamForge Configuration",
+  "description": "Configuration schema for StreamForge Kafka streaming pipelines",
+  "type": "object",
+  "required": ["appid", "bootstrap", "input", "routing"],
+  "properties": {
+    "appid": {
+      "type": "string",
+      "description": "Unique application/consumer group identifier",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "examples": ["user-processor", "event-filter", "data-sync"]
+    },
+    "bootstrap": {
+      "type": "string",
+      "description": "Kafka bootstrap servers (comma-separated)",
+      "minLength": 1,
+      "examples": ["localhost:9092", "kafka1:9092,kafka2:9092"]
+    },
+    "input": {
+      "type": "string",
+      "description": "Source Kafka topic to consume from",
+      "minLength": 1,
+      "examples": ["events", "users", "orders"]
+    },
+    "offset": {
+      "type": "string",
+      "description": "Initial offset position for new consumer groups",
+      "enum": ["earliest", "latest", "stored"],
+      "default": "latest"
+    },
+    "threads": {
+      "type": "integer",
+      "description": "Number of processing threads (1 per CPU core recommended)",
+      "minimum": 1,
+      "maximum": 64,
+      "default": 4
+    },
+    "commit_strategy": {
+      "type": "string",
+      "description": "Offset commit strategy",
+      "enum": ["auto", "manual", "per-message", "time-based"],
+      "default": "auto"
+    },
+    "commit_interval_ms": {
+      "type": "integer",
+      "description": "Commit interval in milliseconds (for time-based strategy)",
+      "minimum": 100,
+      "maximum": 300000,
+      "default": 5000
+    },
+    "performance": {
+      "type": "object",
+      "description": "Performance tuning parameters",
+      "properties": {
+        "fetch_min_bytes": {
+          "type": "integer",
+          "description": "Minimum bytes to fetch from Kafka",
+          "minimum": 1,
+          "maximum": 10485760,
+          "default": 1024
+        },
+        "fetch_max_wait_ms": {
+          "type": "integer",
+          "description": "Maximum wait time for fetch request (ms)",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 100
+        },
+        "max_partition_fetch_bytes": {
+          "type": "integer",
+          "description": "Maximum bytes per partition fetch",
+          "minimum": 1024,
+          "maximum": 10485760,
+          "default": 1048576
+        },
+        "queue_buffering_max_ms": {
+          "type": "integer",
+          "description": "Producer queue buffering time (ms)",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 5
+        },
+        "batch_size": {
+          "type": "integer",
+          "description": "Producer batch size (number of messages)",
+          "minimum": 1,
+          "maximum": 100000,
+          "default": 1000
+        },
+        "linger_ms": {
+          "type": "integer",
+          "description": "Producer linger time to allow batching (ms)",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 10
+        },
+        "compression": {
+          "type": "string",
+          "description": "Producer compression codec",
+          "enum": ["none", "gzip", "snappy", "lz4", "zstd"],
+          "default": "none"
+        }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "description": "Retry policy for transient failures",
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "description": "Maximum retry attempts",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 3
+        },
+        "initial_delay_ms": {
+          "type": "integer",
+          "description": "Initial retry delay (ms)",
+          "minimum": 10,
+          "maximum": 60000,
+          "default": 100
+        },
+        "max_delay_ms": {
+          "type": "integer",
+          "description": "Maximum retry delay (ms)",
+          "minimum": 100,
+          "maximum": 300000,
+          "default": 30000
+        },
+        "jitter": {
+          "type": "boolean",
+          "description": "Add random jitter to retry delays",
+          "default": true
+        }
+      }
+    },
+    "dlq": {
+      "type": "object",
+      "description": "Dead Letter Queue configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable DLQ for failed messages",
+          "default": true
+        },
+        "topic": {
+          "type": "string",
+          "description": "DLQ topic name",
+          "default": "streamforge-dlq"
+        },
+        "include_error_headers": {
+          "type": "boolean",
+          "description": "Include error details in DLQ message headers",
+          "default": true
+        },
+        "max_retries": {
+          "type": "integer",
+          "description": "Max retries before sending to DLQ",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 3
+        }
+      }
+    },
+    "kafka": {
+      "type": "object",
+      "description": "Kafka security and connection settings",
+      "properties": {
+        "security": {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": ["PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"],
+              "default": "PLAINTEXT"
+            },
+            "sasl_mechanism": {
+              "type": "string",
+              "enum": ["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER"],
+              "description": "SASL authentication mechanism"
+            },
+            "sasl_username": {
+              "type": "string",
+              "description": "SASL username (can use ${ENV_VAR} syntax)"
+            },
+            "sasl_password": {
+              "type": "string",
+              "description": "SASL password (can use ${ENV_VAR} syntax)"
+            }
+          }
+        },
+        "ssl": {
+          "type": "object",
+          "properties": {
+            "ca_location": {
+              "type": "string",
+              "description": "Path to CA certificate"
+            },
+            "certificate_location": {
+              "type": "string",
+              "description": "Path to client certificate"
+            },
+            "key_location": {
+              "type": "string",
+              "description": "Path to client private key"
+            },
+            "key_password": {
+              "type": "string",
+              "description": "Private key password"
+            }
+          }
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "description": "Message routing configuration",
+      "required": ["routing_type", "destinations"],
+      "properties": {
+        "routing_type": {
+          "type": "string",
+          "description": "Routing strategy",
+          "enum": ["filter", "fanout", "passthrough"],
+          "examples": ["filter", "fanout"]
+        },
+        "destinations": {
+          "type": "array",
+          "description": "List of destination configurations",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["output"],
+            "properties": {
+              "output": {
+                "type": "string",
+                "description": "Destination Kafka topic",
+                "minLength": 1
+              },
+              "bootstrap": {
+                "type": "string",
+                "description": "Override bootstrap servers for this destination"
+              },
+              "filter": {
+                "type": "string",
+                "description": "DSL filter expression",
+                "examples": [
+                  "/status,==,active",
+                  "AND:/age,>,18:/region,==,us",
+                  "KEY_PREFIX:user-"
+                ]
+              },
+              "transform": {
+                "type": "string",
+                "description": "DSL transform expression",
+                "examples": [
+                  "/data",
+                  "EXTRACT:/user/id,user_id",
+                  "CONSTRUCT:id=/id:name=/name"
+                ]
+              },
+              "key_transform": {
+                "type": "string",
+                "description": "Transform for message key",
+                "examples": ["/user/id", "HASH:MD5,/email"]
+              },
+              "partitioning": {
+                "type": "string",
+                "description": "Partitioning strategy",
+                "enum": ["default", "random", "hash", "field"],
+                "default": "default"
+              },
+              "partition_field": {
+                "type": "string",
+                "description": "Field to use for field-based partitioning",
+                "examples": ["/user/region", "/tenant/id"]
+              },
+              "preserve_timestamp": {
+                "type": "boolean",
+                "description": "Preserve source message timestamp",
+                "default": true
+              },
+              "headers": {
+                "type": "object",
+                "description": "Additional headers to add to messages",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "examples": [
+                  {
+                    "x-pipeline": "user-processor",
+                    "x-version": "1.0"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Observability and metrics configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable Prometheus metrics",
+          "default": true
+        },
+        "port": {
+          "type": "integer",
+          "description": "HTTP port for metrics endpoint",
+          "minimum": 1024,
+          "maximum": 65535,
+          "default": 8080
+        },
+        "path": {
+          "type": "string",
+          "description": "Metrics endpoint path",
+          "default": "/metrics"
+        }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "description": "Caching configuration for enrichment",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable caching",
+          "default": true
+        },
+        "type": {
+          "type": "string",
+          "description": "Cache backend type",
+          "enum": ["local", "redis"],
+          "default": "local"
+        },
+        "ttl_seconds": {
+          "type": "integer",
+          "description": "Cache entry TTL in seconds",
+          "minimum": 1,
+          "maximum": 86400,
+          "default": 300
+        },
+        "max_entries": {
+          "type": "integer",
+          "description": "Maximum cache entries (local cache only)",
+          "minimum": 100,
+          "maximum": 10000000,
+          "default": 10000
+        },
+        "redis_url": {
+          "type": "string",
+          "description": "Redis connection URL (for redis cache type)",
+          "examples": ["redis://localhost:6379", "redis://:password@redis:6379/0"]
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "appid": "user-processor",
+      "bootstrap": "kafka:9092",
+      "input": "users",
+      "offset": "latest",
+      "threads": 4,
+      "performance": {
+        "fetch_min_bytes": 1024,
+        "batch_size": 1000,
+        "linger_ms": 10,
+        "compression": "zstd"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "initial_delay_ms": 100,
+        "max_delay_ms": 30000,
+        "jitter": true
+      },
+      "dlq": {
+        "enabled": true,
+        "topic": "user-processor-dlq",
+        "include_error_headers": true
+      },
+      "routing": {
+        "routing_type": "filter",
+        "destinations": [
+          {
+            "output": "active-users",
+            "filter": "/status,==,active",
+            "transform": "/data",
+            "key_transform": "/user/id",
+            "headers": {
+              "x-pipeline": "user-processor"
+            }
+          }
+        ]
+      },
+      "metrics": {
+        "enabled": true,
+        "port": 8080
+      }
+    },
+    {
+      "appid": "cross-region-sync",
+      "bootstrap": "kafka-us-east:9092",
+      "input": "events",
+      "offset": "earliest",
+      "threads": 8,
+      "performance": {
+        "fetch_min_bytes": 10240,
+        "batch_size": 5000,
+        "linger_ms": 50,
+        "compression": "zstd"
+      },
+      "kafka": {
+        "security": {
+          "protocol": "SASL_SSL",
+          "sasl_mechanism": "SCRAM-SHA-512",
+          "sasl_username": "${KAFKA_USER}",
+          "sasl_password": "${KAFKA_PASSWORD}"
+        },
+        "ssl": {
+          "ca_location": "/certs/ca.crt",
+          "certificate_location": "/certs/client.crt",
+          "key_location": "/certs/client.key"
+        }
+      },
+      "routing": {
+        "routing_type": "passthrough",
+        "destinations": [
+          {
+            "output": "events",
+            "bootstrap": "kafka-us-west:9092",
+            "partitioning": "default",
+            "preserve_timestamp": true
+          }
+        ]
+      }
+    },
+    {
+      "appid": "multi-filter-routing",
+      "bootstrap": "kafka:9092",
+      "input": "orders",
+      "threads": 4,
+      "routing": {
+        "routing_type": "filter",
+        "destinations": [
+          {
+            "output": "premium-orders",
+            "filter": "/tier,==,premium",
+            "transform": "/data"
+          },
+          {
+            "output": "high-value-orders",
+            "filter": "/amount,>,1000",
+            "transform": "CONSTRUCT:id=/order_id:amount=/amount:customer=/customer/id"
+          },
+          {
+            "output": "regional-orders-us",
+            "filter": "/region,==,us",
+            "transform": "/data",
+            "partitioning": "field",
+            "partition_field": "/state"
+          }
+        ]
+      }
+    }
+  ]
+}

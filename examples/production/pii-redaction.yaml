@@ -1,0 +1,87 @@
+# Production config: PII redaction and data masking
+# Use case: Redact sensitive data before sending to analytics
+# Throughput: ~15K msg/s
+# Resource requirements: 1 CPU / 2 Gi memory per replica
+
+appid: "pii-redaction"
+bootstrap: "kafka:9092"
+input: "user-events-raw"
+offset: "latest"
+threads: 2  # Lower parallelism for transform-heavy workload
+
+# Performance tuning for transform-heavy pipeline
+performance:
+  fetch_min_bytes: 2048
+  fetch_max_wait_ms: 100
+  batch_size: 500   # Smaller batches for transform overhead
+  linger_ms: 10
+  compression: "zstd"
+
+commit_strategy: "time-based"
+commit_interval_ms: 2000
+
+retry:
+  max_attempts: 3
+  initial_delay_ms: 100
+  max_delay_ms: 30000
+  jitter: true
+
+dlq:
+  enabled: true
+  topic: "pii-redaction-dlq"
+  include_error_headers: true
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Redact PII fields for analytics
+    - output: "user-events-analytics"
+      filter: "EXISTS:/user/id"  # Ensure user ID exists
+      transform: "CONSTRUCT:user_id=/user/id:event_type=/event_type:timestamp=/timestamp:region=/region:device=/device_type"
+      key_transform: "HASH:SHA256,/user/id"  # Hash user ID
+      partitioning: "hash"
+      headers:
+        x-pipeline: "pii-redaction"
+        x-destination: "analytics"
+        x-redacted: "true"
+
+    # Hash email addresses
+    - output: "user-events-marketing"
+      filter: "AND:EXISTS:/email:/consent/marketing,==,true"
+      transform: "CONSTRUCT:email_hash=HASH:MD5,/email:event=/event_type:timestamp=/timestamp"
+      key_transform: "HASH:MD5,/email"
+      headers:
+        x-pipeline: "pii-redaction"
+        x-destination: "marketing"
+        x-consent: "marketing"
+
+    # Minimal data for third-party integrations
+    - output: "events-third-party"
+      filter: "/consent/third_party,==,true"
+      transform: "CONSTRUCT:anonymous_id=HASH:SHA256,/user/id:event=/event_type:properties=/properties/non_pii"
+      key_transform: "HASH:SHA256,/user/id"
+      headers:
+        x-pipeline: "pii-redaction"
+        x-destination: "third-party"
+        x-pii: "redacted"
+
+    # Full data with PII for internal compliance (encrypted channel)
+    - output: "user-events-compliance"
+      filter: "OR:/event_type,==,account_created:/event_type,==,account_deleted:/event_type,==,consent_updated"
+      transform: "/data"  # Pass through full data
+      key_transform: "/user/id"
+      headers:
+        x-pipeline: "pii-redaction"
+        x-destination: "compliance"
+        x-pii: "full"
+
+metrics:
+  enabled: true
+  port: 8080
+
+# Note: For production PII handling, consider:
+# 1. Encrypting Kafka topics (encryption at rest)
+# 2. Using TLS for all Kafka connections (encryption in transit)
+# 3. Implementing field-level encryption for sensitive fields
+# 4. Audit logging for PII access
+# 5. Data retention policies for PII

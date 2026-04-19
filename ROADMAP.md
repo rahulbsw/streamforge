@@ -1,339 +1,300 @@
-# Streamforge Roadmap
+# StreamForge Roadmap
 
-Vision and planned features for Streamforge.
+Vision and planned features for StreamForge.
 
 ## Vision
 
-Streamforge aims to be the **fastest, most reliable, and easiest-to-use Kafka streaming toolkit**. We focus on:
+StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka selective replication engine**. We focus on:
 
-1. **Performance** - Always faster than alternatives
-2. **Reliability** - Production-grade stability
-3. **Usability** - Simple configuration, great documentation
-4. **Security** - Enterprise-ready security features
+1. **Performance** - Rust-native speed (25K-45K msg/s sustained throughput)
+2. **Reliability** - Production-grade stability with typed errors, retry, and DLQ
+3. **Usability** - Simple DSL, great documentation, validation CLI
+4. **Security** - Enterprise-ready security features (SSL/TLS, SASL, Kerberos)
 5. **Community** - Welcoming, collaborative ecosystem
 
 ---
 
-## Current Version: 0.3.0
+## Current Version: 1.0.0 ✅ STABLE
 
-### What's Included
+**Released:** 2026-04-18  
+**Status:** Production-ready stable release
 
-✅ **Core Features:**
-- Cross-cluster mirroring
-- Multi-destination routing
-- Advanced filtering (DSL)
-- Powerful transformations
-- Custom partitioning
-- Native compression
-- Security (SSL/TLS, SASL, Kerberos)
+### What's Included (v1.0.0)
+
+✅ **Core Engine:**
+- Rust + rdkafka + tokio async runtime
+- At-least-once delivery semantics (documented and tested)
+- Configurable threading model (linear scaling to 8+ threads)
+- Consumer/producer tuning knobs (exposed via `performance:` config block)
+- Typed error system (14+ error types with recovery actions)
+- Dead letter queue (DLQ) with error metadata headers
+- Exponential backoff retry policy (configurable max attempts, delays, jitter)
+
+✅ **DSL (v2.0/v2.1/v2.2):**
+- **v1.x Colon-delimited syntax** (fully supported, backward compatible)
+  - Example: `"AND:/status,==,active:/tier,==,premium"`
+- **v2.0 Function-style syntax** (production-ready, auto-detected)
+  - Example: `"and(field('/status') == 'active', field('/tier') == 'premium')"`
+- **v2.1 Dollar shorthand** (concise field access)
+  - Example: `"and($status == 'active', $tier == 'premium')"`
+  - Dot notation: `$user.email`, `$data.nested.path`
+- **v2.2 Transform evaluators** (35 functions)
+  - 14 string transforms: uppercase, lowercase, length, substring, split, join, replace, pad, trim, type conversions
+  - 21 date/time transforms: now, parse_date, format_date, add_days, year, month, day, hour, etc.
+- AST-based parser with position-tracked errors
+- Semantic validation pass before execution
+- Complete EBNF grammar specification (docs/DSL_SPEC.md)
+
+✅ **Data Plane:**
+- Multi-destination routing with filter-based selection
+- 40+ filter types (AND/OR/NOT, regex, array ops, key/header/timestamp filters, null/empty checks)
+- 30+ transform types (extract, construct, arithmetic, hash, string ops, date/time ops)
+- Envelope access (msg value, key, headers, timestamp, partition, offset, topic)
+- Compression support (gzip, snappy, zstd, lz4)
+- Partitioning strategies (default, random, hash, field-based)
+- Key transformation pipeline
+- Header manipulation
+- Timestamp control
+
+✅ **Observability:**
+- 60+ Prometheus metrics with per-destination tracking
+- Kafka consumer lag monitoring
+- Filter/transform operation tracking
+- HTTP metrics endpoint (< 2% overhead)
+- Structured logging (tracing with span IDs)
+- Grafana dashboard templates with alert rules
+
+✅ **Deployment:**
+- Docker images (multi-arch: x86_64, aarch64)
+- Helm chart for Kubernetes Operator
+- Kubernetes CRD (StreamforgePipeline v1alpha1)
+- Web UI (Next.js with JWT auth)
+- Chainguard distroless container images (~20MB)
 
 ✅ **Performance:**
-- 40x faster than Java JSLT
-- 10x less memory usage
-- 2.5x higher throughput
+- 25,000–45,000 msg/s sustained throughput (JSON processing)
+- 12ms p99 latency end-to-end
+- 44–50ns simple filter latency
+- ~50MB memory footprint
+
+✅ **Testing:**
+- **333 unit tests passing** (0 failures, 0 warnings)
+  - 102 parser tests (v1 + v2 syntax)
+  - 15 dollar syntax tests
+  - 11 string transform tests
+  - 18 date/time transform tests
+  - 187 other tests (filters, transforms, core engine)
+- Integration test infrastructure (testcontainers-based)
+- Comprehensive benchmarks (filter, transform, end-to-end)
 
 ✅ **Documentation:**
-- 18 documentation files
-- 13 example configurations
-- Complete DSL reference
-- Security guide
-- Performance tuning guide
+- **10,000+ lines across 42 documentation files**
+- Complete DSL reference (docs/ADVANCED_DSL_GUIDE.md, docs/DSL_SPEC.md)
+- Function-style DSL guide (docs/DSL_V2_FUNCTION_SYNTAX.md)
+- Production deployment guides (docs/DEPLOYMENT.md, docs/DOCKER.md, docs/KUBERNETES.md)
+- Operations runbook (docs/OPERATIONS.md, 40 KB)
+- Troubleshooting guide (docs/TROUBLESHOOTING.md, 70+ issues covered)
+- 40+ real-world example configurations
+- Delivery guarantees specification (docs/DELIVERY_GUARANTEES.md)
+- Error handling taxonomy (docs/ERROR_HANDLING.md)
 
 ---
 
-## Version 1.0 (Q2 2025)
+## Version 1.1 (Planned - Q3 2026)
 
-**Goal**: First stable release
+**Goal:** Advanced features and performance enhancements
 
-### Features
+### Planned Features
 
 - [ ] **Avro Support**
   - Avro serialization/deserialization
-  - Schema Registry integration
+  - Confluent Schema Registry integration
   - Schema evolution handling
+  - Fast Avro encoding/decoding
 
-- [ ] **Dead Letter Queue**
-  - Configurable DLQ for failed messages
-  - Retry policies
-  - Error categorization
+- [ ] **Exactly-Once Semantics**
+  - Transactional producer support
+  - Idempotent consumers
+  - End-to-end exactly-once guarantees (EOS)
 
-- [ ] **Prometheus Metrics**
-  - Native Prometheus exporter
-  - Rich metrics (latency, throughput, errors)
-  - Grafana dashboard templates
+- [ ] **Generic Envelope<K, V> Refactor**
+  - Type-safe envelope system
+  - `Envelope<Bytes, Bytes>` for passthrough (zero-copy)
+  - `Envelope<Json, Json>` for full processing
+  - `Envelope<String, Bytes>` for key-based routing
+  - Zero deserialization overhead for passthrough pipelines
 
-- [ ] **Health Check Endpoint**
-  - HTTP health endpoint
-  - Kafka connectivity check
-  - Resource utilization metrics
+- [ ] **User-Defined Functions (UDF)**
+  - WASM-based UDF runtime (lightweight, sandboxed)
+  - Or Lua scripting (Rhai engine considered)
+  - Custom filter/transform logic without recompiling
 
-- [ ] **Enhanced CLI**
-  - Better command-line interface
-  - Config validation mode
-  - Dry-run mode
+- [ ] **State Management**
+  - RocksDB-backed state store
+  - Stateful transformations (aggregations, windows)
+  - Fault-tolerant state recovery
 
-### Performance
+- [ ] **Lambda Expressions in DSL**
+  - Inline lambda for complex transforms
+  - Example: `array_map('/items', item => item.price * 1.2)`
+  - Method chaining: `$field.trim().lowercase().split(',')`
 
-- [ ] Zero-copy optimizations
-- [ ] SIMD operations for filtering
-- [ ] Parallel message processing
-- Target: 50K+ messages/second
+### Performance Enhancements
+
+- [ ] Zero-copy optimizations for Envelope<Bytes, Bytes>
+- [ ] SIMD operations for bulk filtering
+- [ ] Parallel message processing within partition
+- [ ] Target: 60K+ messages/second (with zero-copy)
+
+### Developer Experience
+
+- [ ] VS Code extension for DSL syntax highlighting
+- [ ] Interactive DSL playground (REPL)
+- [ ] Config validation as pre-commit hook
+- [ ] Better error messages with suggestions
+
+---
+
+## Version 2.0 (Planned - Q1 2027)
+
+**Goal:** Modernize DSL, deprecate legacy syntax
+
+### Breaking Changes
+
+- [ ] **Deprecate colon-delimited v1 syntax**
+  - v1 syntax will still work but emit deprecation warnings
+  - Automatic migration tool: `streamforge migrate config.yaml`
+  - Full removal in v3.0 (Q4 2027)
+
+- [ ] **Stabilize CRD to v1**
+  - StreamforgePipeline moves from v1alpha1 → v1
+  - Schema changes finalized
+
+- [ ] **Break 0.x compatibility**
+  - Remove deprecated operators (KEY_SUFFIX, KEY_CONTAINS)
+  - Remove legacy config formats
+
+### New Features
+
+- [ ] **SQL-like query syntax** (optional alternative to DSL)
+  - Example: `SELECT * FROM input WHERE status = 'active' AND tier IN ('premium', 'enterprise')`
+  - Transpiled to AST (same execution path as DSL)
+
+- [ ] **Advanced Routing**
+  - Topic-to-topic routing matrix
+  - Dynamic topic creation
+  - Conditional multi-destination routing
+
+- [ ] **Enhanced Observability**
+  - OpenTelemetry integration
+  - Distributed tracing with Jaeger/Zipkin
+  - End-to-end message correlation
 
 ### Documentation
 
-- [ ] Video tutorials
-- [ ] Interactive examples
-- [ ] Migration guide from MM2
-- [ ] Architecture deep-dive
+- [ ] Complete API reference (auto-generated from code)
+- [ ] Interactive tutorials
+- [ ] Video walkthroughs
+- [ ] Localization (i18n support)
 
 ---
 
-## Version 1.1 (Q3 2025)
+## Version 3.0+ (Future)
 
-**Goal**: Advanced features and integrations
+**Long-term Vision**
 
-### Features
+- [ ] **Multi-Cloud Support**
+  - Amazon MSK
+  - Azure Event Hubs (Kafka-compatible)
+  - Confluent Cloud optimizations
 
-- [ ] **Schema Registry Support**
-  - Full Schema Registry integration
-  - Schema validation
-  - Schema evolution strategies
+- [ ] **Advanced Analytics**
+  - Real-time aggregations
+  - Windowing operations (tumbling, sliding, session)
+  - Time-series downsampling
 
-- [ ] **Message Transformation Enhancements**
-  - Nested transform composition
-  - Custom transform functions
-  - Jinja2-like templating
+- [ ] **Governance & Compliance**
+  - Built-in PII detection and redaction
+  - Audit logging (immutable)
+  - Role-based access control (RBAC)
 
-- [ ] **Exactly-Once Semantics**
-  - Transactional processing
-  - Idempotent producers
-  - Offset management improvements
-
-- [ ] **Web UI** (Maybe)
-  - Configuration management
-  - Real-time metrics dashboard
-  - Pipeline visualization
-
-### Integrations
-
-- [ ] Confluent Cloud CLI integration
-- [ ] AWS MSK IAM authentication
-- [ ] Azure Event Hubs integration
-- [ ] Google Cloud Pub/Sub bridge
-
----
-
-## Version 1.2 (Q4 2025)
-
-**Goal**: Enterprise features
-
-### Features
-
-- [ ] **Multi-Tenancy**
-  - Isolated pipelines
-  - Resource quotas
-  - Per-tenant metrics
-
-- [ ] **Advanced Routing**
-  - Content-based routing rules engine
-  - Dynamic routing table updates
-  - Conditional transformations
-
-- [ ] **Data Governance**
-  - PII detection and masking
-  - Data lineage tracking
-  - Audit logging
-
-- [ ] **Kubernetes Operator**
-  - CRD for pipeline definitions
-  - Auto-scaling based on lag
-  - GitOps support
-
-### Performance
-
-- [ ] Adaptive batching
-- [ ] Smart backpressure
-- [ ] Connection pooling optimization
-- Target: 100K+ messages/second
-
----
-
-## Version 2.0 (2026)
-
-**Goal**: Next-generation streaming
-
-### Vision Features
-
-- [ ] **Stream Processing**
-  - Windowing operations
-  - Joins across streams
-  - Aggregations
-  - Stateful processing
-
-- [ ] **Machine Learning**
-  - Real-time model inference
-  - Anomaly detection
-  - Auto-scaling predictions
-
-- [ ] **Multi-Protocol Support**
-  - Pulsar support
-  - NATS integration
-  - RabbitMQ bridge
-  - HTTP/gRPC sources/sinks
-
-- [ ] **Visual Pipeline Builder**
-  - Drag-and-drop pipeline creation
-  - Live preview
-  - Template marketplace
-
----
-
-## Community Wishlist
-
-Features requested by the community (vote on GitHub Issues):
-
-### High Priority
-
-- [ ] Avro/Protobuf support (🔥 Most requested)
-- [ ] Prometheus metrics
-- [ ] Dead letter queue
-- [ ] Web UI for monitoring
-
-### Medium Priority
-
-- [ ] Exactly-once semantics
-- [ ] Schema Registry integration
-- [ ] Kubernetes operator
-- [ ] PII masking
-
-### Low Priority
-
-- [ ] Message deduplication
-- [ ] Time-based filtering
-- [ ] Geographic routing
-- [ ] Multi-cloud support
-
----
-
-## Research & Experiments
-
-Experimental features we're exploring:
-
-### Performance Innovations
-
-- **DPDK Integration**: Zero-copy networking
-- **io_uring**: Modern Linux async I/O
-- **SIMD Optimization**: Vectorized operations
-- **GPU Acceleration**: Parallel filtering/transforms
-
-### New Capabilities
-
-- **Stream SQL**: SQL-like query language
-- **CDC Support**: Change Data Capture integration
-- **Time-Travel**: Historical replay capabilities
-- **Smart Caching**: Intelligent message caching
-
----
-
-## Non-Goals
-
-Things we explicitly don't plan to do:
-
-❌ **Not a Stream Processor**: Use Kafka Streams or Flink for complex stream processing
-❌ **Not a Data Lake**: Use dedicated storage solutions
-❌ **Not a Message Queue**: Kafka is the message queue
-❌ **Not a Database**: Use proper databases for persistence
-
----
-
-## How to Influence the Roadmap
-
-### 1. Vote on Issues
-
-Vote with 👍 on GitHub issues for features you want.
-
-### 2. Submit Proposals
-
-Create detailed feature proposals with:
-- Use case description
-- Technical approach
-- Benefits and tradeoffs
-
-### 3. Contribute Code
-
-Implement features yourself! See [CONTRIBUTING.md](docs/CONTRIBUTING.md).
-
-### 4. Sponsor Development
-
-Support development through GitHub Sponsors (coming soon).
+- [ ] **Stream Joins**
+  - Inner/outer/left joins across topics
+  - Temporal joins (time-based windowing)
+  - KTable equivalents
 
 ---
 
 ## Release Schedule
 
-### Cadence
-
-- **Major releases** (X.0.0): Yearly
-- **Minor releases** (0.X.0): Quarterly
-- **Patch releases** (0.0.X): As needed
-
-### Support Policy
-
-- **Current major version**: Full support
-- **Previous major version**: Security fixes for 6 months
-- **Older versions**: Community support only
+| Version | Target Date | Status |
+|---------|-------------|--------|
+| v1.0.0  | 2026-04-18  | ✅ Released |
+| v1.0.1  | 2026-05-15  | Patch release (bugfixes) |
+| v1.1.0  | 2026-09-01  | Feature release |
+| v1.2.0  | 2026-12-01  | Feature release |
+| v2.0.0  | 2027-03-01  | Breaking changes |
+| v3.0.0  | 2028-01-01  | Major evolution |
 
 ---
 
-## Success Metrics
+## Contribution Opportunities
 
-How we measure success:
+Want to contribute? Here are high-impact areas:
 
-### Adoption
+### Code Contributions
+- Implement Avro support (Issue #123)
+- Add exactly-once semantics (Issue #145)
+- Build WASM UDF runtime (Issue #178)
+- Performance benchmarking suite (Issue #201)
 
-- **GitHub stars**: 1K+ (v1.0), 5K+ (v2.0)
-- **Downloads**: 10K/month (v1.0), 50K/month (v2.0)
-- **Production usage**: 100+ companies (v1.0), 500+ (v2.0)
+### Documentation Contributions
+- Write migration guide v1 → v2 DSL syntax
+- Create video tutorials for common use cases
+- Translate docs to other languages (Spanish, Mandarin, Japanese)
+- Expand examples directory with real-world scenarios
 
-### Performance
+### Testing Contributions
+- Add integration tests for complex scenarios
+- Performance regression testing
+- Chaos engineering (failure injection)
+- Load testing at scale (100K+ msg/s)
 
-- **Throughput**: 50K msg/s (v1.0), 100K msg/s (v2.0)
-- **Latency p99**: <10ms (v1.0), <5ms (v2.0)
-- **Memory**: <50MB (v1.0), <30MB (v2.0)
-
-### Community
-
-- **Contributors**: 50+ (v1.0), 200+ (v2.0)
-- **Stars**: 1K+ (v1.0), 5K+ (v2.0)
-- **Conference talks**: 3+ (v1.0), 10+ (v2.0)
-
----
-
-## Get Involved
-
-### Ways to Contribute
-
-1. **Use it** - Try Streamforge and provide feedback
-2. **Report bugs** - Help us improve quality
-3. **Request features** - Tell us what you need
-4. **Write docs** - Improve documentation
-5. **Write code** - Implement features
-6. **Spread the word** - Star, tweet, blog about it
-
-### Communication
-
-- **GitHub Issues**: Feature requests and bugs
-- **GitHub Discussions**: Questions and ideas
-- **Email**: rahul.oracle.db@gmail.com
+### Community Contributions
+- Answer questions on GitHub Discussions
+- Review pull requests
+- Maintain Helm chart
+- Improve Kubernetes Operator
 
 ---
 
-## Changelog
+## Feedback & Suggestions
 
-See [docs/CHANGELOG.md](docs/CHANGELOG.md) for version history.
+Have ideas for future versions? Open a discussion at:
+- **GitHub Discussions:** https://github.com/rahulbsw/streamforge/discussions
+- **Feature Requests:** https://github.com/rahulbsw/streamforge/issues/new?template=feature_request.md
+- **Slack Community:** https://streamforge.slack.com
+
+We value community input and prioritize features based on user demand!
 
 ---
 
-**Last Updated**: 2025-03-09
-**Current Version**: 0.3.0
-**Next Release**: 1.0.0 (Q2 2025)
+## Version Compatibility Matrix
+
+| Feature | v1.0 | v1.1 | v2.0 | v3.0 |
+|---------|------|------|------|------|
+| Colon DSL syntax | ✅ | ✅ | ⚠️ Deprecated | ❌ |
+| Function-style DSL | ✅ | ✅ | ✅ | ✅ |
+| Dollar syntax | ✅ | ✅ | ✅ | ✅ |
+| At-least-once | ✅ | ✅ | ✅ | ✅ |
+| Exactly-once | ❌ | ✅ | ✅ | ✅ |
+| Avro | ❌ | ✅ | ✅ | ✅ |
+| UDF (WASM) | ❌ | ✅ | ✅ | ✅ |
+| Envelope<K,V> | ❌ | ✅ | ✅ | ✅ |
+| SQL syntax | ❌ | ❌ | ✅ | ✅ |
+| Stream joins | ❌ | ❌ | ❌ | ✅ |
+
+---
+
+**Last Updated:** 2026-04-18  
+**Maintained By:** StreamForge Core Team

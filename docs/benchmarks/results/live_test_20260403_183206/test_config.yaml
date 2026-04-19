@@ -1,0 +1,21 @@
+appid: streamforge-observability-test
+bootstrap: localhost:9092
+target_broker: localhost:9092
+input: test-8p-input
+threads: 8
+offset: latest
+
+observability:
+  metrics_enabled: true
+  metrics_port: 9090
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 10
+
+routing:
+  routing_type: filter
+  destinations:
+    - output: test-8p-output
+      # Match all messages (no filter = pass-through)
+      key_transform: "/user/id"
+      headers:
+        x-processed: "true"

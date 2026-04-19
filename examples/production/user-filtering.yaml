@@ -1,0 +1,98 @@
+# Production config: User event filtering and routing
+# Use case: Filter user events by status and route to different topics
+# Throughput: ~50K msg/s
+# Resource requirements: 2 CPU / 4 Gi memory per replica
+
+appid: "user-filtering-prod"
+bootstrap: "kafka.kafka.svc.cluster.local:9092"
+input: "user-events"
+offset: "latest"
+threads: 4
+
+# Performance tuning for balanced throughput and latency
+performance:
+  fetch_min_bytes: 5120         # 5 KB - moderate batching
+  fetch_max_wait_ms: 100        # 100ms max wait
+  max_partition_fetch_bytes: 1048576  # 1 MB per partition
+  queue_buffering_max_ms: 10
+  batch_size: 2000              # Moderate batch size
+  linger_ms: 20                 # Allow some batching
+  compression: "zstd"           # Fast compression
+
+# Commit every 5 seconds for throughput
+commit_strategy: "manual"
+commit_interval_ms: 5000
+
+# Retry policy with exponential backoff
+retry:
+  max_attempts: 3
+  initial_delay_ms: 100
+  max_delay_ms: 30000
+  jitter: true
+
+# DLQ for failed messages
+dlq:
+  enabled: true
+  topic: "user-filtering-dlq"
+  include_error_headers: true
+  max_retries: 3
+
+# Routing configuration
+routing:
+  routing_type: "filter"
+  destinations:
+    # Active users with complete profiles
+    - output: "active-users"
+      filter: "AND:/status,==,active:/profile/complete,==,true"
+      transform: "/data"
+      key_transform: "/user/id"
+      partitioning: "hash"
+      headers:
+        x-pipeline: "user-filtering"
+        x-destination: "active-users"
+
+    # Premium tier users
+    - output: "premium-users"
+      filter: "/tier,==,premium"
+      transform: "CONSTRUCT:id=/user/id:email=/email:tier=/tier:created=/created_at"
+      key_transform: "/user/id"
+      headers:
+        x-pipeline: "user-filtering"
+        x-tier: "premium"
+
+    # New user registrations (last 24 hours)
+    - output: "new-users"
+      filter: "TIMESTAMP_AGE:<,86400"
+      transform: "/data"
+      key_transform: "/user/id"
+      headers:
+        x-pipeline: "user-filtering"
+        x-destination: "new-users"
+
+    # Users by region (for regional processing)
+    - output: "users-us"
+      filter: "/region,==,us"
+      transform: "/data"
+      key_transform: "/user/id"
+      partitioning: "field"
+      partition_field: "/state"
+
+    - output: "users-eu"
+      filter: "/region,==,eu"
+      transform: "/data"
+      key_transform: "/user/id"
+      partitioning: "field"
+      partition_field: "/country"
+
+# Metrics for monitoring
+metrics:
+  enabled: true
+  port: 8080
+  path: "/metrics"
+
+# Local cache for enrichment (if needed)
+cache:
+  enabled: true
+  type: "local"
+  ttl_seconds: 300
+  max_entries: 10000

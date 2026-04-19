@@ -65,6 +65,14 @@ pub struct MirrorMakerConfig {
     /// Observability configuration (metrics, monitoring)
     #[serde(default)]
     pub observability: ObservabilityConfig,
+
+    /// Retry configuration for transient failures
+    #[serde(default)]
+    pub retry: crate::retry::RetryConfig,
+
+    /// Dead letter queue configuration for failed messages
+    #[serde(default)]
+    pub dlq: crate::dlq::DlqConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,6 +196,21 @@ pub struct RoutingConfig {
     pub destinations: Vec<DestinationConfig>,
 }
 
+/// Error handling policy for filter/transform failures
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorPolicy {
+    /// Halt pipeline on any error (strictest)
+    #[default]
+    Fail,
+    /// Send failed messages to dead letter queue (recommended)
+    Dlq,
+    /// Skip bad messages and log errors (permissive)
+    SkipAndLog,
+    /// Continue processing, log but don't DLQ (most permissive)
+    Continue,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DestinationConfig {
     /// Destination topic name
@@ -211,6 +234,21 @@ pub struct DestinationConfig {
     /// Simple path: "/message" or "/message/confId"
     /// Object construction JSON (parsed separately)
     pub transform: Option<String>,
+
+    /// Error handling policy for this destination
+    ///
+    /// Controls what happens when filter/transform evaluation fails:
+    /// - "fail" - Halt pipeline on any error (default for backward compatibility)
+    /// - "dlq" - Send failed messages to dead letter queue
+    /// - "skip_and_log" - Skip bad messages and log errors
+    /// - "continue" - Continue processing, log errors but don't DLQ
+    ///
+    /// Choose based on data criticality:
+    /// - Financial/audit: use "fail" or "dlq"
+    /// - Analytics: use "skip_and_log"
+    /// - Enrichment: use "continue" with try() functions
+    #[serde(default)]
+    pub error_policy: ErrorPolicy,
 
     /// Key transformation expression (NEW)
     ///

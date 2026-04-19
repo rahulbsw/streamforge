@@ -61,7 +61,7 @@ When asking for help, please provide:
 
 ```
 **Environment:**
-- Streamforge version: 0.3.0
+- Streamforge version: _e.g., 1.0.0, 0.4.0-rc1_
 - OS: Ubuntu 22.04
 - Rust: 1.70.0
 

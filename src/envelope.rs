@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Complete Kafka message envelope containing key, value, headers, and metadata.
 ///
@@ -41,7 +42,8 @@ pub struct MessageEnvelope {
     /// Message value (payload)
     ///
     /// The main message content. In Streamforge, this is always JSON.
-    pub value: Value,
+    /// Wrapped in Arc to make cloning cheap for multi-destination routing.
+    pub value: Arc<Value>,
 
     /// Message headers (metadata key-value pairs)
     ///
@@ -52,7 +54,8 @@ pub struct MessageEnvelope {
     /// - Metadata (content-type, schema-version)
     ///
     /// Values are raw bytes to support both string and binary data.
-    pub headers: HashMap<String, Vec<u8>>,
+    /// Wrapped in Arc to make cloning cheap for multi-destination routing.
+    pub headers: Arc<HashMap<String, Vec<u8>>>,
 
     /// Message timestamp (milliseconds since Unix epoch)
     ///
@@ -87,8 +90,8 @@ impl MessageEnvelope {
     pub fn new(value: Value) -> Self {
         Self {
             key: None,
-            value,
-            headers: HashMap::new(),
+            value: Arc::new(value),
+            headers: Arc::new(HashMap::new()),
             timestamp: None,
             partition: None,
             offset: None,
@@ -100,8 +103,8 @@ impl MessageEnvelope {
     pub fn with_key(key: Option<Value>, value: Value) -> Self {
         Self {
             key,
-            value,
-            headers: HashMap::new(),
+            value: Arc::new(value),
+            headers: Arc::new(HashMap::new()),
             timestamp: None,
             partition: None,
             offset: None,
@@ -123,13 +126,13 @@ impl MessageEnvelope {
 
     /// Builder: Add header
     pub fn header(mut self, name: String, value: Vec<u8>) -> Self {
-        self.headers.insert(name, value);
+        Arc::make_mut(&mut self.headers).insert(name, value);
         self
     }
 
     /// Builder: Add string header
     pub fn with_header_str(mut self, name: String, value: &str) -> Self {
-        self.headers.insert(name, value.as_bytes().to_vec());
+        Arc::make_mut(&mut self.headers).insert(name, value.as_bytes().to_vec());
         self
     }
 
@@ -165,12 +168,12 @@ impl MessageEnvelope {
 
     /// Remove header
     pub fn remove_header(&mut self, name: &str) -> Option<Vec<u8>> {
-        self.headers.remove(name)
+        Arc::make_mut(&mut self.headers).remove(name)
     }
 
     /// Clear all headers
     pub fn clear_headers(&mut self) {
-        self.headers.clear();
+        Arc::make_mut(&mut self.headers).clear();
     }
 
     /// Get message age in seconds (if timestamp present)
@@ -207,7 +210,7 @@ mod tests {
     fn test_envelope_new() {
         let envelope = MessageEnvelope::new(json!({"test": "value"}));
         assert!(envelope.key.is_none());
-        assert_eq!(envelope.value, json!({"test": "value"}));
+        assert_eq!(*envelope.value, json!({"test": "value"}));
         assert!(envelope.headers.is_empty());
         assert!(envelope.timestamp.is_none());
     }
@@ -217,7 +220,7 @@ mod tests {
         let envelope =
             MessageEnvelope::with_key(Some(json!({"id": 123})), json!({"test": "value"}));
         assert_eq!(envelope.key, Some(json!({"id": 123})));
-        assert_eq!(envelope.value, json!({"test": "value"}));
+        assert_eq!(*envelope.value, json!({"test": "value"}));
     }
 
     #[test]
@@ -244,12 +247,8 @@ mod tests {
         let mut envelope = MessageEnvelope::new(json!({}));
 
         // Add headers
-        envelope
-            .headers
-            .insert("x-tenant".to_string(), b"prod".to_vec());
-        envelope
-            .headers
-            .insert("x-user".to_string(), b"user-123".to_vec());
+        Arc::make_mut(&mut envelope.headers).insert("x-tenant".to_string(), b"prod".to_vec());
+        Arc::make_mut(&mut envelope.headers).insert("x-user".to_string(), b"user-123".to_vec());
 
         // Check existence
         assert!(envelope.has_header("x-tenant"));

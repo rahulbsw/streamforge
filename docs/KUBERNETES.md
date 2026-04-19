@@ -421,45 +421,109 @@ kubectl port-forward -n headlamp svc/headlamp 8080:80
 
 Access: http://localhost:8080
 
-### Option 4: Custom Streamforge UI (Future)
+### Option 4: Streamforge UI (Built-in) ⭐ New!
 
-**Roadmap v1.2:** Web UI specifically for Streamforge
+**Web UI for managing pipelines - included with the Helm chart!**
 
-**Planned Features:**
-- Pipeline builder (drag-and-drop)
-- Filter/transform DSL editor with syntax highlighting
-- Live metrics and monitoring
-- Pipeline templates
-- Kafka cluster browser
-- Testing playground
+**Features:**
+- 🔐 JWT authentication
+- 📝 Visual pipeline builder (form + YAML editor)
+- 📊 Real-time pipeline monitoring
+- 📋 Live log viewer with auto-refresh
+- 🎯 Direct CRD management via Kubernetes API
+- 🎨 Modern Next.js + React + Tailwind CSS
 
 **Architecture:**
 
 ```
 ┌────────────────────────────────────────┐
-│      Streamforge UI (React/Next.js)    │
-│  • Pipeline editor                      │
-│  • DSL syntax highlighting              │
-│  • Live monitoring                      │
-│  • Template library                     │
+│      Streamforge UI (Next.js)          │
+│  • Pipeline form builder                │
+│  • DSL syntax editor                    │
+│  • Real-time status monitoring          │
+│  • Pod log viewer                       │
 └────────────────────────────────────────┘
                   │
-                  │ API calls
+                  │ Kubernetes API
                   ▼
 ┌────────────────────────────────────────┐
 │     Kubernetes API Server               │
-│  • Authentication (RBAC)                │
-│  • CRD operations                       │
+│  • RBAC authentication                  │
+│  • StreamforgePipeline CRD ops          │
+│  • Pod logs access                      │
 └────────────────────────────────────────┘
                   │
-                  │ watches
+                  │ watches/reconciles
                   ▼
 ┌────────────────────────────────────────┐
 │      Streamforge Operator               │
 └────────────────────────────────────────┘
 ```
 
-**Would you like this?** Vote on: https://github.com/rahulbsw/streamforge/discussions/new
+**Setup (via Helm):**
+
+```bash
+# Install operator with UI enabled
+helm install streamforge-operator ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --create-namespace \
+  --set ui.enabled=true
+
+# Access the UI
+# Option 1: Minikube
+minikube service streamforge-operator-ui -n streamforge-system
+
+# Option 2: Port forward
+kubectl port-forward -n streamforge-system svc/streamforge-operator-ui 3001:3001
+# Access at: http://localhost:3001
+
+# Option 3: Ingress
+helm upgrade streamforge-operator ./helm/streamforge-operator \
+  -n streamforge-system \
+  --reuse-values \
+  --set ui.ingress.enabled=true \
+  --set ui.ingress.hosts[0].host=streamforge.example.com
+```
+
+**Default credentials:**
+- Username: `admin`
+- Password: `admin`
+
+⚠️ **Change these in production!**
+
+**UI Configuration:**
+
+```yaml
+# custom-ui-values.yaml
+ui:
+  enabled: true
+  replicas: 2
+  
+  service:
+    type: LoadBalancer  # or NodePort, ClusterIP
+    port: 3001
+  
+  # Secure JWT secret
+  jwtSecret: "your-secure-random-secret-key"
+  
+  # Enable ingress
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: streamforge.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: streamforge-tls
+        hosts:
+          - streamforge.example.com
+```
+
+See [ui/README.md](../ui/README.md) for more details.
 
 ### Option 5: kubectl Plugin
 
@@ -740,8 +804,8 @@ kafka-consumer-groups.sh --bootstrap-server kafka:9092 \
 ## Next Steps
 
 1. **Install Operator**: `helm install streamforge-operator`
-2. **Create First Pipeline**: Apply example YAML
-3. **Choose UI**: Set up Lens or Headlamp
+2. **Enable UI**: `--set ui.enabled=true`
+3. **Create First Pipeline**: Apply example YAML or use UI
 4. **Monitor**: Enable Prometheus metrics
 5. **Scale**: Test with production load
 

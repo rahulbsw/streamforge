@@ -1,0 +1,39 @@
+# Basic Error Policy Example
+#
+# Shows how to use error_policy to control what happens when messages fail processing
+
+appid: "error-policy-demo"
+bootstrap: "localhost:9092"
+input: "source-topic"
+offset: "latest"
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Critical data: halt on error
+    - output: "critical-topic"
+      filter: "$priority == 'critical'"
+      error_policy: "fail"
+      # If any message fails filter/transform → pipeline stops
+      # Use for: financial data, audit logs, compliance records
+
+    # Standard data: send errors to DLQ
+    - output: "standard-topic"
+      filter: "$priority == 'standard'"
+      error_policy: "dlq"
+      # If any message fails → send to DLQ, continue processing
+      # Use for: most production use cases
+      # Requires DLQ config below
+
+    # Analytics: skip bad records
+    - output: "analytics-topic"
+      filter: "$priority == 'analytics'"
+      error_policy: "skip_and_log"
+      # If any message fails → log warning, skip, continue
+      # Use for: metrics, dashboards, non-critical data
+
+# Dead letter queue configuration (required for error_policy: "dlq")
+dlq:
+  enabled: true
+  topic: "error-handling-dlq"
+  max_retries: 3

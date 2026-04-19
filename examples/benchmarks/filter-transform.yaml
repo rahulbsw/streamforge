@@ -1,0 +1,62 @@
+# Benchmark config: Filter and transform performance
+# Target: ~20K msg/s with JSON filtering and transformation
+# Use case: Validate DSL performance under load
+
+appid: "benchmark-filter-transform"
+bootstrap: "localhost:9092"
+input: "test-input"
+offset: "earliest"
+threads: 4
+
+# Balanced performance
+performance:
+  fetch_min_bytes: 5120
+  fetch_max_wait_ms: 100
+  batch_size: 2000
+  linger_ms: 20
+  compression: "zstd"
+
+commit_strategy: "time-based"
+commit_interval_ms: 1000
+
+# Retry policy for benchmark
+retry:
+  max_attempts: 2
+  initial_delay_ms: 50
+  max_delay_ms: 1000
+  jitter: true
+
+# DLQ for failed messages
+dlq:
+  enabled: true
+  topic: "benchmark-dlq"
+  include_error_headers: true
+
+# Filter-based routing with transforms
+routing:
+  routing_type: "filter"
+  destinations:
+    # Simple filter (JSON path comparison)
+    - output: "test-simple"
+      filter: "/status,==,active"
+      transform: "/data"
+
+    # Complex filter (AND with 3 conditions)
+    - output: "test-complex"
+      filter: "AND:/status,==,active:/age,>,18:/tier,==,premium"
+      transform: "CONSTRUCT:id=/user/id:email=/email:tier=/tier"
+      key_transform: "/user/id"
+
+    # Regex filter
+    - output: "test-regex"
+      filter: 'REGEX:/email,.*@example\\.com$'
+      transform: "/data"
+
+    # Array filter
+    - output: "test-array"
+      filter: "ARRAY_ANY:/items,/price,>,100"
+      transform: "ARRAY_MAP:/items,/id,item_ids"
+
+metrics:
+  enabled: true
+  port: 8080

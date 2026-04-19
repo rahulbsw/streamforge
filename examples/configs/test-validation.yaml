@@ -1,0 +1,42 @@
+# Test config for streamforge-validate CLI
+appid: "validation-test"
+bootstrap: "localhost:9092"
+input: "test-input"
+offset: "latest"
+threads: 4
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Valid destination with all features
+    - output: "active-users"
+      filter: "AND:/status,==,active:/age,>,18"
+      transform: "CONSTRUCT:id=/user/id:email=/email"
+      key_transform: "/user/id"
+      headers:
+        x-pipeline: "user-processor"
+
+    # Valid destination with regex (simplified pattern)
+    - output: "emails"
+      filter: 'REGEX:/email,.*@.*\\.com$'
+      transform: "/email"
+
+    # Valid destination with array filter
+    - output: "premium-orders"
+      filter: "ARRAY_ANY:/items,/price,>,1000"
+      transform: "ARRAY_MAP:/items,/id,item_ids"
+
+    # Valid destination with key prefix
+    - output: "event-messages"
+      filter: "KEY_PREFIX:event-"
+      transform: "/event"
+
+    # Simple timestamp filter
+    - output: "recent-only"
+      filter: "TIMESTAMP_AGE:<,3600"
+      transform: "/data"
+
+    # Valid destination with hash transform
+    - output: "redacted"
+      filter: "/user/tier,==,premium"
+      transform: "HASH:SHA256,/user/email,email_hash"

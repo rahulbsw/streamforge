@@ -1,0 +1,94 @@
+    Finished `bench` profile [optimized] target(s) in 0.31s
+     Running benches/transform_benchmarks.rs (target/release/deps/transform_benchmarks-4e918ca6779ae582)
+Gnuplot not found, using plotters backend
+Benchmarking transform/field_extract
+Benchmarking transform/field_extract: Warming up for 3.0000 s
+Benchmarking transform/field_extract: Collecting 100 samples in estimated 5.0008 s (5.7M iterations)
+Benchmarking transform/field_extract: Analyzing
+transform/field_extract time:   [873.43 ns 875.78 ns 878.13 ns]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) low mild
+  1 (1.00%) high mild
+
+Benchmarking transform/construct_2_fields
+Benchmarking transform/construct_2_fields: Warming up for 3.0000 s
+Benchmarking transform/construct_2_fields: Collecting 100 samples in estimated 5.0030 s (6.2M iterations)
+Benchmarking transform/construct_2_fields: Analyzing
+transform/construct_2_fields
+                        time:   [800.31 ns 802.99 ns 805.84 ns]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+Benchmarking transform/construct_4_fields
+Benchmarking transform/construct_4_fields: Warming up for 3.0000 s
+Benchmarking transform/construct_4_fields: Collecting 100 samples in estimated 5.0053 s (3.9M iterations)
+Benchmarking transform/construct_4_fields: Analyzing
+transform/construct_4_fields
+                        time:   [1.2681 µs 1.2724 µs 1.2769 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+Benchmarking transform/string_lower
+Benchmarking transform/string_lower: Warming up for 3.0000 s
+Benchmarking transform/string_lower: Collecting 100 samples in estimated 5.0006 s (5.1M iterations)
+Benchmarking transform/string_lower: Analyzing
+transform/string_lower  time:   [974.47 ns 976.99 ns 979.50 ns]
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) low mild
+  5 (5.00%) high mild
+
+Benchmarking transform/arithmetic
+Benchmarking transform/arithmetic: Warming up for 3.0000 s
+Benchmarking transform/arithmetic: Collecting 100 samples in estimated 5.0016 s (11M iterations)
+Benchmarking transform/arithmetic: Analyzing
+transform/arithmetic    time:   [429.51 ns 432.08 ns 435.31 ns]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+
+Benchmarking transform/if_else
+Benchmarking transform/if_else: Warming up for 3.0000 s
+Benchmarking transform/if_else: Collecting 100 samples in estimated 5.0022 s (8.6M iterations)
+Benchmarking transform/if_else: Analyzing
+transform/if_else       time:   [577.27 ns 578.78 ns 580.41 ns]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+
+Benchmarking transform/switch_case
+Benchmarking transform/switch_case: Warming up for 3.0000 s
+Benchmarking transform/switch_case: Collecting 100 samples in estimated 5.0022 s (11M iterations)
+Benchmarking transform/switch_case: Analyzing
+transform/switch_case   time:   [473.50 ns 475.01 ns 476.57 ns]
+
+Benchmarking transform/coalesce
+Benchmarking transform/coalesce: Warming up for 3.0000 s
+Benchmarking transform/coalesce: Collecting 100 samples in estimated 5.0015 s (8.1M iterations)
+Benchmarking transform/coalesce: Analyzing
+transform/coalesce      time:   [612.54 ns 615.47 ns 618.47 ns]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+Benchmarking transform/array_map
+Benchmarking transform/array_map: Warming up for 3.0000 s
+Benchmarking transform/array_map: Collecting 100 samples in estimated 5.0047 s (2.2M iterations)
+Benchmarking transform/array_map: Analyzing
+transform/array_map     time:   [2.2860 µs 2.2947 µs 2.3043 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+
+Benchmarking transform/multistatement
+Benchmarking transform/multistatement: Warming up for 3.0000 s
+Benchmarking transform/multistatement: Collecting 100 samples in estimated 5.0019 s (4.2M iterations)
+Benchmarking transform/multistatement: Analyzing
+transform/multistatement
+                        time:   [1.1730 µs 1.1770 µs 1.1811 µs]
+
+Benchmarking transform/envelope_aware
+Benchmarking transform/envelope_aware: Warming up for 3.0000 s
+Benchmarking transform/envelope_aware: Collecting 100 samples in estimated 5.0025 s (5.0M iterations)
+Benchmarking transform/envelope_aware: Analyzing
+transform/envelope_aware
+                        time:   [999.75 ns 1.0022 µs 1.0045 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
