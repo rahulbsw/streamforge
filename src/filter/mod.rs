@@ -16,9 +16,9 @@ pub use envelope_transform::{
 };
 
 pub use string_transforms::{
-    JoinTransform, PadLeftTransform, PadRightTransform, ReplaceTransform, SplitTransform,
-    StringLengthTransform, SubstringTransform, ToFloatTransform, ToIntTransform,
-    ToStringTransform, TrimEndTransform, TrimStartTransform,
+    JoinTransform, LowercaseTransform, PadLeftTransform, PadRightTransform, ReplaceTransform,
+    SplitTransform, StringLengthTransform, SubstringTransform, ToFloatTransform, ToIntTransform,
+    ToStringTransform, TrimEndTransform, TrimStartTransform, UppercaseTransform,
 };
 
 use crate::cache::SyncLookupCache;

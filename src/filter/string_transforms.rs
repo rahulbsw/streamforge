@@ -441,6 +441,70 @@ impl Transform for ToFloatTransform {
     }
 }
 
+/// Uppercase transform
+pub struct UppercaseTransform {
+    path: String,
+}
+
+impl UppercaseTransform {
+    pub fn new(path: impl Into<String>) -> Result<Self> {
+        Ok(Self {
+            path: path.into(),
+        })
+    }
+}
+
+impl Transform for UppercaseTransform {
+    fn transform(&self, value: Value) -> Result<Value> {
+        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
+            MirrorMakerError::JsonPathNotFound {
+            path: self.path.clone(),
+            value: None,
+        }
+        })?;
+
+        match extracted {
+            Value::String(s) => Ok(Value::String(s.to_uppercase())),
+            _ => Err(MirrorMakerError::Config(format!(
+                "Cannot uppercase non-string at path '{}'",
+                self.path
+            ))),
+        }
+    }
+}
+
+/// Lowercase transform
+pub struct LowercaseTransform {
+    path: String,
+}
+
+impl LowercaseTransform {
+    pub fn new(path: impl Into<String>) -> Result<Self> {
+        Ok(Self {
+            path: path.into(),
+        })
+    }
+}
+
+impl Transform for LowercaseTransform {
+    fn transform(&self, value: Value) -> Result<Value> {
+        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
+            MirrorMakerError::JsonPathNotFound {
+            path: self.path.clone(),
+            value: None,
+        }
+        })?;
+
+        match extracted {
+            Value::String(s) => Ok(Value::String(s.to_lowercase())),
+            _ => Err(MirrorMakerError::Config(format!(
+                "Cannot lowercase non-string at path '{}'",
+                self.path
+            ))),
+        }
+    }
+}
+
 /// Trim start transform
 pub struct TrimStartTransform {
     path: String,
@@ -580,5 +644,21 @@ mod tests {
         let input = json!({"string": "3.14"});
         let result = transform.transform(input).unwrap();
         assert_eq!(result, json!(3.14));
+    }
+
+    #[test]
+    fn test_uppercase() {
+        let transform = UppercaseTransform::new("/name").unwrap();
+        let input = json!({"name": "hello world"});
+        let result = transform.transform(input).unwrap();
+        assert_eq!(result, json!("HELLO WORLD"));
+    }
+
+    #[test]
+    fn test_lowercase() {
+        let transform = LowercaseTransform::new("/name").unwrap();
+        let input = json!({"name": "HELLO WORLD"});
+        let result = transform.transform(input).unwrap();
+        assert_eq!(result, json!("hello world"));
     }
 }
