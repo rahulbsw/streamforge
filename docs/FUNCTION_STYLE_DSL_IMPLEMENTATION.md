@@ -1,8 +1,9 @@
 # Function-Style DSL Implementation (v2.0)
 
-**Status:** ✅ Complete (Phase 1 - Filters)  
+**Status:** ✅ Complete and Stable (v1.0.0 Release)  
 **Date:** 2026-04-18  
-**Version:** 1.1 (ready for release)
+**Version:** 1.0.0 (shipped and stable)  
+**Note:** This document describes DSL v2.0/v2.1/v2.2 syntax which is fully backward compatible with v1.x colon syntax
 
 ---
 

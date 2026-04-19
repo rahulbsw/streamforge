@@ -1,8 +1,10 @@
 # DSL v2.0: Function-Style Syntax Proposal
 
-**Status:** 📋 Proposal (for v1.1 or v2.0)  
+**Status:** ✅ Implemented and Stable (v1.0.0 Release)  
 **Created:** 2026-04-18  
-**Rationale:** Improve readability for complex expressions while maintaining backward compatibility
+**Released:** 2026-04-18  
+**Note:** Function-style syntax and dollar shorthand are production-ready. Colon-delimited v1 syntax is also fully supported (automatic detection).  
+**Deprecation Timeline:** v1.x colon syntax will remain supported through v1.x releases. v2.0 (Q1 2027) will deprecate but not remove it.
 
 ---
 

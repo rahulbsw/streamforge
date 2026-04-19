@@ -6,8 +6,9 @@ We release patches for security vulnerabilities. Which versions are eligible for
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.3.x   | :white_check_mark: |
-| < 0.3   | :x:                |
+| 1.0.x   | :white_check_mark: |
+| 0.4.x   | :white_check_mark: (LTS until 2026-10-18) |
+| < 0.4   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -176,5 +177,5 @@ We thank the following security researchers for responsibly disclosing vulnerabi
 
 ---
 
-**Last Updated**: 2025-03-09
-**Version**: 0.3.0
+**Last Updated**: 2026-04-18
+**Version**: 1.0.0
