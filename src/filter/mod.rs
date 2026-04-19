@@ -476,9 +476,9 @@ impl Transform for IdentityTransform {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// // Try to extract email, fallback to default
-/// try($user.email, 'unknown@example.com')
+/// try($user.email, "unknown@example.com")
 ///
 /// // Try to convert to int, fallback to 0
 /// try(to_int($age), 0)
