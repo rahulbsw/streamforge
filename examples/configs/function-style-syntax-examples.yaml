@@ -1,0 +1,160 @@
+# Function-Style DSL Syntax Examples (v2.0)
+# This config demonstrates the new function-style syntax with auto-detection
+
+appid: "function-style-demo"
+bootstrap: "localhost:9092"
+input: "demo-input"
+offset: "latest"
+threads: 2
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Example 1: Simple field comparison (v2 syntax)
+    - output: "active-users"
+      filter: "field('/status') == 'active'"
+      transform: "field('/user/id')"
+
+    # Example 2: Boolean AND with null checks (v2 syntax)
+    - output: "validated-users"
+      filter: "and(is_not_null('/user/id'), field('/email_verified') == true)"
+      transform: "field('/data')"
+
+    # Example 3: Null and empty checks (v2 syntax)
+    - output: "complete-profiles"
+      filter: |
+        and(
+          is_not_null('/user/id'),
+          is_not_empty('/user/name'),
+          is_not_blank('/user/email')
+        )
+      transform: "field('/data')"
+
+    # Example 4: String operations in filters (v2 syntax)
+    - output: "admin-users"
+      filter: "field('/email').starts_with('admin@')"
+      transform: "field('/data')"
+      # Note: starts_with will be implemented soon
+
+    # Example 5: Regex matching (v2 syntax)
+    - output: "valid-emails"
+      filter: "regex(field('/email'), '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$')"
+      transform: "field('/data')"
+
+    # Example 6: OR conditions (v2 syntax)
+    - output: "premium-or-trial"
+      filter: |
+        or(
+          field('/tier') == 'premium',
+          field('/tier') == 'trial'
+        )
+      transform: "field('/data')"
+
+    # Example 7: NOT filter (v2 syntax)
+    - output: "not-deleted"
+      filter: "not(field('/deleted') == true)"
+      transform: "field('/data')"
+
+    # Example 8: Complex nested conditions (v2 syntax)
+    - output: "active-premium-verified"
+      filter: |
+        and(
+          field('/status') == 'active',
+          or(
+            field('/tier') == 'premium',
+            field('/tier') == 'enterprise'
+          ),
+          is_not_null('/email_verified_at')
+        )
+      transform: "field('/data')"
+
+    # Example 9: Exists checks (v2 syntax)
+    - output: "with-optional-field"
+      filter: "exists('/optional_field')"
+      transform: "field('/data')"
+
+    # Example 10: Not exists (v2 syntax)
+    - output: "never-deleted"
+      filter: "not_exists('/deleted_at')"
+      transform: "field('/data')"
+
+    # Example 11: Empty array/string check (v2 syntax)
+    - output: "non-empty-tags"
+      filter: "is_not_empty('/tags')"
+      transform: "field('/data')"
+
+    # Example 12: Blank check (null, empty, or whitespace) (v2 syntax)
+    - output: "has-description"
+      filter: "not(is_blank('/description'))"
+      transform: "field('/data')"
+
+    # Example 13: Number comparisons (v2 syntax)
+    - output: "high-value"
+      filter: |
+        and(
+          field('/amount') > 1000,
+          field('/amount') <= 10000
+        )
+      transform: "field('/data')"
+
+    # Example 14: Boolean comparisons (v2 syntax)
+    - output: "active-subscribers"
+      filter: |
+        and(
+          field('/active') == true,
+          field('/subscribed') == true,
+          field('/trial') == false
+        )
+      transform: "field('/data')"
+
+    # Example 15: Combining v1 and v2 (auto-detection)
+    # This uses v1 syntax (colon-delimited)
+    - output: "v1-syntax-still-works"
+      filter: "AND:/status,==,active:/count,>,10"
+      transform: "/data"
+
+    # Example 16: Comparison with null literal (v2 syntax)
+    - output: "explicit-null-check"
+      filter: "field('/value') == null"
+      transform: "field('/data')"
+
+    # Example 17: Multiple NOT conditions (v2 syntax)
+    - output: "clean-records"
+      filter: |
+        and(
+          not(is_null('/id')),
+          not(is_empty('/name')),
+          not(field('/flagged') == true)
+        )
+      transform: "field('/data')"
+
+# Note: String manipulation, date/time functions, and advanced transforms
+# are coming in the next phase. This example focuses on filter operations.
+
+# Comparison: v1 vs v2 syntax side-by-side:
+# V1: "AND:/status,==,active:/profile/complete,==,true"
+# V2: "and(field('/status') == 'active', field('/profile/complete') == true)"
+#
+# V1: "OR:/type,==,premium:/type,==,enterprise"
+# V2: "or(field('/type') == 'premium', field('/type') == 'enterprise')"
+#
+# V1: "NOT:/deleted,==,true"
+# V2: "not(field('/deleted') == true)"
+#
+# V1: "EXISTS:/optional_field"
+# V2: "exists('/optional_field')"
+#
+# V1: "REGEX:/email,^[a-z]+@example\\.com$"
+# V2: "regex(field('/email'), '^[a-z]+@example\\.com$')"
+
+# Benefits of v2 syntax:
+# - More readable, especially for complex expressions
+# - Familiar to programmers (looks like code)
+# - Better IDE support potential (autocomplete, syntax highlighting)
+# - Natural nesting with parentheses
+# - Self-documenting function names
+# - Better error messages pinpoint exact tokens
+
+metrics:
+  enabled: true
+  port: 8080

@@ -151,6 +151,31 @@ fn validate_filter_node(node: &Node<FilterExpr>, result: &mut ValidationResult) 
         FilterExpr::Exists(path) | FilterExpr::NotExists(path) => {
             validate_json_path(path, node.span, result);
         }
+
+        FilterExpr::IsNull(path)
+        | FilterExpr::IsNotNull(path)
+        | FilterExpr::IsEmpty(path)
+        | FilterExpr::IsNotEmpty(path)
+        | FilterExpr::IsBlank(path) => {
+            validate_json_path(path, node.span, result);
+        }
+
+        FilterExpr::StartsWith { path, prefix: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        FilterExpr::EndsWith { path, suffix: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        FilterExpr::Contains { path, substring: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        FilterExpr::StringLength { path, op, length: _ } => {
+            validate_json_path(path, node.span, result);
+            validate_numeric_comparison(op, node.span, result);
+        }
     }
 }
 
@@ -242,6 +267,86 @@ fn validate_transform_node(node: &Node<TransformExpr>, result: &mut ValidationRe
             for path in paths {
                 validate_json_path(path, node.span, result);
             }
+        }
+
+        // String operations (new in v2)
+        TransformExpr::StringLength(path) => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::Substring { path, start: _, end: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::Split { path, delimiter: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::Join { path, separator: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::Concat(operands) => {
+            for operand in operands {
+                if let super::ast::StringOperand::Path(path) = operand {
+                    validate_json_path(path, node.span, result);
+                }
+            }
+        }
+
+        TransformExpr::Replace { path, pattern: _, replacement: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::PadLeft { path, width: _, pad_char: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::PadRight { path, width: _, pad_char: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::ToString(path) | TransformExpr::ToInt(path) | TransformExpr::ToFloat(path) => {
+            validate_json_path(path, node.span, result);
+        }
+
+        // Date/time operations (new in v2)
+        TransformExpr::Now | TransformExpr::NowIso => {
+            // No validation needed
+        }
+
+        TransformExpr::ParseDate { path, format: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::FromEpoch(path) | TransformExpr::FromEpochSeconds(path) => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::FormatDate { path, format: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::ToEpoch(path) | TransformExpr::ToEpochSeconds(path) | TransformExpr::ToIso(path) => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::AddDays { path, days: _ }
+        | TransformExpr::AddHours { path, hours: _ }
+        | TransformExpr::AddMinutes { path, minutes: _ }
+        | TransformExpr::SubtractDays { path, days: _ } => {
+            validate_json_path(path, node.span, result);
+        }
+
+        TransformExpr::Year(path)
+        | TransformExpr::Month(path)
+        | TransformExpr::Day(path)
+        | TransformExpr::Hour(path)
+        | TransformExpr::Minute(path)
+        | TransformExpr::Second(path)
+        | TransformExpr::DayOfWeek(path)
+        | TransformExpr::DayOfYear(path) => {
+            validate_json_path(path, node.span, result);
         }
     }
 }

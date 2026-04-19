@@ -140,6 +140,37 @@ pub enum FilterExpr {
 
     /// Field not exists: NOT_EXISTS:path
     NotExists(String),
+
+    /// Null check: IS_NULL:path
+    IsNull(String),
+
+    /// Not null check: IS_NOT_NULL:path
+    IsNotNull(String),
+
+    /// Empty check (string or array): IS_EMPTY:path
+    IsEmpty(String),
+
+    /// Not empty check: IS_NOT_EMPTY:path
+    IsNotEmpty(String),
+
+    /// Blank check (null, empty, or whitespace): IS_BLANK:path
+    IsBlank(String),
+
+    /// String starts with: STARTS_WITH:path,prefix
+    StartsWith { path: String, prefix: String },
+
+    /// String ends with: ENDS_WITH:path,suffix
+    EndsWith { path: String, suffix: String },
+
+    /// String contains: CONTAINS:path,substring
+    Contains { path: String, substring: String },
+
+    /// String length comparison: STRING_LENGTH:path,op,length
+    StringLength {
+        path: String,
+        op: ComparisonOp,
+        length: usize,
+    },
 }
 
 /// Transform expression AST
@@ -196,6 +227,121 @@ pub enum TransformExpr {
         paths: Vec<String>,
         default: Option<String>,
     },
+
+    /// String length: LENGTH:path
+    StringLength(String),
+
+    /// Substring: SUBSTRING:path,start,end
+    Substring {
+        path: String,
+        start: usize,
+        end: Option<usize>,
+    },
+
+    /// Split string: SPLIT:path,delimiter
+    Split { path: String, delimiter: String },
+
+    /// Join array: JOIN:path,separator
+    Join { path: String, separator: String },
+
+    /// Concatenate: CONCAT:value1,value2,...
+    Concat(Vec<StringOperand>),
+
+    /// Replace: REPLACE:path,pattern,replacement
+    Replace {
+        path: String,
+        pattern: String,
+        replacement: String,
+    },
+
+    /// Pad left: PAD_LEFT:path,width,char
+    PadLeft {
+        path: String,
+        width: usize,
+        pad_char: char,
+    },
+
+    /// Pad right: PAD_RIGHT:path,width,char
+    PadRight {
+        path: String,
+        width: usize,
+        pad_char: char,
+    },
+
+    /// To string: TO_STRING:path
+    ToString(String),
+
+    /// To integer: TO_INT:path
+    ToInt(String),
+
+    /// To float: TO_FLOAT:path
+    ToFloat(String),
+
+    /// Current timestamp: NOW
+    Now,
+
+    /// Current timestamp ISO: NOW_ISO
+    NowIso,
+
+    /// Parse date: PARSE_DATE:path,format
+    ParseDate {
+        path: String,
+        format: Option<String>,
+    },
+
+    /// From epoch: FROM_EPOCH:path
+    FromEpoch(String),
+
+    /// From epoch seconds: FROM_EPOCH_SECONDS:path
+    FromEpochSeconds(String),
+
+    /// Format date: FORMAT_DATE:path,format
+    FormatDate { path: String, format: String },
+
+    /// To epoch: TO_EPOCH:path
+    ToEpoch(String),
+
+    /// To epoch seconds: TO_EPOCH_SECONDS:path
+    ToEpochSeconds(String),
+
+    /// To ISO: TO_ISO:path
+    ToIso(String),
+
+    /// Add days: ADD_DAYS:path,days
+    AddDays { path: String, days: i32 },
+
+    /// Add hours: ADD_HOURS:path,hours
+    AddHours { path: String, hours: i32 },
+
+    /// Add minutes: ADD_MINUTES:path,minutes
+    AddMinutes { path: String, minutes: i32 },
+
+    /// Subtract days: SUBTRACT_DAYS:path,days
+    SubtractDays { path: String, days: i32 },
+
+    /// Year: YEAR:path
+    Year(String),
+
+    /// Month: MONTH:path
+    Month(String),
+
+    /// Day: DAY:path
+    Day(String),
+
+    /// Hour: HOUR:path
+    Hour(String),
+
+    /// Minute: MINUTE:path
+    Minute(String),
+
+    /// Second: SECOND:path
+    Second(String),
+
+    /// Day of week: DAY_OF_WEEK:path
+    DayOfWeek(String),
+
+    /// Day of year: DAY_OF_YEAR:path
+    DayOfYear(String),
 }
 
 /// Hash algorithm
@@ -223,6 +369,8 @@ pub enum StringOp {
     Uppercase,
     Lowercase,
     Trim,
+    TrimStart,
+    TrimEnd,
 }
 
 impl StringOp {
@@ -231,6 +379,8 @@ impl StringOp {
             "UPPERCASE" => Some(Self::Uppercase),
             "LOWERCASE" => Some(Self::Lowercase),
             "TRIM" => Some(Self::Trim),
+            "TRIM_START" | "TRIMSTART" => Some(Self::TrimStart),
+            "TRIM_END" | "TRIMEND" => Some(Self::TrimEnd),
             _ => None,
         }
     }
@@ -265,6 +415,13 @@ impl ArithmeticOp {
 pub enum ArithmeticOperand {
     Path(String),
     Constant(f64),
+}
+
+/// String operand (path or literal)
+#[derive(Debug, Clone)]
+pub enum StringOperand {
+    Path(String),
+    Literal(String),
 }
 
 /// Top-level DSL expression

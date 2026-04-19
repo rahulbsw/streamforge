@@ -105,6 +105,28 @@ impl<'a> Parser<'a> {
 
 /// Parse a filter expression
 pub fn parse_filter_expr(input: &str) -> Result<Node<FilterExpr>, ParseError> {
+    // Auto-detect syntax version
+    let trimmed = input.trim();
+
+    // Check for function-style syntax (v2)
+    // Function-style starts with: and(, or(, not(, field(, exists(, is_null(, etc.
+    if trimmed.starts_with("and(") ||
+       trimmed.starts_with("or(") ||
+       trimmed.starts_with("not(") ||
+       trimmed.starts_with("field(") ||
+       trimmed.starts_with("exists(") ||
+       trimmed.starts_with("not_exists(") ||
+       trimmed.starts_with("is_null(") ||
+       trimmed.starts_with("is_not_null(") ||
+       trimmed.starts_with("is_empty(") ||
+       trimmed.starts_with("is_not_empty(") ||
+       trimmed.starts_with("is_blank(") ||
+       trimmed.starts_with("regex(") {
+        // Use v2 parser (function-style)
+        return super::parser_v2::parse_filter_expr_v2(input);
+    }
+
+    // Otherwise use v1 parser (colon-delimited)
     let mut parser = Parser::new(input);
     parse_filter_expr_inner(&mut parser)
 }

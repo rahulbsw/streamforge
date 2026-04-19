@@ -126,6 +126,60 @@ fn eval_filter_as_box(node: &Node<FilterExpr>) -> Result<Box<dyn Filter>> {
                 "NOT_EXISTS filter not yet implemented in evaluator".to_string(),
             ))
         }
+
+        FilterExpr::IsNull(_path) => {
+            Err(MirrorMakerError::Config(
+                "IS_NULL filter not yet implemented in evaluator".to_string(),
+            ))
+        }
+
+        FilterExpr::IsNotNull(_path) => {
+            Err(MirrorMakerError::Config(
+                "IS_NOT_NULL filter not yet implemented in evaluator".to_string(),
+            ))
+        }
+
+        FilterExpr::IsEmpty(_path) => {
+            Err(MirrorMakerError::Config(
+                "IS_EMPTY filter not yet implemented in evaluator".to_string(),
+            ))
+        }
+
+        FilterExpr::IsNotEmpty(_path) => {
+            Err(MirrorMakerError::Config(
+                "IS_NOT_EMPTY filter not yet implemented in evaluator".to_string(),
+            ))
+        }
+
+        FilterExpr::IsBlank(_path) => {
+            Err(MirrorMakerError::Config(
+                "IS_BLANK filter not yet implemented in evaluator".to_string(),
+            ))
+        }
+
+        FilterExpr::StartsWith { path: _, prefix: _ } => {
+            Err(MirrorMakerError::Config(
+                "STARTS_WITH filter not yet implemented in evaluator".to_string(),
+            ))
+        }
+
+        FilterExpr::EndsWith { path: _, suffix: _ } => {
+            Err(MirrorMakerError::Config(
+                "ENDS_WITH filter not yet implemented in evaluator".to_string(),
+            ))
+        }
+
+        FilterExpr::Contains { path: _, substring: _ } => {
+            Err(MirrorMakerError::Config(
+                "CONTAINS filter not yet implemented in evaluator".to_string(),
+            ))
+        }
+
+        FilterExpr::StringLength { path: _, op: _, length: _ } => {
+            Err(MirrorMakerError::Config(
+                "STRING_LENGTH filter not yet implemented in evaluator".to_string(),
+            ))
+        }
     }
 }
 
