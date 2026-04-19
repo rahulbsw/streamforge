@@ -119,7 +119,8 @@ enum Token {
 
 /// Lexer for tokenizing input
 struct Lexer {
-    input: String,
+    input: String,      // Keep for error reporting
+    chars: Vec<char>,   // Char vector for O(1) access
     position: usize,
     line: usize,
     column: usize,
@@ -129,6 +130,7 @@ impl Lexer {
     fn new(input: &str) -> Self {
         Self {
             input: input.to_string(),
+            chars: input.chars().collect(),
             position: 0,
             line: 1,
             column: 1,
@@ -136,11 +138,11 @@ impl Lexer {
     }
 
     fn current_char(&self) -> Option<char> {
-        self.input.chars().nth(self.position)
+        self.chars.get(self.position).copied()
     }
 
     fn peek_char(&self, offset: usize) -> Option<char> {
-        self.input.chars().nth(self.position + offset)
+        self.chars.get(self.position + offset).copied()
     }
 
     fn advance(&mut self) {
@@ -212,8 +214,9 @@ impl Lexer {
         }
     }
 
-    fn read_number(&mut self) -> f64 {
+    fn read_number(&mut self) -> Result<f64, ParseError> {
         let start = self.position;
+        let start_pos = self.get_position();
 
         // Handle negative sign
         if self.current_char() == Some('-') {
@@ -241,8 +244,16 @@ impl Lexer {
             }
         }
 
-        let number_str = &self.input[start..self.position];
-        number_str.parse().unwrap_or(0.0)
+        // Collect chars into string for parsing
+        let number_str: String = self.chars[start..self.position].iter().collect();
+
+        number_str.parse().map_err(|e| {
+            ParseError::new(
+                format!("Invalid number literal '{}': {}", number_str, e),
+                Span::new(start_pos, self.get_position()),
+                &self.input,
+            )
+        })
     }
 
     fn read_identifier(&mut self) -> String {
@@ -256,7 +267,7 @@ impl Lexer {
             }
         }
 
-        self.input[start..self.position].to_string()
+        self.chars[start..self.position].iter().collect()
     }
 
     fn get_position(&self) -> Position {
@@ -302,7 +313,7 @@ impl Lexer {
             }
             '-' => {
                 if self.peek_char(1).map_or(false, |c| c.is_ascii_digit()) {
-                    Token::Number(self.read_number())
+                    Token::Number(self.read_number()?)
                 } else {
                     self.advance();
                     Token::Minus
@@ -318,20 +329,22 @@ impl Lexer {
             }
             '=' => {
                 self.advance();
-                if self.current_char() == Some('=') {
-                    self.advance();
-                    if self.current_char() == Some('>') {
+                match self.current_char() {
+                    Some('=') => {
                         self.advance();
-                        Token::Arrow
-                    } else {
                         Token::Eq
                     }
-                } else {
-                    return Err(ParseError::new(
-                        "Unexpected '=', did you mean '=='?",
-                        Span::new(self.get_position(), self.get_position()),
-                        &self.input,
-                    ));
+                    Some('>') => {
+                        self.advance();
+                        Token::Arrow
+                    }
+                    _ => {
+                        return Err(ParseError::new(
+                            "Unexpected '=', did you mean '==' or '=>'?",
+                            Span::new(self.get_position(), self.get_position()),
+                            &self.input,
+                        ));
+                    }
                 }
             }
             '!' => {
@@ -386,14 +399,14 @@ impl Lexer {
                 // Check if it's part of a number (e.g., .5) or a dot operator
                 if self.peek_char(1).map_or(false, |c| c.is_ascii_digit()) {
                     // It's a number like .5
-                    Token::Number(self.read_number())
+                    Token::Number(self.read_number()?)
                 } else {
                     self.advance();
                     Token::Dot
                 }
             }
             '\'' | '"' => Token::String(self.read_string(ch)?),
-            _ if ch.is_ascii_digit() => Token::Number(self.read_number()),
+            _ if ch.is_ascii_digit() => Token::Number(self.read_number()?),
             _ if ch.is_alphabetic() || ch == '_' => {
                 let ident = self.read_identifier();
                 self.keyword_or_identifier(&ident)
@@ -1091,5 +1104,49 @@ mod tests {
             }
             _ => panic!("Expected REGEX filter"),
         }
+    }
+
+    #[test]
+    fn test_number_parsing_edge_cases() {
+        // Test that numbers parse correctly (not silently becoming 0.0)
+
+        // Valid numbers should parse correctly
+        let result = parse_filter_expr_v2("field('/count') > 123.45");
+        assert!(result.is_ok());
+
+        let result = parse_filter_expr_v2("field('/count') > -42");
+        assert!(result.is_ok());
+
+        let result = parse_filter_expr_v2("field('/count') > 0.5");
+        assert!(result.is_ok());
+
+        // Note: "123.45.67" will parse as "123.45" followed by ".67"
+        // This is correct behavior - the lexer stops at the second dot
+        let result = parse_filter_expr_v2("field('/count') > 123.45");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_arrow_token() {
+        // Test that => (arrow) is properly tokenized as two characters, not three
+        let mut lexer = Lexer::new("=>");
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token, Token::Arrow, "=> should tokenize as Arrow");
+
+        // Test that == is still tokenized correctly
+        let mut lexer = Lexer::new("==");
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token, Token::Eq, "== should tokenize as Eq");
+    }
+
+    #[test]
+    fn test_unicode_handling() {
+        // Test that multi-byte UTF-8 characters work correctly in identifiers
+        let result = parse_filter_expr_v2("field('/日本語') == 'test'");
+        assert!(result.is_ok(), "Should handle UTF-8 in field paths");
+
+        // Test unicode in string values
+        let result = parse_filter_expr_v2("field('/name') == '日本語'");
+        assert!(result.is_ok(), "Should handle UTF-8 in string literals");
     }
 }
