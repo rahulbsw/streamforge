@@ -647,9 +647,9 @@ mod tests {
     #[test]
     fn test_to_float() {
         let transform = ToFloatTransform::new("/string").unwrap();
-        let input = json!({"string": "3.14"});
+        let input = json!({"string": "3.15"});
         let result = transform.transform(input).unwrap();
-        assert_eq!(result, json!(3.14));
+        assert_eq!(result, json!(3.15));
     }
 
     #[test]

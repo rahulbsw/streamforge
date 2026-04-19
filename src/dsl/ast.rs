@@ -27,6 +27,7 @@ pub enum ComparisonOp {
 }
 
 impl ComparisonOp {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "==" => Some(Self::Eq),
@@ -353,6 +354,7 @@ pub enum HashAlgorithm {
 }
 
 impl HashAlgorithm {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "MD5" => Some(Self::MD5),
@@ -374,6 +376,7 @@ pub enum StringOp {
 }
 
 impl StringOp {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "UPPERCASE" => Some(Self::Uppercase),
@@ -396,6 +399,7 @@ pub enum ArithmeticOp {
 }
 
 impl ArithmeticOp {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "ADD" => Some(Self::Add),

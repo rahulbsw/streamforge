@@ -1,10 +1,10 @@
-///! Config validation CLI
-///!
-///! Usage: streamforge-validate <config.yaml>
-///!
-///! Validates a StreamForge configuration file by parsing all filter and
-///! transform expressions without executing them. Reports syntax errors,
-///! invalid paths, and deprecation warnings.
+//! Config validation CLI
+//!
+//! Usage: streamforge-validate <config.yaml>
+//!
+//! Validates a StreamForge configuration file by parsing all filter and
+//! transform expressions without executing them. Reports syntax errors,
+//! invalid paths, and deprecation warnings.
 
 use std::fs;
 use std::path::PathBuf;

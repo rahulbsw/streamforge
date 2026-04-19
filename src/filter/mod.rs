@@ -70,6 +70,7 @@ pub trait Transform: Send + Sync {
 /// - path="/message/siteId", op=">", value="10000"
 /// - path="/message/status", op="==", value="active"
 pub struct JsonPathFilter {
+    #[allow(dead_code)]
     path: String,  // Keep for error messages
     path_segments: Vec<String>,  // Pre-parsed path segments
     operator: ComparisonOp,
@@ -526,6 +527,7 @@ impl Transform for TryTransform {
 /// let filter = RegexFilter::new("/message/status", r"^active").unwrap();
 /// ```
 pub struct RegexFilter {
+    #[allow(dead_code)]
     path: String,  // Keep for error messages
     path_segments: Vec<String>,  // Pre-parsed path segments
     regex: Regex,
@@ -596,6 +598,7 @@ impl Filter for RegexFilter {
 /// let filter = ArrayFilter::new("/users", element_filter, ArrayFilterMode::All).unwrap();
 /// ```
 pub struct ArrayFilter {
+    #[allow(dead_code)]
     path: String,
     path_segments: Vec<String>,
     element_filter: Box<dyn Filter>,
