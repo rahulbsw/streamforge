@@ -180,8 +180,64 @@ routing:
         )
       transform: "field('/data')"
 
-# Note: String manipulation, date/time functions, and advanced transforms
-# are coming in the next phase. This example focuses on filter operations.
+    # ====================================================================
+    # DATE/TIME TRANSFORMS - Working with timestamps (v2.2) ✅ IMPLEMENTED
+    # ====================================================================
+
+    # Example 18: Add current timestamp to messages
+    - output: "timestamped-messages"
+      filter: "$status == 'active'"
+      transform: |
+        {
+          "original": field('/data'),
+          "processed_at": now(),
+          "processed_at_iso": now_iso()
+        }
+
+    # Example 19: Parse and format dates
+    - output: "formatted-dates"
+      filter: "is_not_null('/created_at')"
+      transform: |
+        {
+          "id": $id,
+          "created_date": format_date(field('/created_at'), '%Y-%m-%d'),
+          "created_epoch": to_epoch(field('/created_at'))
+        }
+
+    # Example 20: Convert epoch timestamps to ISO
+    - output: "iso-timestamps"
+      filter: "is_not_null('/timestamp')"
+      transform: |
+        {
+          "id": $id,
+          "timestamp_iso": from_epoch(field('/timestamp')),
+          "year": year(from_epoch(field('/timestamp'))),
+          "month": month(from_epoch(field('/timestamp')))
+        }
+
+    # Example 21: Date arithmetic
+    - output: "expiration-dates"
+      filter: "$type == 'subscription'"
+      transform: |
+        {
+          "id": $id,
+          "start_date": field('/start_date'),
+          "expiration": add_days(field('/start_date'), 30),
+          "reminder_date": subtract_days(field('/expiration'), 7)
+        }
+
+    # Example 22: Extract date components
+    - output: "date-analysis"
+      filter: "is_not_null('/event_date')"
+      transform: |
+        {
+          "event_id": $id,
+          "year": year(field('/event_date')),
+          "month": month(field('/event_date')),
+          "day": day(field('/event_date')),
+          "day_of_week": day_of_week(field('/event_date')),
+          "hour": hour(field('/event_date'))
+        }
 
 # Comparison: v1 vs v2 syntax side-by-side:
 # V1: "AND:/status,==,active:/profile/complete,==,true"

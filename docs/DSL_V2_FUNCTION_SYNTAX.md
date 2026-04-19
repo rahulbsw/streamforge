@@ -207,39 +207,39 @@ divide(field('/total'), 2)
 coalesce(field('/primary'), field('/secondary'), 'default')
 field('/primary') ?? field('/secondary') ?? 'default'
 
-// Date/Time operations
+// Date/Time operations (✅ IMPLEMENTED)
 now()                                          // Current timestamp (epoch ms)
 now_iso()                                      // Current timestamp (ISO 8601)
 
-// Parse date strings
+// Parse date strings (✅ IMPLEMENTED)
 parse_date(field('/date'), format: '%Y-%m-%d')
 parse_date(field('/iso_date'))                 // Auto-detect ISO 8601
 from_epoch(field('/timestamp'))                // Epoch ms to ISO 8601
 from_epoch_seconds(field('/timestamp'))        // Epoch seconds to ISO 8601
 
-// Format dates
+// Format dates (✅ IMPLEMENTED)
 format_date(field('/date'), format: '%Y-%m-%d %H:%M:%S')
 to_epoch(field('/iso_date'))                   // ISO 8601 to epoch ms
 to_epoch_seconds(field('/iso_date'))           // ISO 8601 to epoch seconds
 to_iso(field('/date'))                         // Any date to ISO 8601
 
-// Date arithmetic
+// Date arithmetic (✅ IMPLEMENTED)
 add_days(field('/date'), 7)
 add_hours(field('/date'), 24)
 add_minutes(field('/date'), 30)
 subtract_days(field('/date'), 1)
 
-// Date extraction
-year(field('/date'))
-month(field('/date'))
-day(field('/date'))
-hour(field('/date'))
-minute(field('/date'))
-second(field('/date'))
+// Date extraction (✅ IMPLEMENTED)
+year(field('/date'))                           // Extract year (2024)
+month(field('/date'))                          // Extract month (1-12)
+day(field('/date'))                            // Extract day (1-31)
+hour(field('/date'))                           // Extract hour (0-23)
+minute(field('/date'))                         // Extract minute (0-59)
+second(field('/date'))                         // Extract second (0-59)
 day_of_week(field('/date'))                    // 0-6 (Sunday=0)
 day_of_year(field('/date'))                    // 1-366
 
-// Date comparison (in filters)
+// Date comparison (in filters) (🚧 TODO)
 date_diff(field('/start'), field('/end'), unit: 'days')
 is_before(field('/date'), '2024-01-01')
 is_after(field('/date'), '2023-01-01')

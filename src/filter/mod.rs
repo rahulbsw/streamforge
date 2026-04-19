@@ -1,3 +1,4 @@
+mod datetime_transforms;
 mod envelope_filter;
 mod envelope_transform;
 mod string_transforms;
@@ -13,6 +14,14 @@ pub use envelope_transform::{
     HeaderSetTransform, KeyConstantTransform, KeyConstructTransform, KeyFromTransform,
     KeyHashTransform, KeyTemplateTransform, TimestampAddTransform, TimestampCurrentTransform,
     TimestampFromTransform, TimestampPreserveTransform, TimestampSubtractTransform,
+};
+
+pub use datetime_transforms::{
+    AddDaysTransform, AddHoursTransform, AddMinutesTransform, DayOfWeekTransform,
+    DayOfYearTransform, DayTransform, FormatDateTransform, FromEpochSecondsTransform,
+    FromEpochTransform, HourTransform, MinuteTransform, MonthTransform, NowIsoTransform,
+    NowTransform, ParseDateTransform, SecondTransform, SubtractDaysTransform, ToEpochSecondsTransform,
+    ToEpochTransform, ToIsoTransform, YearTransform,
 };
 
 pub use string_transforms::{
