@@ -286,7 +286,7 @@ mod tests {
         };
 
         // Create DLQ (will fail since no real Kafka, but we can test the flow)
-        let dlq_config = DlqConfig {
+        let _dlq_config = DlqConfig {
             enabled: true,
             topic: "test-dlq".to_string(),
             ..Default::default()
