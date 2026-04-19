@@ -13,8 +13,8 @@ StreamForge is a high-performance Kafka streaming toolkit written in Rust. It pr
 
 | | |
 |---|---|
-| **Version** | 1.0.0-alpha.1 |
-| **Status** | v1.0 Hardening Phase 🚧 |
+| **Version** | 1.0.0 |
+| **Status** | Stable v1.0 Production Release ✅ |
 | **Last Updated** | 2026-04-18 |
 | **License** | Apache 2.0 |
 | **Repository** | [github.com/rahulbsw/streamforge](https://github.com/rahulbsw/streamforge) |
@@ -54,9 +54,16 @@ StreamForge is a high-performance Kafka streaming toolkit written in Rust. It pr
 | Envelope transforms (wrap/unwrap/add_metadata) | ✅ Production | v0.4.0 |
 | Multi-arch release binaries (x86_64 + aarch64) | ✅ Production | v0.4.0 |
 | GHCR Docker image publishing | ✅ Production | v0.4.0 |
-| Avro serialization | ⚠️ Planned v0.5.0 | — |
-| Schema registry integration | ⚠️ Planned v0.5.0 | — |
-| Exactly-once semantics | ⚠️ Planned v1.0.0 | — |
+| Typed error system (14+ error types) | ✅ Production | v1.0.0 |
+| Dead letter queue (DLQ) with error metadata | ✅ Production | v1.0.0 |
+| Exponential backoff retry policy | ✅ Production | v1.0.0 |
+| AST-based DSL parser with validation | ✅ Production | v1.0.0 |
+| Function-style DSL (`and()`, `or()`, `field()`) | ✅ Production | v1.0.0 |
+| Dollar shorthand ($status, $user.email) | ✅ Production | v1.0.0 |
+| 35 transform evaluators (14 string + 21 date/time) | ✅ Production | v1.0.0 |
+| Avro serialization | ⚠️ Planned v1.1.0 | — |
+| Schema registry integration | ⚠️ Planned v1.1.0 | — |
+| Exactly-once semantics | ⚠️ Planned v1.1.0 | — |
 
 ---
 
@@ -267,7 +274,7 @@ See [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for the complete list.
 ## Testing
 
 ```bash
-# Unit + integration tests (92 tests)
+# Unit + integration tests (333 tests)
 cargo test
 
 # Benchmarks
@@ -278,7 +285,7 @@ cargo audit
 npm audit --prefix ui
 ```
 
-**Test coverage**: 92 unit tests ✅ | 30+ benchmarks ✅ | 0 vulnerabilities ✅
+**Test coverage**: 333 unit tests ✅ | 30+ benchmarks ✅ | 0 vulnerabilities ✅
 
 ---
 
@@ -309,7 +316,7 @@ StreamForge is a **production-ready** high-performance Kafka streaming toolkit:
 ✅ **Observable** — Prometheus metrics, Grafana alerts, structured logging  
 ✅ **Cloud-native** — Kubernetes operator, Helm chart, Web UI, multi-arch images  
 ✅ **Secure** — SSL/TLS, SASL, Kerberos, Chainguard distroless, 0 CVEs  
-✅ **Tested** — 92 unit tests, 30+ benchmarks with real measured results  
+✅ **Tested** — 333 unit tests, 30+ benchmarks with real measured results  
 
 ---
 
