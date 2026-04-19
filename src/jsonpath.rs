@@ -68,7 +68,7 @@ impl JsonPath {
     ///
     /// Returns None if the path doesn't exist in the value.
     pub fn extract_owned(&self, value: &Value) -> Option<Value> {
-        self.extract(value).map(|v| v.clone())
+        self.extract(value).cloned()
     }
 
     /// Extract a string value from JSON path, with type coercion
@@ -122,7 +122,7 @@ pub fn extract_with_segments<'a>(value: &'a Value, segments: &[String]) -> Optio
 
 /// Extract an owned value from JSON using segment slices
 pub fn extract_owned_with_segments(value: &Value, segments: &[String]) -> Option<Value> {
-    extract_with_segments(value, segments).map(|v| v.clone())
+    extract_with_segments(value, segments).cloned()
 }
 
 #[cfg(test)]

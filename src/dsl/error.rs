@@ -84,7 +84,7 @@ impl ParseError {
             let line_idx = self.span.start.line - 1;
             let line = lines[line_idx];
 
-            output.push_str("\n");
+            output.push('\n');
             output.push_str(&format!("{:4} | {}\n", self.span.start.line, line));
 
             // Add caret indicator

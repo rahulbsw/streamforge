@@ -441,9 +441,9 @@ impl Transform for ToFloatTransform {
             }
         };
 
-        Ok(serde_json::Number::from_f64(result)
+        serde_json::Number::from_f64(result)
             .map(Value::Number)
-            .ok_or_else(|| MirrorMakerError::Config("Invalid float value".to_string()))?)
+            .ok_or_else(|| MirrorMakerError::Config("Invalid float value".to_string()))
     }
 }
 

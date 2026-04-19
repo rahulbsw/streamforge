@@ -313,7 +313,7 @@ impl Lexer {
                 Token::Plus
             }
             '-' => {
-                if self.peek_char(1).map_or(false, |c| c.is_ascii_digit()) {
+                if self.peek_char(1).is_some_and(|c| c.is_ascii_digit()) {
                     Token::Number(self.read_number()?)
                 } else {
                     self.advance();
@@ -398,7 +398,7 @@ impl Lexer {
             }
             '.' => {
                 // Check if it's part of a number (e.g., .5) or a dot operator
-                if self.peek_char(1).map_or(false, |c| c.is_ascii_digit()) {
+                if self.peek_char(1).is_some_and(|c| c.is_ascii_digit()) {
                     // It's a number like .5
                     Token::Number(self.read_number()?)
                 } else {

@@ -265,7 +265,7 @@ impl KafkaSink {
         let key_bytes = envelope
             .key
             .as_ref()
-            .map(|k| serialize_to_vec(k))
+            .map(serialize_to_vec)
             .transpose()?;
 
         // Serialize value using thread-local buffer

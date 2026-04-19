@@ -1,7 +1,7 @@
-///! Dead Letter Queue (DLQ) handling
-///!
-///! Sends messages that cannot be processed to a dedicated DLQ topic
-///! with full error context for debugging and manual recovery.
+//! Dead Letter Queue (DLQ) handling
+//!
+//! Sends messages that cannot be processed to a dedicated DLQ topic
+//! with full error context for debugging and manual recovery.
 
 use crate::{MessageEnvelope, MirrorMakerError, Result};
 use rdkafka::producer::{FutureProducer, FutureRecord};

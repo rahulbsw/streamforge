@@ -1,7 +1,7 @@
-///! Processor wrapper with retry and DLQ support
-///!
-///! Wraps any MessageProcessor to add retry logic and dead letter queue
-///! handling according to the error recovery actions defined in error.rs.
+//! Processor wrapper with retry and DLQ support
+//!
+//! Wraps any MessageProcessor to add retry logic and dead letter queue
+//! handling according to the error recovery actions defined in error.rs.
 
 use crate::{
     DeadLetterQueue, DlqMessage, MessageEnvelope, MirrorMakerError,

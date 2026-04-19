@@ -1,7 +1,7 @@
-///! Retry logic with exponential backoff
-///!
-///! Implements retry policies for transient failures according to the
-///! recovery actions defined in error.rs.
+//! Retry logic with exponential backoff
+//!
+//! Implements retry policies for transient failures according to the
+//! recovery actions defined in error.rs.
 
 use crate::{MirrorMakerError, Result};
 use std::time::Duration;

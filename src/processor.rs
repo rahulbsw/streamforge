@@ -2,7 +2,6 @@ use crate::filter::{EnvelopeTransform, Filter, IdentityTransform, PassThroughFil
 use crate::kafka::sink::KafkaSink;
 use crate::observability::{labels, METRICS};
 use crate::{MessageEnvelope, MirrorMakerError, Result};
-use futures::future;
 use prometheus::{Counter, Histogram};
 use serde_json::Value;
 use std::sync::Arc;
