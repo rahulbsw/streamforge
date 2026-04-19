@@ -162,16 +162,22 @@ impl Transform for JoinTransform {
 
         match extracted {
             Value::Array(arr) => {
-                let strings: Vec<String> = arr
-                    .iter()
-                    .map(|v| match v {
+                let mut strings = Vec::new();
+                for v in arr.iter() {
+                    let s = match v {
                         Value::String(s) => s.clone(),
                         Value::Number(n) => n.to_string(),
                         Value::Bool(b) => b.to_string(),
                         Value::Null => "null".to_string(),
-                        _ => serde_json::to_string(v).unwrap_or_default(),
-                    })
-                    .collect();
+                        _ => serde_json::to_string(v).map_err(|e| {
+                            MirrorMakerError::Config(format!(
+                                "Cannot serialize array element to string during join at path '{}': {}",
+                                self.path, e
+                            ))
+                        })?,
+                    };
+                    strings.push(s);
+                }
                 Ok(Value::String(strings.join(&self.separator)))
             }
             _ => Err(MirrorMakerError::Config(format!(
