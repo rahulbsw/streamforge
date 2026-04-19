@@ -3,6 +3,7 @@ pub mod cache_backend;
 pub mod compression;
 pub mod config;
 pub mod dlq;
+pub mod dsl;
 pub mod envelope;
 pub mod error;
 pub mod filter;

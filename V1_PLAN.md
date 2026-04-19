@@ -146,7 +146,7 @@
 
 **Progress:** 7/7 deliverables complete (100%)
 
-### Phase 2: DSL Stabilization (🚧 IN PROGRESS)
+### Phase 2: DSL Stabilization (✅ COMPLETE)
 **Goal:** Formal grammar, validation, stable API
 
 **2.1 DSL Specification** ✅ COMPLETE
@@ -155,11 +155,14 @@
 - ✅ Precedence, escaping, quoting rules specified
 - ✅ Backward compatibility rules defined
 
-**2.2 Parser Refactor** ⏭️ PLANNED
-- Separate parsing from validation
-- Add AST representation
-- Implement validation pass (type checking, path validation)
-- Better error messages with line/column
+**2.2 Parser Refactor** ✅ COMPLETE
+- ✅ Separated parsing from validation (5 modules: ast, parser, validator, evaluator, error)
+- ✅ Added AST representation (FilterExpr, TransformExpr with 40+ operators)
+- ✅ Implemented validation pass (13 semantic rules: type checking, path validation, deprecations)
+- ✅ Better error messages with line/column/span tracking
+- ✅ Position-tracked ParseError with context formatting
+- ✅ Validation warnings for deprecated syntax
+- ✅ AST → trait object evaluator (backward compatible)
 
 **2.3 Config Validation** ✅ COMPLETE
 - ✅ CLI tool: `streamforge-validate config.yaml`
@@ -170,13 +173,17 @@
 **Deliverables:**
 - ✅ docs/DSL_SPEC.md with EBNF grammar (85 KB, 1000+ lines)
 - ✅ docs/PARSER_REFACTOR_PLAN.md (architecture, implementation plan)
+- ✅ docs/DSL_ARCHITECTURE.md (v1.0 architecture documentation)
 - ✅ src/bin/validate.rs CLI (350 lines)
 - ✅ examples/configs/test-validation.yaml (test config)
-- ⏭️  src/dsl/ast.rs, src/dsl/parser.rs, src/dsl/validator.rs (future)
-- ⏭️  100+ parser test cases (future)
-- ⏭️  docs/DSL_MIGRATION.md (covered in DSL_SPEC.md for now)
+- ✅ src/dsl/ast.rs (330 lines - AST node definitions)
+- ✅ src/dsl/error.rs (260 lines - position-tracked errors)
+- ✅ src/dsl/parser.rs (850 lines - recursive descent parser)
+- ✅ src/dsl/validator.rs (430 lines - semantic validation)
+- ✅ src/dsl/evaluator.rs (230 lines - AST → trait objects)
+- ✅ 102 parser test cases (98 active, 4 ignored for future work)
 
-**Progress:** 3/5 major tasks complete (60%)
+**Progress:** 5/5 major tasks complete (100%)
 
 ### Phase 3: Envelope and Runtime Maturity (⏭️ DEFERRED TO v1.1)
 **Goal:** Type-safe envelope system, zero-copy paths, deterministic behavior
@@ -343,9 +350,9 @@ Status: ✅ 100% complete (2026-04-18)
 Achievement: Typed errors, retry/DLQ, delivery guarantees documented, 168 unit tests passing  
 
 **Phase 2: DSL Stabilization**  
-Status: ✅ 60% complete (documentation + validation CLI done)  
-Achievement: Formal grammar (DSL_SPEC.md), validation CLI, deprecation warnings  
-Note: Full parser refactor (Phase 2.2) deferred to post-v1.0
+Status: ✅ 100% complete (2026-04-18)  
+Achievement: Formal grammar (DSL_SPEC.md), validation CLI, AST-based parser with 102 tests, position-tracked errors, semantic validation  
+Note: Full parser refactor (Phase 2.2) completed with 2,000 lines of new code (ast, parser, validator, evaluator modules)
 
 **Phase 3: Typed Envelope System**  
 Status: ✅ Documentation complete (implementation deferred to v1.1)  
