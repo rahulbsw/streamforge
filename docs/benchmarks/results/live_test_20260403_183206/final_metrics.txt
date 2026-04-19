@@ -1,0 +1,90 @@
+# HELP streamforge_batch_processing_duration_seconds Batch processing duration
+# TYPE streamforge_batch_processing_duration_seconds histogram
+streamforge_batch_processing_duration_seconds_bucket{le="0.01"} 64
+streamforge_batch_processing_duration_seconds_bucket{le="0.05"} 169
+streamforge_batch_processing_duration_seconds_bucket{le="0.1"} 169
+streamforge_batch_processing_duration_seconds_bucket{le="0.25"} 169
+streamforge_batch_processing_duration_seconds_bucket{le="0.5"} 169
+streamforge_batch_processing_duration_seconds_bucket{le="1"} 169
+streamforge_batch_processing_duration_seconds_bucket{le="2"} 169
+streamforge_batch_processing_duration_seconds_bucket{le="5"} 169
+streamforge_batch_processing_duration_seconds_bucket{le="+Inf"} 169
+streamforge_batch_processing_duration_seconds_sum 2.1081743819999996
+streamforge_batch_processing_duration_seconds_count 169
+# HELP streamforge_consumer_high_watermark High watermark per partition
+# TYPE streamforge_consumer_high_watermark gauge
+streamforge_consumer_high_watermark{partition="0",topic="test-8p-input"} 101617
+streamforge_consumer_high_watermark{partition="1",topic="test-8p-input"} 100934
+streamforge_consumer_high_watermark{partition="2",topic="test-8p-input"} 101139
+streamforge_consumer_high_watermark{partition="3",topic="test-8p-input"} 100941
+streamforge_consumer_high_watermark{partition="4",topic="test-8p-input"} 101737
+streamforge_consumer_high_watermark{partition="5",topic="test-8p-input"} 100727
+streamforge_consumer_high_watermark{partition="6",topic="test-8p-input"} 103063
+streamforge_consumer_high_watermark{partition="7",topic="test-8p-input"} 100842
+# HELP streamforge_consumer_lag Consumer lag per partition
+# TYPE streamforge_consumer_lag gauge
+streamforge_consumer_lag{partition="0",topic="test-8p-input"} 0
+streamforge_consumer_lag{partition="1",topic="test-8p-input"} 0
+streamforge_consumer_lag{partition="2",topic="test-8p-input"} 0
+streamforge_consumer_lag{partition="3",topic="test-8p-input"} 0
+streamforge_consumer_lag{partition="4",topic="test-8p-input"} 0
+streamforge_consumer_lag{partition="5",topic="test-8p-input"} 0
+streamforge_consumer_lag{partition="6",topic="test-8p-input"} 0
+streamforge_consumer_lag{partition="7",topic="test-8p-input"} 0
+# HELP streamforge_consumer_offset Current consumer offset per partition
+# TYPE streamforge_consumer_offset gauge
+streamforge_consumer_offset{partition="0",topic="test-8p-input"} 101617
+streamforge_consumer_offset{partition="1",topic="test-8p-input"} 100934
+streamforge_consumer_offset{partition="2",topic="test-8p-input"} 101139
+streamforge_consumer_offset{partition="3",topic="test-8p-input"} 100941
+streamforge_consumer_offset{partition="4",topic="test-8p-input"} 101737
+streamforge_consumer_offset{partition="5",topic="test-8p-input"} 100727
+streamforge_consumer_offset{partition="6",topic="test-8p-input"} 103063
+streamforge_consumer_offset{partition="7",topic="test-8p-input"} 100842
+# HELP streamforge_filter_evaluations_total Filter evaluations by result
+# TYPE streamforge_filter_evaluations_total counter
+streamforge_filter_evaluations_total{destination="test-8p-output",result="pass"} 11000
+# HELP streamforge_kafka_connections Active Kafka connections
+# TYPE streamforge_kafka_connections gauge
+streamforge_kafka_connections{type="consumer"} 1
+streamforge_kafka_connections{type="producer"} 1
+# HELP streamforge_messages_consumed_total Total messages consumed from source Kafka
+# TYPE streamforge_messages_consumed_total counter
+streamforge_messages_consumed_total 11000
+# HELP streamforge_messages_in_flight Messages currently being processed
+# TYPE streamforge_messages_in_flight gauge
+streamforge_messages_in_flight 0
+# HELP streamforge_messages_produced_total Messages successfully produced to destinations
+# TYPE streamforge_messages_produced_total counter
+streamforge_messages_produced_total{destination="test-8p-output"} 11000
+# HELP streamforge_processing_duration_seconds End-to-end processing latency per destination
+# TYPE streamforge_processing_duration_seconds histogram
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.0001"} 0
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.0005"} 0
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.001"} 0
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.0025"} 0
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.005"} 0
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.01"} 10030
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.025"} 11000
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.05"} 11000
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.1"} 11000
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.25"} 11000
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="0.5"} 11000
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="1"} 11000
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="2.5"} 11000
+streamforge_processing_duration_seconds_bucket{destination="test-8p-output",le="+Inf"} 11000
+streamforge_processing_duration_seconds_sum{destination="test-8p-output"} 88.79012325300003
+streamforge_processing_duration_seconds_count{destination="test-8p-output"} 11000
+# HELP streamforge_processing_rate_mps Current processing rate (messages per second)
+# TYPE streamforge_processing_rate_mps gauge
+streamforge_processing_rate_mps 0
+# HELP streamforge_time_since_last_commit_seconds Time since last offset commit
+# TYPE streamforge_time_since_last_commit_seconds gauge
+streamforge_time_since_last_commit_seconds 0
+# HELP streamforge_transform_operations_total Transform operations by type
+# TYPE streamforge_transform_operations_total counter
+streamforge_transform_operations_total{destination="test-8p-output",transform_type="envelope"} 22000
+streamforge_transform_operations_total{destination="test-8p-output",transform_type="value"} 11000
+# HELP streamforge_uptime_seconds Service uptime in seconds
+# TYPE streamforge_uptime_seconds gauge
+streamforge_uptime_seconds 110

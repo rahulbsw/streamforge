@@ -1,0 +1,47 @@
+# Benchmark config: 8-thread throughput test
+# Target: 30K+ msg/s sustained throughput
+# Use case: Validate linear scaling with 8 threads on 8 partitions
+
+appid: "benchmark-8thread"
+bootstrap: "localhost:9092"
+input: "test-8p-input"
+offset: "earliest"
+threads: 8
+
+# Performance tuning for maximum throughput
+performance:
+  fetch_min_bytes: 10240      # 10 KB batches
+  fetch_max_wait_ms: 100      # Wait up to 100ms
+  max_partition_fetch_bytes: 10485760  # 10 MB per partition
+  queue_buffering_max_ms: 10
+  batch_size: 5000            # Large batches
+  linger_ms: 50               # Allow batching
+  compression: "zstd"         # Fast compression
+
+# Manual commit for throughput
+commit_strategy: "manual"
+commit_interval_ms: 5000
+
+# Minimal retry for benchmarking (fast failure)
+retry:
+  max_attempts: 1
+  initial_delay_ms: 10
+  max_delay_ms: 100
+  jitter: false
+
+# DLQ disabled for pure throughput test
+dlq:
+  enabled: false
+
+# Passthrough routing (no filters)
+routing:
+  routing_type: "passthrough"
+  destinations:
+    - output: "test-8p-output"
+      partitioning: "default"
+      preserve_timestamp: true
+
+# Metrics enabled for monitoring
+metrics:
+  enabled: true
+  port: 8080

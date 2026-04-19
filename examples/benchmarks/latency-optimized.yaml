@@ -1,0 +1,45 @@
+# Benchmark config: Low-latency configuration
+# Target: < 10ms p95 latency
+# Use case: Validate minimum latency with low batching
+
+appid: "benchmark-latency"
+bootstrap: "localhost:9092"
+input: "test-input"
+offset: "latest"
+threads: 2  # Fewer threads for lower contention
+
+# Performance tuning for low latency
+performance:
+  fetch_min_bytes: 1          # Don't wait for data
+  fetch_max_wait_ms: 10       # Very short wait
+  max_partition_fetch_bytes: 1048576  # 1 MB
+  queue_buffering_max_ms: 1
+  batch_size: 100             # Small batches
+  linger_ms: 0                # Send immediately
+  compression: "none"         # No compression overhead
+
+# Per-message commit for low latency
+commit_strategy: "per-message"
+
+# No retry for latency test
+retry:
+  max_attempts: 1
+  initial_delay_ms: 1
+  max_delay_ms: 10
+  jitter: false
+
+# DLQ disabled
+dlq:
+  enabled: false
+
+# Passthrough routing
+routing:
+  routing_type: "passthrough"
+  destinations:
+    - output: "test-output"
+      partitioning: "default"
+      preserve_timestamp: true
+
+metrics:
+  enabled: true
+  port: 8080
