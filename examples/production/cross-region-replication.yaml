@@ -1,0 +1,80 @@
+# Production config: Cross-region Kafka replication
+# Use case: Replicate events from us-east-1 to us-west-2 for DR/multi-region
+# Throughput: ~100K msg/s
+# Resource requirements: 4 CPU / 8 Gi memory per replica
+
+appid: "cross-region-replication"
+bootstrap: "kafka-us-east.internal:9092"
+input: "events"
+offset: "earliest"  # Process all messages for DR
+threads: 8          # High parallelism for throughput
+
+# Performance tuning for cross-region (high throughput, compression)
+performance:
+  fetch_min_bytes: 10240        # 10 KB - large batches for WAN
+  fetch_max_wait_ms: 500        # Wait longer for larger batches
+  max_partition_fetch_bytes: 5242880  # 5 MB per partition
+  queue_buffering_max_ms: 100
+  batch_size: 5000              # Large batches
+  linger_ms: 50                 # Allow batching
+  compression: "zstd"           # Compress for WAN transfer
+
+# Commit less frequently for throughput
+commit_strategy: "manual"
+commit_interval_ms: 10000       # Every 10 seconds
+
+# Aggressive retry for cross-region reliability
+retry:
+  max_attempts: 5
+  initial_delay_ms: 500
+  max_delay_ms: 60000
+  jitter: true
+
+# DLQ for failed messages
+dlq:
+  enabled: true
+  topic: "cross-region-dlq"
+  include_error_headers: true
+
+# Source cluster TLS/SASL (us-east-1)
+kafka:
+  security:
+    protocol: "SASL_SSL"
+    sasl_mechanism: "SCRAM-SHA-512"
+    sasl_username: "${KAFKA_EAST_USER}"
+    sasl_password: "${KAFKA_EAST_PASSWORD}"
+  ssl:
+    ca_location: "/certs/kafka-east-ca.crt"
+    certificate_location: "/certs/kafka-east-client.crt"
+    key_location: "/certs/kafka-east-client.key"
+
+# Routing to destination cluster (us-west-2)
+routing:
+  routing_type: "passthrough"
+  destinations:
+    - output: "events"
+      # Override bootstrap for destination cluster
+      bootstrap: "kafka-us-west.internal:9092"
+
+      # Optional: Filter for regional data only
+      filter: "OR:/region,==,us-east:/region,==,global"
+
+      # Preserve original keys and timestamps for DR
+      partitioning: "default"
+      preserve_timestamp: true
+
+      # Add replication metadata
+      headers:
+        x-replication-source: "us-east-1"
+        x-replication-pipeline: "cross-region-replication"
+
+      # Destination cluster TLS/SASL (us-west-2)
+      # Note: This syntax is conceptual - actual implementation
+      # may require separate producer config section
+      # For now, use environment variables with KAFKA_WEST_ prefix
+
+# Metrics
+metrics:
+  enabled: true
+  port: 8080
+  path: "/metrics"

@@ -1,0 +1,70 @@
+# Production config: CDC to Data Lake
+# Use case: Stream database changes to S3/data lake via Kafka
+# Throughput: ~20K msg/s
+# Resource requirements: 1 CPU / 2 Gi memory per replica
+
+appid: "cdc-to-datalake"
+bootstrap: "kafka:9092"
+input: "dbserver.inventory.orders"  # Debezium CDC topic
+offset: "earliest"
+threads: 4
+
+# Performance tuning for CDC (moderate throughput)
+performance:
+  fetch_min_bytes: 2048
+  fetch_max_wait_ms: 200
+  batch_size: 1000
+  linger_ms: 100
+  compression: "zstd"
+
+# Commit every 10 seconds (data lake can tolerate some duplicates)
+commit_strategy: "manual"
+commit_interval_ms: 10000
+
+# Retry policy
+retry:
+  max_attempts: 3
+  initial_delay_ms: 100
+  max_delay_ms: 30000
+  jitter: true
+
+# DLQ for schema errors
+dlq:
+  enabled: true
+  topic: "cdc-datalake-dlq"
+  include_error_headers: true
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Extract only after-state for INSERT/UPDATE operations
+    - output: "datalake-orders"
+      filter: "OR:/payload/op,==,c:/payload/op,==,u"  # create or update
+      transform: "EXTRACT:/payload/after,order"
+      key_transform: "/payload/after/id"
+      partitioning: "field"
+      partition_field: "/payload/after/customer_id"
+      headers:
+        x-pipeline: "cdc-to-datalake"
+        x-source: "inventory.orders"
+
+    # Extract before-state for DELETE operations (for soft deletes)
+    - output: "datalake-orders-deleted"
+      filter: "/payload/op,==,d"  # delete
+      transform: "CONSTRUCT:id=/payload/before/id:deleted_at=/payload/ts_ms"
+      key_transform: "/payload/before/id"
+      headers:
+        x-pipeline: "cdc-to-datalake"
+        x-operation: "delete"
+
+    # Schema changes (DDL) go to separate topic
+    - output: "datalake-schema-changes"
+      filter: "/payload/op,==,s"  # schema change
+      transform: "/payload"
+      headers:
+        x-pipeline: "cdc-to-datalake"
+        x-operation: "schema-change"
+
+metrics:
+  enabled: true
+  port: 8080
