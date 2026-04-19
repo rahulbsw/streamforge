@@ -134,7 +134,10 @@ where
     // All attempts exhausted
     let last_err = last_error.unwrap();
     Err(MirrorMakerError::RetryExhausted {
-        message: format!("{} failed after {} attempts", operation_name, config.max_attempts),
+        message: format!(
+            "{} failed after {} attempts",
+            operation_name, config.max_attempts
+        ),
         attempts: config.max_attempts,
         last_error: last_err.to_string(),
     })
@@ -156,11 +159,7 @@ impl RetryPolicy {
     }
 
     /// Retry an operation according to the policy
-    pub async fn execute<F, Fut, T>(
-        &self,
-        operation: F,
-        operation_name: &str,
-    ) -> Result<T>
+    pub async fn execute<F, Fut, T>(&self, operation: F, operation_name: &str) -> Result<T>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<T>>,
@@ -187,7 +186,7 @@ mod tests {
             initial_delay_ms: 100,
             max_delay_ms: 10_000,
             multiplier: 2.0,
-            jitter: 0.0,  // No jitter for predictable tests
+            jitter: 0.0, // No jitter for predictable tests
         };
 
         // Attempt 0: 100ms * 2^0 = 100ms
@@ -207,7 +206,7 @@ mod tests {
     fn test_jitter_range() {
         let config = RetryConfig {
             initial_delay_ms: 1000,
-            jitter: 0.2,  // 20% jitter
+            jitter: 0.2, // 20% jitter
             ..Default::default()
         };
 
@@ -246,7 +245,7 @@ mod tests {
     async fn test_retry_succeeds_after_failures() {
         let config = RetryConfig {
             max_attempts: 3,
-            initial_delay_ms: 10,  // Short delay for test
+            initial_delay_ms: 10, // Short delay for test
             ..Default::default()
         };
 
@@ -262,7 +261,7 @@ mod tests {
                     Err(MirrorMakerError::KafkaProducer {
                         message: "Queue full".into(),
                         destination: None,
-                        recoverable: true,  // Important: must be recoverable
+                        recoverable: true, // Important: must be recoverable
                     })
                 } else {
                     Ok::<i32, MirrorMakerError>(42)
@@ -301,7 +300,10 @@ mod tests {
 
         let result = retry_with_backoff(operation, &config, "test_op").await;
 
-        assert!(matches!(result, Err(MirrorMakerError::RetryExhausted { .. })));
+        assert!(matches!(
+            result,
+            Err(MirrorMakerError::RetryExhausted { .. })
+        ));
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
 
@@ -316,9 +318,7 @@ mod tests {
             async move {
                 count.fetch_add(1, Ordering::SeqCst);
                 // Non-recoverable error
-                Err::<i32, MirrorMakerError>(MirrorMakerError::Config(
-                    "Invalid config".into()
-                ))
+                Err::<i32, MirrorMakerError>(MirrorMakerError::Config("Invalid config".into()))
             }
         };
 

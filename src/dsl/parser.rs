@@ -95,11 +95,7 @@ impl<'a> Parser<'a> {
 
     fn error(&self, message: impl Into<String>) -> ParseError {
         let pos = self.current_position();
-        ParseError::new(
-            message,
-            Span::new(pos, pos),
-            self.input,
-        )
+        ParseError::new(message, Span::new(pos, pos), self.input)
     }
 }
 
@@ -110,20 +106,23 @@ pub fn parse_filter_expr(input: &str) -> Result<Node<FilterExpr>, ParseError> {
 
     // Check for function-style syntax (v2)
     // Function-style starts with: and(, or(, not(, field(, exists(, is_null(, $(, $identifier, etc.
-    if trimmed.starts_with("and(") ||
-       trimmed.starts_with("or(") ||
-       trimmed.starts_with("not(") ||
-       trimmed.starts_with("field(") ||
-       trimmed.starts_with("exists(") ||
-       trimmed.starts_with("not_exists(") ||
-       trimmed.starts_with("is_null(") ||
-       trimmed.starts_with("is_not_null(") ||
-       trimmed.starts_with("is_empty(") ||
-       trimmed.starts_with("is_not_empty(") ||
-       trimmed.starts_with("is_blank(") ||
-       trimmed.starts_with("regex(") ||
-       trimmed.starts_with("$(") ||
-       (trimmed.starts_with('$') && trimmed.len() > 1 && trimmed.chars().nth(1).unwrap().is_alphabetic()) {
+    if trimmed.starts_with("and(")
+        || trimmed.starts_with("or(")
+        || trimmed.starts_with("not(")
+        || trimmed.starts_with("field(")
+        || trimmed.starts_with("exists(")
+        || trimmed.starts_with("not_exists(")
+        || trimmed.starts_with("is_null(")
+        || trimmed.starts_with("is_not_null(")
+        || trimmed.starts_with("is_empty(")
+        || trimmed.starts_with("is_not_empty(")
+        || trimmed.starts_with("is_blank(")
+        || trimmed.starts_with("regex(")
+        || trimmed.starts_with("$(")
+        || (trimmed.starts_with('$')
+            && trimmed.len() > 1
+            && trimmed.chars().nth(1).unwrap().is_alphabetic())
+    {
         // Use v2 parser (function-style)
         return super::parser_v2::parse_filter_expr_v2(input);
     }
@@ -264,7 +263,10 @@ fn parse_not_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, ParseError>
     let expr = parse_filter_expr_inner(&mut sub_parser)?;
 
     let end = parser.current_position();
-    Ok(Node::new(FilterExpr::Not(Box::new(expr)), Span::new(start, end)))
+    Ok(Node::new(
+        FilterExpr::Not(Box::new(expr)),
+        Span::new(start, end),
+    ))
 }
 
 fn parse_regex_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, ParseError> {
@@ -380,14 +382,20 @@ fn parse_array_length_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, Pa
     let array_path = parts[0].trim().to_string();
     let op = ComparisonOp::from_str(parts[1].trim())
         .ok_or_else(|| parser.error(format!("Invalid operator: {}", parts[1])))?;
-    let length = parts[2].trim().parse::<usize>()
+    let length = parts[2]
+        .trim()
+        .parse::<usize>()
         .map_err(|_| parser.error(format!("Invalid length: {}", parts[2])))?;
 
     parser.position = parser.input.len();
     let end = parser.current_position();
 
     Ok(Node::new(
-        FilterExpr::ArrayLength { array_path, op, length },
+        FilterExpr::ArrayLength {
+            array_path,
+            op,
+            length,
+        },
         Span::new(start, end),
     ))
 }
@@ -399,7 +407,10 @@ fn parse_key_prefix_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, Pars
     let prefix = parser.read_until_any(&[]).trim().to_string();
     let end = parser.current_position();
 
-    Ok(Node::new(FilterExpr::KeyPrefix(prefix), Span::new(start, end)))
+    Ok(Node::new(
+        FilterExpr::KeyPrefix(prefix),
+        Span::new(start, end),
+    ))
 }
 
 fn parse_key_matches_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, ParseError> {
@@ -409,7 +420,10 @@ fn parse_key_matches_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, Par
     let pattern = parser.read_until_any(&[]).trim().to_string();
     let end = parser.current_position();
 
-    Ok(Node::new(FilterExpr::KeyMatches(pattern), Span::new(start, end)))
+    Ok(Node::new(
+        FilterExpr::KeyMatches(pattern),
+        Span::new(start, end),
+    ))
 }
 
 fn parse_key_suffix_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, ParseError> {
@@ -419,7 +433,10 @@ fn parse_key_suffix_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, Pars
     let suffix = parser.read_until_any(&[]).trim().to_string();
     let end = parser.current_position();
 
-    Ok(Node::new(FilterExpr::KeySuffix(suffix), Span::new(start, end)))
+    Ok(Node::new(
+        FilterExpr::KeySuffix(suffix),
+        Span::new(start, end),
+    ))
 }
 
 fn parse_key_contains_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, ParseError> {
@@ -429,7 +446,10 @@ fn parse_key_contains_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, Pa
     let substring = parser.read_until_any(&[]).trim().to_string();
     let end = parser.current_position();
 
-    Ok(Node::new(FilterExpr::KeyContains(substring), Span::new(start, end)))
+    Ok(Node::new(
+        FilterExpr::KeyContains(substring),
+        Span::new(start, end),
+    ))
 }
 
 fn parse_header_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, ParseError> {
@@ -468,7 +488,9 @@ fn parse_timestamp_age_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, P
 
     let op = ComparisonOp::from_str(parts[0].trim())
         .ok_or_else(|| parser.error(format!("Invalid operator: {}", parts[0])))?;
-    let seconds = parts[1].trim().parse::<u64>()
+    let seconds = parts[1]
+        .trim()
+        .parse::<u64>()
         .map_err(|_| parser.error(format!("Invalid seconds: {}", parts[1])))?;
 
     parser.position = parser.input.len();
@@ -497,10 +519,16 @@ fn parse_not_exists_filter(parser: &mut Parser) -> Result<Node<FilterExpr>, Pars
     let path = parser.read_until_any(&[]).trim().to_string();
     let end = parser.current_position();
 
-    Ok(Node::new(FilterExpr::NotExists(path), Span::new(start, end)))
+    Ok(Node::new(
+        FilterExpr::NotExists(path),
+        Span::new(start, end),
+    ))
 }
 
-fn parse_json_path_filter(parser: &mut Parser, start: Position) -> Result<Node<FilterExpr>, ParseError> {
+fn parse_json_path_filter(
+    parser: &mut Parser,
+    start: Position,
+) -> Result<Node<FilterExpr>, ParseError> {
     let rest = &parser.input[parser.position..];
     let parts: Vec<&str> = rest.split(',').collect();
 
@@ -574,8 +602,12 @@ fn parse_transform_expr_inner(parser: &mut Parser) -> Result<Node<TransformExpr>
     if parser.peek_str("ARRAY_FILTER:") {
         return parse_array_filter_transform(parser);
     }
-    if parser.peek_str("ADD:") || parser.peek_str("SUB:") || parser.peek_str("MULTIPLY:") ||
-       parser.peek_str("DIVIDE:") || parser.peek_str("ARITHMETIC:") {
+    if parser.peek_str("ADD:")
+        || parser.peek_str("SUB:")
+        || parser.peek_str("MULTIPLY:")
+        || parser.peek_str("DIVIDE:")
+        || parser.peek_str("ARITHMETIC:")
+    {
         return parse_arithmetic_transform(parser);
     }
     if parser.peek_str("COALESCE:") {
@@ -619,7 +651,11 @@ fn parse_extract_transform(parser: &mut Parser) -> Result<Node<TransformExpr>, P
     let end = parser.current_position();
 
     Ok(Node::new(
-        TransformExpr::Extract { path, target_field, default_value },
+        TransformExpr::Extract {
+            path,
+            target_field,
+            default_value,
+        },
         Span::new(start, end),
     ))
 }
@@ -680,7 +716,11 @@ fn parse_hash_transform(parser: &mut Parser) -> Result<Node<TransformExpr>, Pars
     let end = parser.current_position();
 
     Ok(Node::new(
-        TransformExpr::Hash { algorithm, path, target_field },
+        TransformExpr::Hash {
+            algorithm,
+            path,
+            target_field,
+        },
         Span::new(start, end),
     ))
 }
@@ -726,14 +766,21 @@ fn parse_array_map_transform(parser: &mut Parser) -> Result<Node<TransformExpr>,
     let target_field = if parts.len() > 2 {
         parts[2].trim().to_string()
     } else {
-        format!("{}_mapped", array_path.trim_start_matches('/').replace('/', "_"))
+        format!(
+            "{}_mapped",
+            array_path.trim_start_matches('/').replace('/', "_")
+        )
     };
 
     parser.position = parser.input.len();
     let end = parser.current_position();
 
     Ok(Node::new(
-        TransformExpr::ArrayMap { array_path, element_path, target_field },
+        TransformExpr::ArrayMap {
+            array_path,
+            element_path,
+            target_field,
+        },
         Span::new(start, end),
     ))
 }
@@ -883,7 +930,10 @@ fn parse_coalesce_transform(parser: &mut Parser) -> Result<Node<TransformExpr>, 
     let end = parser.current_position();
 
     Ok(Node::new(
-        TransformExpr::Coalesce { paths, default: default_value },
+        TransformExpr::Coalesce {
+            paths,
+            default: default_value,
+        },
         Span::new(start, end),
     ))
 }

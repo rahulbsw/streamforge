@@ -18,12 +18,12 @@ impl<T> Node<T> {
 /// Comparison operator
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComparisonOp {
-    Eq,   // ==
-    Ne,   // !=
-    Gt,   // >
-    Ge,   // >= (not implemented yet, for future)
-    Lt,   // <
-    Le,   // <= (not implemented yet, for future)
+    Eq, // ==
+    Ne, // !=
+    Gt, // >
+    Ge, // >= (not implemented yet, for future)
+    Lt, // <
+    Le, // <= (not implemented yet, for future)
 }
 
 impl ComparisonOp {
@@ -81,10 +81,7 @@ pub enum FilterExpr {
     Not(Box<Node<FilterExpr>>),
 
     /// Regex match: REGEX:path,pattern
-    Regex {
-        path: String,
-        pattern: String,
-    },
+    Regex { path: String, pattern: String },
 
     /// Array filter: ARRAY_ANY:array_path,element_filter
     ArrayAny {
@@ -99,10 +96,7 @@ pub enum FilterExpr {
     },
 
     /// Array contains: ARRAY_CONTAINS:array_path,value
-    ArrayContains {
-        array_path: String,
-        value: Literal,
-    },
+    ArrayContains { array_path: String, value: Literal },
 
     /// Array length: ARRAY_LENGTH:array_path,op,value
     ArrayLength {
@@ -131,10 +125,7 @@ pub enum FilterExpr {
     },
 
     /// Timestamp age: TIMESTAMP_AGE:op,seconds
-    TimestampAge {
-        op: ComparisonOp,
-        seconds: u64,
-    },
+    TimestampAge { op: ComparisonOp, seconds: u64 },
 
     /// Field exists: EXISTS:path
     Exists(String),
@@ -198,10 +189,7 @@ pub enum TransformExpr {
     },
 
     /// String transform: UPPERCASE:path, LOWERCASE:path, TRIM:path
-    String {
-        op: StringOp,
-        path: String,
-    },
+    String { op: StringOp, path: String },
 
     /// Array map: ARRAY_MAP:array_path,element_path,target_field
     ArrayMap {
@@ -453,7 +441,10 @@ mod tests {
     fn test_hash_algorithm_from_str() {
         assert_eq!(HashAlgorithm::from_str("MD5"), Some(HashAlgorithm::MD5));
         assert_eq!(HashAlgorithm::from_str("md5"), Some(HashAlgorithm::MD5));
-        assert_eq!(HashAlgorithm::from_str("SHA256"), Some(HashAlgorithm::SHA256));
+        assert_eq!(
+            HashAlgorithm::from_str("SHA256"),
+            Some(HashAlgorithm::SHA256)
+        );
         assert_eq!(HashAlgorithm::from_str("invalid"), None);
     }
 

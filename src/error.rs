@@ -6,7 +6,7 @@ use thiserror::Error;
 pub enum MirrorMakerError {
     // ========== Kafka Errors ==========
     #[error("Kafka error: {0}")]
-    Kafka(String),  // Store as String for Clone
+    Kafka(String), // Store as String for Clone
 
     #[error("Kafka producer error: {message}")]
     KafkaProducer {
@@ -34,7 +34,7 @@ pub enum MirrorMakerError {
 
     // ========== Serialization Errors ==========
     #[error("JSON serialization error: {0}")]
-    Serialization(String),  // Store as String for Clone
+    Serialization(String), // Store as String for Clone
 
     #[error("Message deserialization failed: {message}")]
     MessageDeserialization {
@@ -50,10 +50,7 @@ pub enum MirrorMakerError {
     Config(String),
 
     #[error("Configuration error: {message} (field: {field})")]
-    ConfigWithField {
-        message: String,
-        field: String,
-    },
+    ConfigWithField { message: String, field: String },
 
     #[error("Missing required configuration: {field}")]
     ConfigMissing { field: String },
@@ -74,16 +71,10 @@ pub enum MirrorMakerError {
     },
 
     #[error("Invalid filter expression: {expression}")]
-    InvalidFilter {
-        expression: String,
-        reason: String,
-    },
+    InvalidFilter { expression: String, reason: String },
 
     #[error("Invalid transform expression: {expression}")]
-    InvalidTransform {
-        expression: String,
-        reason: String,
-    },
+    InvalidTransform { expression: String, reason: String },
 
     // ========== Processing Errors ==========
     #[error("Processing error: {0}")]
@@ -112,26 +103,17 @@ pub enum MirrorMakerError {
     },
 
     #[error("JSON path not found: {path}")]
-    JsonPathNotFound {
-        path: String,
-        value: Option<String>,
-    },
+    JsonPathNotFound { path: String, value: Option<String> },
 
     // ========== Compression Errors ==========
     #[error("Compression error: {0}")]
     Compression(String),
 
     #[error("{codec} compression error: {message}")]
-    CompressionWithCodec {
-        message: String,
-        codec: String,
-    },
+    CompressionWithCodec { message: String, codec: String },
 
     #[error("Decompression error: {message}")]
-    Decompression {
-        message: String,
-        codec: String,
-    },
+    Decompression { message: String, codec: String },
 
     // ========== Cache Errors ==========
     #[error("Cache error: {message}")]
@@ -142,14 +124,11 @@ pub enum MirrorMakerError {
     },
 
     #[error("Redis error: {message}")]
-    Redis {
-        message: String,
-        operation: String,
-    },
+    Redis { message: String, operation: String },
 
     // ========== I/O Errors ==========
     #[error("IO error: {0}")]
-    Io(String),  // Store as String for Clone
+    Io(String), // Store as String for Clone
 
     // ========== Retry and DLQ Errors ==========
     #[error("Retry exhausted: {message}")]
@@ -160,10 +139,7 @@ pub enum MirrorMakerError {
     },
 
     #[error("Dead letter queue error: {message}")]
-    DeadLetterQueue {
-        message: String,
-        dlq_topic: String,
-    },
+    DeadLetterQueue { message: String, dlq_topic: String },
 
     // ========== Generic Error ==========
     #[error("{0}")]

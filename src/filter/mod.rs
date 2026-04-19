@@ -20,8 +20,8 @@ pub use datetime_transforms::{
     AddDaysTransform, AddHoursTransform, AddMinutesTransform, DayOfWeekTransform,
     DayOfYearTransform, DayTransform, FormatDateTransform, FromEpochSecondsTransform,
     FromEpochTransform, HourTransform, MinuteTransform, MonthTransform, NowIsoTransform,
-    NowTransform, ParseDateTransform, SecondTransform, SubtractDaysTransform, ToEpochSecondsTransform,
-    ToEpochTransform, ToIsoTransform, YearTransform,
+    NowTransform, ParseDateTransform, SecondTransform, SubtractDaysTransform,
+    ToEpochSecondsTransform, ToEpochTransform, ToIsoTransform, YearTransform,
 };
 
 pub use string_transforms::{
@@ -71,8 +71,8 @@ pub trait Transform: Send + Sync {
 /// - path="/message/status", op="==", value="active"
 pub struct JsonPathFilter {
     #[allow(dead_code)]
-    path: String,  // Keep for error messages
-    path_segments: Vec<String>,  // Pre-parsed path segments
+    path: String, // Keep for error messages
+    path_segments: Vec<String>, // Pre-parsed path segments
     operator: ComparisonOp,
     expected: ComparisonValue,
 }
@@ -330,8 +330,8 @@ impl Filter for NotFilter {
 /// - "/message" - Extract entire message object
 /// - "/message/confId" - Extract specific field
 pub struct JsonPathTransform {
-    path: String,  // Keep for error messages
-    path_segments: Vec<String>,  // Pre-parsed path segments
+    path: String,               // Keep for error messages
+    path_segments: Vec<String>, // Pre-parsed path segments
 }
 
 impl JsonPathTransform {
@@ -503,10 +503,7 @@ impl Transform for TryTransform {
             Ok(result) => Ok(result),
             Err(_) => {
                 // Inner transform failed, use fallback
-                tracing::debug!(
-                    "Transform failed, using fallback value: {}",
-                    self.fallback
-                );
+                tracing::debug!("Transform failed, using fallback value: {}", self.fallback);
                 Ok(self.fallback.clone())
             }
         }
@@ -528,8 +525,8 @@ impl Transform for TryTransform {
 /// ```
 pub struct RegexFilter {
     #[allow(dead_code)]
-    path: String,  // Keep for error messages
-    path_segments: Vec<String>,  // Pre-parsed path segments
+    path: String, // Keep for error messages
+    path_segments: Vec<String>, // Pre-parsed path segments
     regex: Regex,
 }
 

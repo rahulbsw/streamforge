@@ -1,8 +1,6 @@
 // DSL Validator - Semantic validation of parsed AST
 
-use super::ast::{
-    ArithmeticOperand, ComparisonOp, FilterExpr, Literal, Node, TransformExpr,
-};
+use super::ast::{ArithmeticOperand, ComparisonOp, FilterExpr, Literal, Node, TransformExpr};
 use super::error::{Span, ValidationError, ValidationWarning};
 
 /// Validation result with warnings
@@ -172,7 +170,11 @@ fn validate_filter_node(node: &Node<FilterExpr>, result: &mut ValidationResult) 
             validate_json_path(path, node.span, result);
         }
 
-        FilterExpr::StringLength { path, op, length: _ } => {
+        FilterExpr::StringLength {
+            path,
+            op,
+            length: _,
+        } => {
             validate_json_path(path, node.span, result);
             validate_numeric_comparison(op, node.span, result);
         }
@@ -274,7 +276,11 @@ fn validate_transform_node(node: &Node<TransformExpr>, result: &mut ValidationRe
             validate_json_path(path, node.span, result);
         }
 
-        TransformExpr::Substring { path, start: _, end: _ } => {
+        TransformExpr::Substring {
+            path,
+            start: _,
+            end: _,
+        } => {
             validate_json_path(path, node.span, result);
         }
 
@@ -294,19 +300,33 @@ fn validate_transform_node(node: &Node<TransformExpr>, result: &mut ValidationRe
             }
         }
 
-        TransformExpr::Replace { path, pattern: _, replacement: _ } => {
+        TransformExpr::Replace {
+            path,
+            pattern: _,
+            replacement: _,
+        } => {
             validate_json_path(path, node.span, result);
         }
 
-        TransformExpr::PadLeft { path, width: _, pad_char: _ } => {
+        TransformExpr::PadLeft {
+            path,
+            width: _,
+            pad_char: _,
+        } => {
             validate_json_path(path, node.span, result);
         }
 
-        TransformExpr::PadRight { path, width: _, pad_char: _ } => {
+        TransformExpr::PadRight {
+            path,
+            width: _,
+            pad_char: _,
+        } => {
             validate_json_path(path, node.span, result);
         }
 
-        TransformExpr::ToString(path) | TransformExpr::ToInt(path) | TransformExpr::ToFloat(path) => {
+        TransformExpr::ToString(path)
+        | TransformExpr::ToInt(path)
+        | TransformExpr::ToFloat(path) => {
             validate_json_path(path, node.span, result);
         }
 
@@ -327,7 +347,9 @@ fn validate_transform_node(node: &Node<TransformExpr>, result: &mut ValidationRe
             validate_json_path(path, node.span, result);
         }
 
-        TransformExpr::ToEpoch(path) | TransformExpr::ToEpochSeconds(path) | TransformExpr::ToIso(path) => {
+        TransformExpr::ToEpoch(path)
+        | TransformExpr::ToEpochSeconds(path)
+        | TransformExpr::ToIso(path) => {
             validate_json_path(path, node.span, result);
         }
 
@@ -401,10 +423,18 @@ fn validate_field_name(name: &str, span: Span, result: &mut ValidationResult) {
     }
 }
 
-fn validate_comparison(op: &ComparisonOp, value: &Literal, span: Span, result: &mut ValidationResult) {
+fn validate_comparison(
+    op: &ComparisonOp,
+    value: &Literal,
+    span: Span,
+    result: &mut ValidationResult,
+) {
     // Type checking for operators
     match (op, value) {
-        (ComparisonOp::Gt | ComparisonOp::Ge | ComparisonOp::Lt | ComparisonOp::Le, Literal::Number(_)) => {
+        (
+            ComparisonOp::Gt | ComparisonOp::Ge | ComparisonOp::Lt | ComparisonOp::Le,
+            Literal::Number(_),
+        ) => {
             // Valid: numeric comparison with number
         }
         (ComparisonOp::Gt | ComparisonOp::Ge | ComparisonOp::Lt | ComparisonOp::Le, _) => {
@@ -478,7 +508,11 @@ fn validate_literal(_value: &Literal, _span: Span, _result: &mut ValidationResul
     // All literals are valid by construction
 }
 
-fn validate_arithmetic_operand(operand: &ArithmeticOperand, span: Span, result: &mut ValidationResult) {
+fn validate_arithmetic_operand(
+    operand: &ArithmeticOperand,
+    span: Span,
+    result: &mut ValidationResult,
+) {
     match operand {
         ArithmeticOperand::Path(path) => {
             validate_json_path(path, span, result);
@@ -571,7 +605,10 @@ mod tests {
 
     #[test]
     fn test_deprecated_key_contains() {
-        let filter = Node::new(FilterExpr::KeyContains("substring".to_string()), test_span());
+        let filter = Node::new(
+            FilterExpr::KeyContains("substring".to_string()),
+            test_span(),
+        );
 
         let result = validate_filter(&filter);
         assert!(result.is_valid());
@@ -707,7 +744,10 @@ mod tests {
             test_span(),
         );
 
-        let or_filter = Node::new(FilterExpr::Or(vec![inner_filter1, inner_filter2]), test_span());
+        let or_filter = Node::new(
+            FilterExpr::Or(vec![inner_filter1, inner_filter2]),
+            test_span(),
+        );
 
         let and_filter = Node::new(
             FilterExpr::And(vec![or_filter.clone(), or_filter]),

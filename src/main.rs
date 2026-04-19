@@ -19,7 +19,10 @@ use streamforge::processor::{
     DestinationProcessor, MessageProcessor, MultiDestinationProcessor, SingleDestinationProcessor,
 };
 use streamforge::processor_with_retry::ProcessorWithRetry;
-use streamforge::{DeadLetterQueue, MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result, RetryPolicy, SyncCacheManager};
+use streamforge::{
+    DeadLetterQueue, MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result, RetryPolicy,
+    SyncCacheManager,
+};
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
@@ -101,7 +104,10 @@ async fn main() -> Result<()> {
                 "DLQ enabled: topic={}, max_retries={}",
                 config.dlq.topic, config.dlq.max_dlq_retries
             );
-            Some(Arc::new(DeadLetterQueue::new(config.dlq.clone(), &config.bootstrap)?))
+            Some(Arc::new(DeadLetterQueue::new(
+                config.dlq.clone(),
+                &config.bootstrap,
+            )?))
         } else {
             info!("DLQ disabled - errors will halt pipeline");
             None
@@ -109,9 +115,7 @@ async fn main() -> Result<()> {
 
         info!(
             "Retry policy: max_attempts={}, initial_delay={}ms, max_delay={}ms",
-            config.retry.max_attempts,
-            config.retry.initial_delay_ms,
-            config.retry.max_delay_ms
+            config.retry.max_attempts, config.retry.initial_delay_ms, config.retry.max_delay_ms
         );
 
         Arc::new(ProcessorWithRetry::new(

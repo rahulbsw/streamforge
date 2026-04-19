@@ -71,9 +71,11 @@ fn main() {
 
     // Validate single-destination mode
     if config.routing.is_none() {
-        if let Some(ref filter_expr) = config.routing.as_ref().and_then(|r| {
-            r.destinations.first().and_then(|d| d.filter.as_ref())
-        }) {
+        if let Some(ref filter_expr) = config
+            .routing
+            .as_ref()
+            .and_then(|r| r.destinations.first().and_then(|d| d.filter.as_ref()))
+        {
             expr_count += 1;
             if opt.verbose {
                 println!("  Validating filter: {}", filter_expr);
@@ -135,7 +137,10 @@ fn main() {
                     println!("  │  Key transform: {}", key_expr);
                 }
                 // Key transforms use a simpler syntax, validate as transform
-                if key_expr.starts_with('/') || key_expr.starts_with("HASH:") || key_expr.starts_with("CONSTRUCT:") {
+                if key_expr.starts_with('/')
+                    || key_expr.starts_with("HASH:")
+                    || key_expr.starts_with("CONSTRUCT:")
+                {
                     if let Err(e) = parse_transform_with_cache(key_expr, None) {
                         errors.push(format!("{} - Key transform: {}", dest_name, e));
                     }

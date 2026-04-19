@@ -24,8 +24,8 @@ mod dollar_syntax_tests;
 
 // Re-exports for convenience
 pub use ast::{
-    ArithmeticOp, ArithmeticOperand, ComparisonOp, DslExpr, FilterExpr, HashAlgorithm,
-    Literal, Node, StringOp, StringOperand, TransformExpr,
+    ArithmeticOp, ArithmeticOperand, ComparisonOp, DslExpr, FilterExpr, HashAlgorithm, Literal,
+    Node, StringOp, StringOperand, TransformExpr,
 };
 pub use error::{ParseError, Position, Span, ValidationError, ValidationWarning};
 pub use evaluator::eval_filter;

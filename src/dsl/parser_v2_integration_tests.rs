@@ -161,9 +161,8 @@ mod tests {
 
     #[test]
     fn test_v2_nested_and_with_null_checks() {
-        let result = parse_filter_expr(
-            "and(is_not_null('/user/id'), field('/status') == 'active')"
-        );
+        let result =
+            parse_filter_expr("and(is_not_null('/user/id'), field('/status') == 'active')");
         assert!(result.is_ok());
 
         let node = result.unwrap();

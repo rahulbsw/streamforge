@@ -41,8 +41,7 @@ impl MessageProcessor for SingleDestinationProcessor {
     async fn process(&self, envelope: MessageEnvelope) -> Result<()> {
         let envelope = if let Some(t) = &self.transform {
             // Unwrap Arc to get owned Value for transform (cheap if no other references)
-            let value_owned = Arc::try_unwrap(envelope.value)
-                .unwrap_or_else(|arc| (*arc).clone());
+            let value_owned = Arc::try_unwrap(envelope.value).unwrap_or_else(|arc| (*arc).clone());
             let transformed = t.transform(value_owned)?;
             MessageEnvelope {
                 value: Arc::new(transformed),
@@ -176,8 +175,7 @@ impl DestinationProcessor {
         self.transform_value_counter.inc();
 
         // Unwrap Arc to get owned Value for transform (cheap if no other references)
-        let value_owned = Arc::try_unwrap(envelope.value)
-            .unwrap_or_else(|arc| (*arc).clone());
+        let value_owned = Arc::try_unwrap(envelope.value).unwrap_or_else(|arc| (*arc).clone());
 
         let transformed_value = match self.transform.transform(value_owned) {
             Ok(val) => val,

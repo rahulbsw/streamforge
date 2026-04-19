@@ -12,11 +12,19 @@ pub struct Position {
 
 impl Position {
     pub fn new(line: usize, column: usize, offset: usize) -> Self {
-        Self { line, column, offset }
+        Self {
+            line,
+            column,
+            offset,
+        }
     }
 
     pub fn zero() -> Self {
-        Self { line: 1, column: 1, offset: 0 }
+        Self {
+            line: 1,
+            column: 1,
+            offset: 0,
+        }
     }
 }
 
@@ -46,8 +54,11 @@ impl Span {
 impl fmt::Display for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.start.line == self.end.line {
-            write!(f, "line {}, columns {}-{}",
-                   self.start.line, self.start.column, self.end.column)
+            write!(
+                f,
+                "line {}, columns {}-{}",
+                self.start.line, self.start.column, self.end.column
+            )
         } else {
             write!(f, "lines {}-{}", self.start.line, self.end.line)
         }
@@ -128,10 +139,7 @@ pub enum ValidationError {
     },
 
     /// Unknown operator
-    UnknownOperator {
-        operator: String,
-        span: Span,
-    },
+    UnknownOperator { operator: String, span: Span },
 
     /// Invalid argument count
     InvalidArgumentCount {
@@ -142,18 +150,22 @@ pub enum ValidationError {
     },
 
     /// Undefined variable or function
-    Undefined {
-        name: String,
-        span: Span,
-    },
+    Undefined { name: String, span: Span },
 }
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::TypeMismatch { expected, actual, span } => {
-                write!(f, "Type mismatch at {}: expected {}, got {}",
-                       span, expected, actual)
+            Self::TypeMismatch {
+                expected,
+                actual,
+                span,
+            } => {
+                write!(
+                    f,
+                    "Type mismatch at {}: expected {}, got {}",
+                    span, expected, actual
+                )
             }
             Self::InvalidPath { path, reason, span } => {
                 write!(f, "Invalid path '{}' at {}: {}", path, span, reason)
@@ -161,9 +173,17 @@ impl fmt::Display for ValidationError {
             Self::UnknownOperator { operator, span } => {
                 write!(f, "Unknown operator '{}' at {}", operator, span)
             }
-            Self::InvalidArgumentCount { operator, expected, actual, span } => {
-                write!(f, "Invalid argument count for '{}' at {}: expected {}, got {}",
-                       operator, span, expected, actual)
+            Self::InvalidArgumentCount {
+                operator,
+                expected,
+                actual,
+                span,
+            } => {
+                write!(
+                    f,
+                    "Invalid argument count for '{}' at {}: expected {}, got {}",
+                    operator, span, expected, actual
+                )
             }
             Self::Undefined { name, span } => {
                 write!(f, "Undefined '{}' at {}", name, span)
@@ -185,24 +205,21 @@ pub enum ValidationWarning {
     },
 
     /// Unused value
-    UnusedValue {
-        value: String,
-        span: Span,
-    },
+    UnusedValue { value: String, span: Span },
 
     /// Performance hint
-    PerformanceHint {
-        message: String,
-        span: Span,
-    },
+    PerformanceHint { message: String, span: Span },
 }
 
 impl fmt::Display for ValidationWarning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DeprecatedSyntax { old, new, span } => {
-                write!(f, "Warning at {}: '{}' is deprecated, use '{}' instead",
-                       span, old, new)
+                write!(
+                    f,
+                    "Warning at {}: '{}' is deprecated, use '{}' instead",
+                    span, old, new
+                )
             }
             Self::UnusedValue { value, span } => {
                 write!(f, "Warning at {}: unused value '{}'", span, value)
@@ -226,29 +243,20 @@ mod tests {
 
     #[test]
     fn test_span_display_same_line() {
-        let span = Span::new(
-            Position::new(5, 10, 50),
-            Position::new(5, 20, 60),
-        );
+        let span = Span::new(Position::new(5, 10, 50), Position::new(5, 20, 60));
         assert_eq!(format!("{}", span), "line 5, columns 10-20");
     }
 
     #[test]
     fn test_span_display_different_lines() {
-        let span = Span::new(
-            Position::new(5, 10, 50),
-            Position::new(7, 5, 80),
-        );
+        let span = Span::new(Position::new(5, 10, 50), Position::new(7, 5, 80));
         assert_eq!(format!("{}", span), "lines 5-7");
     }
 
     #[test]
     fn test_parse_error_format() {
         let input = "/status,==,active";
-        let span = Span::new(
-            Position::new(1, 8, 7),
-            Position::new(1, 10, 9),
-        );
+        let span = Span::new(Position::new(1, 8, 7), Position::new(1, 10, 9));
         let error = ParseError::new("Invalid operator", span, input);
 
         let formatted = error.format_with_context();

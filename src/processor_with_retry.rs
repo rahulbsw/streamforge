@@ -3,11 +3,11 @@
 //! Wraps any MessageProcessor to add retry logic and dead letter queue
 //! handling according to the error recovery actions defined in error.rs.
 
-use crate::{
-    DeadLetterQueue, DlqMessage, MessageEnvelope, MirrorMakerError,
-    RecoveryAction, Result, RetryPolicy,
-};
 use crate::processor::MessageProcessor;
+use crate::{
+    DeadLetterQueue, DlqMessage, MessageEnvelope, MirrorMakerError, RecoveryAction, Result,
+    RetryPolicy,
+};
 use std::sync::Arc;
 use tracing::{debug, error, warn};
 

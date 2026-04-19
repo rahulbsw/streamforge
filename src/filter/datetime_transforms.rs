@@ -54,9 +54,9 @@ fn parse_datetime_value(value: &Value, format: Option<&str>) -> Result<DateTime<
             let ms = n.as_i64().ok_or_else(|| {
                 MirrorMakerError::Config("Cannot convert number to i64".to_string())
             })?;
-            Utc.timestamp_millis_opt(ms).single().ok_or_else(|| {
-                MirrorMakerError::Config(format!("Invalid timestamp: {}", ms))
-            })
+            Utc.timestamp_millis_opt(ms)
+                .single()
+                .ok_or_else(|| MirrorMakerError::Config(format!("Invalid timestamp: {}", ms)))
         }
         _ => Err(MirrorMakerError::Config(format!(
             "Cannot parse datetime from {:?}",
@@ -114,12 +114,11 @@ impl ParseDateTransform {
 
 impl Transform for ParseDateTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, self.format.as_deref())?;
         Ok(Value::String(dt.to_rfc3339()))
@@ -133,20 +132,17 @@ pub struct FromEpochTransform {
 
 impl FromEpochTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for FromEpochTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         match extracted {
             Value::Number(n) => {
@@ -173,20 +169,17 @@ pub struct FromEpochSecondsTransform {
 
 impl FromEpochSecondsTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for FromEpochSecondsTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         match extracted {
             Value::Number(n) => {
@@ -223,12 +216,11 @@ impl FormatDateTransform {
 
 impl Transform for FormatDateTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         let formatted = dt.format(&self.format).to_string();
@@ -243,20 +235,17 @@ pub struct ToEpochTransform {
 
 impl ToEpochTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for ToEpochTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::Number(dt.timestamp_millis().into()))
@@ -270,20 +259,17 @@ pub struct ToEpochSecondsTransform {
 
 impl ToEpochSecondsTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for ToEpochSecondsTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::Number(dt.timestamp().into()))
@@ -297,20 +283,17 @@ pub struct ToIsoTransform {
 
 impl ToIsoTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for ToIsoTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::String(dt.to_rfc3339()))
@@ -334,12 +317,11 @@ impl AddDaysTransform {
 
 impl Transform for AddDaysTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         let new_dt = dt + chrono::Duration::days(self.days);
@@ -364,12 +346,11 @@ impl AddHoursTransform {
 
 impl Transform for AddHoursTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         let new_dt = dt + chrono::Duration::hours(self.hours);
@@ -394,12 +375,11 @@ impl AddMinutesTransform {
 
 impl Transform for AddMinutesTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         let new_dt = dt + chrono::Duration::minutes(self.minutes);
@@ -424,12 +404,11 @@ impl SubtractDaysTransform {
 
 impl Transform for SubtractDaysTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         let new_dt = dt - chrono::Duration::days(self.days);
@@ -444,20 +423,17 @@ pub struct YearTransform {
 
 impl YearTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for YearTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::Number(dt.year().into()))
@@ -471,20 +447,17 @@ pub struct MonthTransform {
 
 impl MonthTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for MonthTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::Number(dt.month().into()))
@@ -498,20 +471,17 @@ pub struct DayTransform {
 
 impl DayTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for DayTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::Number(dt.day().into()))
@@ -525,20 +495,17 @@ pub struct HourTransform {
 
 impl HourTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for HourTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::Number(dt.hour().into()))
@@ -552,20 +519,17 @@ pub struct MinuteTransform {
 
 impl MinuteTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for MinuteTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::Number(dt.minute().into()))
@@ -579,20 +543,17 @@ pub struct SecondTransform {
 
 impl SecondTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for SecondTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::Number(dt.second().into()))
@@ -606,20 +567,17 @@ pub struct DayOfWeekTransform {
 
 impl DayOfWeekTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for DayOfWeekTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         let weekday = dt.weekday().num_days_from_sunday();
@@ -634,20 +592,17 @@ pub struct DayOfYearTransform {
 
 impl DayOfYearTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for DayOfYearTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
                 path: self.path.clone(),
                 value: None,
-            }
-        })?;
+            })?;
 
         let dt = parse_datetime_value(&extracted, None)?;
         Ok(Value::Number(dt.ordinal().into()))

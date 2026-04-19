@@ -1,7 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use serde_json::json;
 use std::sync::Arc;
-use streamforge::filter::{Filter, JsonPathFilter, Transform, JsonPathTransform};
+use streamforge::filter::{Filter, JsonPathFilter, JsonPathTransform, Transform};
 use streamforge::MessageEnvelope;
 
 /// Benchmark end-to-end message processing pipeline
@@ -32,8 +32,9 @@ fn benchmark_processing_pipeline(c: &mut Criterion) {
             let envelope = MessageEnvelope::new(test_message.clone());
             let passes = filter.evaluate(&envelope.value).unwrap();
             if passes {
-                let _ = transform.transform(Arc::try_unwrap(envelope.value)
-                    .unwrap_or_else(|arc| (*arc).clone())).unwrap();
+                let _ = transform
+                    .transform(Arc::try_unwrap(envelope.value).unwrap_or_else(|arc| (*arc).clone()))
+                    .unwrap();
             }
         });
     });
@@ -71,8 +72,7 @@ fn benchmark_processing_pipeline(c: &mut Criterion) {
 
         b.iter(|| {
             let envelope = MessageEnvelope::new(test_message.clone());
-            let value = Arc::try_unwrap(envelope.value)
-                .unwrap_or_else(|arc| (*arc).clone());
+            let value = Arc::try_unwrap(envelope.value).unwrap_or_else(|arc| (*arc).clone());
 
             for path in &paths {
                 let _ = black_box(path.transform(value.clone()).unwrap());

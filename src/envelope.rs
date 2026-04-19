@@ -247,10 +247,8 @@ mod tests {
         let mut envelope = MessageEnvelope::new(json!({}));
 
         // Add headers
-        Arc::make_mut(&mut envelope.headers)
-            .insert("x-tenant".to_string(), b"prod".to_vec());
-        Arc::make_mut(&mut envelope.headers)
-            .insert("x-user".to_string(), b"user-123".to_vec());
+        Arc::make_mut(&mut envelope.headers).insert("x-tenant".to_string(), b"prod".to_vec());
+        Arc::make_mut(&mut envelope.headers).insert("x-user".to_string(), b"user-123".to_vec());
 
         // Check existence
         assert!(envelope.has_header("x-tenant"));

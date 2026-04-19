@@ -120,8 +120,8 @@ enum Token {
 
 /// Lexer for tokenizing input
 struct Lexer {
-    input: String,      // Keep for error reporting
-    chars: Vec<char>,   // Char vector for O(1) access
+    input: String,    // Keep for error reporting
+    chars: Vec<char>, // Char vector for O(1) access
     position: usize,
     line: usize,
     column: usize,
@@ -994,10 +994,16 @@ mod tests {
         assert_eq!(lexer.next_token().unwrap(), Token::LParen);
         assert_eq!(lexer.next_token().unwrap(), Token::Field);
         assert_eq!(lexer.next_token().unwrap(), Token::LParen);
-        assert_eq!(lexer.next_token().unwrap(), Token::String("/status".to_string()));
+        assert_eq!(
+            lexer.next_token().unwrap(),
+            Token::String("/status".to_string())
+        );
         assert_eq!(lexer.next_token().unwrap(), Token::RParen);
         assert_eq!(lexer.next_token().unwrap(), Token::Eq);
-        assert_eq!(lexer.next_token().unwrap(), Token::String("active".to_string()));
+        assert_eq!(
+            lexer.next_token().unwrap(),
+            Token::String("active".to_string())
+        );
         assert_eq!(lexer.next_token().unwrap(), Token::RParen);
         assert_eq!(lexer.next_token().unwrap(), Token::Eof);
     }
@@ -1041,7 +1047,8 @@ mod tests {
 
     #[test]
     fn test_parse_and_filter() {
-        let result = parse_filter_expr_v2("and(field('/status') == 'active', field('/count') > 10)");
+        let result =
+            parse_filter_expr_v2("and(field('/status') == 'active', field('/count') > 10)");
         assert!(result.is_ok());
 
         let node = result.unwrap();

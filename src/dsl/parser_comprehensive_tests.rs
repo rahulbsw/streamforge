@@ -3,7 +3,10 @@
 
 #[cfg(test)]
 mod comprehensive_tests {
-    use crate::dsl::ast::{ArithmeticOp, ArithmeticOperand, ComparisonOp, FilterExpr, HashAlgorithm, Literal, StringOp, TransformExpr};
+    use crate::dsl::ast::{
+        ArithmeticOp, ArithmeticOperand, ComparisonOp, FilterExpr, HashAlgorithm, Literal,
+        StringOp, TransformExpr,
+    };
     use crate::dsl::parser::{parse_filter_expr, parse_transform_expr};
 
     // ============================================================================
@@ -58,7 +61,11 @@ mod comprehensive_tests {
         assert!(result.is_ok());
         let node = result.unwrap();
         match &node.value {
-            FilterExpr::JsonPath { path: _, op: _, value } => match value {
+            FilterExpr::JsonPath {
+                path: _,
+                op: _,
+                value,
+            } => match value {
                 Literal::Boolean(b) => assert!(*b),
                 _ => panic!("Expected boolean literal"),
             },
@@ -78,7 +85,11 @@ mod comprehensive_tests {
         assert!(result.is_ok());
         let node = result.unwrap();
         match &node.value {
-            FilterExpr::JsonPath { path: _, op: _, value } => {
+            FilterExpr::JsonPath {
+                path: _,
+                op: _,
+                value,
+            } => {
                 assert!(matches!(value, Literal::Null));
             }
             _ => panic!("Expected JsonPath filter"),
@@ -237,7 +248,8 @@ mod comprehensive_tests {
 
     #[test]
     fn test_regex_complex_email() {
-        let result = parse_filter_expr("REGEX:/email,[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
+        let result =
+            parse_filter_expr("REGEX:/email,[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
         assert!(result.is_ok());
     }
 
@@ -251,7 +263,10 @@ mod comprehensive_tests {
         assert!(result.is_ok());
         let node = result.unwrap();
         match &node.value {
-            FilterExpr::ArrayAny { array_path, element_filter: _ } => {
+            FilterExpr::ArrayAny {
+                array_path,
+                element_filter: _,
+            } => {
                 assert_eq!(array_path, "/items");
             }
             _ => panic!("Expected ARRAY_ANY filter"),
@@ -458,7 +473,11 @@ mod comprehensive_tests {
         assert!(result.is_ok());
         let node = result.unwrap();
         match &node.value {
-            TransformExpr::Extract { path, target_field, default_value } => {
+            TransformExpr::Extract {
+                path,
+                target_field,
+                default_value,
+            } => {
                 assert_eq!(path, "/user/name");
                 assert_eq!(target_field, "username");
                 assert!(default_value.is_none());
@@ -473,7 +492,11 @@ mod comprehensive_tests {
         assert!(result.is_ok());
         let node = result.unwrap();
         match &node.value {
-            TransformExpr::Extract { path: _, target_field: _, default_value } => {
+            TransformExpr::Extract {
+                path: _,
+                target_field: _,
+                default_value,
+            } => {
                 assert_eq!(default_value.as_ref().unwrap(), "default_value");
             }
             _ => panic!("Expected EXTRACT transform"),
@@ -524,7 +547,11 @@ mod comprehensive_tests {
         assert!(result.is_ok());
         let node = result.unwrap();
         match &node.value {
-            TransformExpr::Hash { algorithm, path, target_field } => {
+            TransformExpr::Hash {
+                algorithm,
+                path,
+                target_field,
+            } => {
                 assert_eq!(*algorithm, HashAlgorithm::MD5);
                 assert_eq!(path, "/user/email");
                 assert_eq!(target_field, "email_hash");
@@ -585,7 +612,11 @@ mod comprehensive_tests {
         assert!(result.is_ok());
         let node = result.unwrap();
         match &node.value {
-            TransformExpr::ArrayMap { array_path, element_path, target_field } => {
+            TransformExpr::ArrayMap {
+                array_path,
+                element_path,
+                target_field,
+            } => {
                 assert_eq!(array_path, "/items");
                 assert_eq!(element_path, "/id");
                 assert_eq!(target_field, "item_ids");

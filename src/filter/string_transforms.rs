@@ -23,20 +23,17 @@ pub struct StringLengthTransform {
 
 impl StringLengthTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for StringLengthTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => Ok(Value::Number(s.len().into())),
@@ -68,12 +65,11 @@ impl SubstringTransform {
 
 impl Transform for SubstringTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => {
@@ -113,12 +109,11 @@ impl SplitTransform {
 
 impl Transform for SplitTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => {
@@ -153,12 +148,11 @@ impl JoinTransform {
 
 impl Transform for JoinTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::Array(arr) => {
@@ -196,7 +190,11 @@ pub struct ReplaceTransform {
 }
 
 impl ReplaceTransform {
-    pub fn new(path: impl Into<String>, pattern: impl Into<String>, replacement: impl Into<String>) -> Result<Self> {
+    pub fn new(
+        path: impl Into<String>,
+        pattern: impl Into<String>,
+        replacement: impl Into<String>,
+    ) -> Result<Self> {
         Ok(Self {
             path: path.into(),
             pattern: pattern.into(),
@@ -207,12 +205,11 @@ impl ReplaceTransform {
 
 impl Transform for ReplaceTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => {
@@ -246,12 +243,11 @@ impl PadLeftTransform {
 
 impl Transform for PadLeftTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => {
@@ -290,12 +286,11 @@ impl PadRightTransform {
 
 impl Transform for PadRightTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => {
@@ -322,20 +317,17 @@ pub struct ToStringTransform {
 
 impl ToStringTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for ToStringTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         let result = match extracted {
             Value::String(s) => s.clone(),
@@ -358,20 +350,17 @@ pub struct ToIntTransform {
 
 impl ToIntTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for ToIntTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         let result = match extracted {
             Value::Number(n) => {
@@ -381,14 +370,20 @@ impl Transform for ToIntTransform {
                     f as i64
                 } else {
                     return Err(MirrorMakerError::Config(
-                        "Cannot convert number to int".to_string()
+                        "Cannot convert number to int".to_string(),
                     ));
                 }
             }
             Value::String(s) => s.parse::<i64>().map_err(|e| {
                 MirrorMakerError::Config(format!("Cannot parse string to int: {}", e))
             })?,
-            Value::Bool(b) => if b { 1 } else { 0 },
+            Value::Bool(b) => {
+                if b {
+                    1
+                } else {
+                    0
+                }
+            }
             _ => {
                 return Err(MirrorMakerError::Config(format!(
                     "Cannot convert {:?} to int",
@@ -408,31 +403,32 @@ pub struct ToFloatTransform {
 
 impl ToFloatTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for ToFloatTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         let result = match extracted {
-            Value::Number(n) => {
-                n.as_f64().ok_or_else(|| {
-                    MirrorMakerError::Config("Cannot convert number to float".to_string())
-                })?
-            }
+            Value::Number(n) => n.as_f64().ok_or_else(|| {
+                MirrorMakerError::Config("Cannot convert number to float".to_string())
+            })?,
             Value::String(s) => s.parse::<f64>().map_err(|e| {
                 MirrorMakerError::Config(format!("Cannot parse string to float: {}", e))
             })?,
-            Value::Bool(b) => if b { 1.0 } else { 0.0 },
+            Value::Bool(b) => {
+                if b {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
             _ => {
                 return Err(MirrorMakerError::Config(format!(
                     "Cannot convert {:?} to float",
@@ -454,20 +450,17 @@ pub struct UppercaseTransform {
 
 impl UppercaseTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for UppercaseTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => Ok(Value::String(s.to_uppercase())),
@@ -486,20 +479,17 @@ pub struct LowercaseTransform {
 
 impl LowercaseTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for LowercaseTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => Ok(Value::String(s.to_lowercase())),
@@ -518,20 +508,17 @@ pub struct TrimStartTransform {
 
 impl TrimStartTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for TrimStartTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => Ok(Value::String(s.trim_start().to_string())),
@@ -550,20 +537,17 @@ pub struct TrimEndTransform {
 
 impl TrimEndTransform {
     pub fn new(path: impl Into<String>) -> Result<Self> {
-        Ok(Self {
-            path: path.into(),
-        })
+        Ok(Self { path: path.into() })
     }
 }
 
 impl Transform for TrimEndTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let extracted = extract_path(&value, &self.path).ok_or_else(|| {
-            MirrorMakerError::JsonPathNotFound {
-            path: self.path.clone(),
-            value: None,
-        }
-        })?;
+        let extracted =
+            extract_path(&value, &self.path).ok_or_else(|| MirrorMakerError::JsonPathNotFound {
+                path: self.path.clone(),
+                value: None,
+            })?;
 
         match extracted {
             Value::String(s) => Ok(Value::String(s.trim_end().to_string())),

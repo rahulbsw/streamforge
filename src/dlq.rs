@@ -101,9 +101,9 @@ impl DeadLetterQueue {
             let producer = ClientConfig::new()
                 .set("bootstrap.servers", main_brokers)
                 .create()
-                .map_err(|e| MirrorMakerError::Config(
-                    format!("Failed to create DLQ producer: {}", e)
-                ))?;
+                .map_err(|e| {
+                    MirrorMakerError::Config(format!("Failed to create DLQ producer: {}", e))
+                })?;
 
             return Ok(Self { config, producer });
         }
@@ -115,20 +115,18 @@ impl DeadLetterQueue {
         client_config.set("bootstrap.servers", brokers);
 
         // DLQ producer settings (reliability over performance)
-        client_config.set("acks", "all");  // Wait for all replicas
+        client_config.set("acks", "all"); // Wait for all replicas
         client_config.set("retries", "3");
-        client_config.set("max.in.flight.requests.per.connection", "1");  // Ordering
+        client_config.set("max.in.flight.requests.per.connection", "1"); // Ordering
         client_config.set("request.timeout.ms", "30000");
 
         if let Some(compression) = &config.compression {
             client_config.set("compression.type", compression);
         }
 
-        let producer = client_config
-            .create()
-            .map_err(|e| MirrorMakerError::Config(
-                format!("Failed to create DLQ producer: {}", e)
-            ))?;
+        let producer = client_config.create().map_err(|e| {
+            MirrorMakerError::Config(format!("Failed to create DLQ producer: {}", e))
+        })?;
 
         debug!(
             topic = %config.topic,
@@ -172,8 +170,7 @@ impl DeadLetterQueue {
         let mut last_error = None;
         for attempt in 0..self.config.max_dlq_retries {
             // Create Kafka record
-            let mut record = FutureRecord::to(&self.config.topic)
-                .payload(&value_bytes);
+            let mut record = FutureRecord::to(&self.config.topic).payload(&value_bytes);
 
             if let Some(key) = &key_bytes {
                 record = record.key(key);
@@ -189,10 +186,7 @@ impl DeadLetterQueue {
             }
             record = record.headers(kafka_headers);
 
-            match self.producer
-                .send(record, Duration::from_secs(30))
-                .await
-            {
+            match self.producer.send(record, Duration::from_secs(30)).await {
                 Ok(_) => {
                     debug!(
                         topic = %self.config.topic,
@@ -383,8 +377,8 @@ mod tests {
 
     #[test]
     fn test_dlq_message_creation() {
-        let envelope = MessageEnvelope::new(json!({"test": "value"}))
-            .source("test-topic".into(), 0, 100);
+        let envelope =
+            MessageEnvelope::new(json!({"test": "value"})).source("test-topic".into(), 0, 100);
 
         let error = MirrorMakerError::FilterEvaluation {
             message: "Filter failed".into(),

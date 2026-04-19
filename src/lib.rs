@@ -30,7 +30,6 @@ pub use config::{
 pub use dlq::{DeadLetterQueue, DlqConfig, DlqMessage};
 pub use envelope::MessageEnvelope;
 pub use error::{MirrorMakerError, RecoveryAction, Result};
-pub use retry::{retry_with_backoff, RetryConfig, RetryPolicy};
 pub use filter::{
     AndFilter, CacheLookupTransform, CachePutTransform, ConcatPart, ConcatTransform,
     EnvelopeTransform, Filter, HashTransform, HeaderCopyTransform, HeaderExistsFilter,
@@ -49,3 +48,4 @@ pub use filter_parser::{
 pub use hash::{hash_bytes, hash_value, HashAlgorithm};
 pub use jsonpath::{extract_owned_with_segments, extract_with_segments, JsonPath};
 pub use kafka::sink::KafkaSink;
+pub use retry::{retry_with_backoff, RetryConfig, RetryPolicy};
