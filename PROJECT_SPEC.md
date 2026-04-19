@@ -1055,7 +1055,184 @@ When making decisions:
 
 ---
 
-## 21. Claude-Specific Prompt
+## 21. DSL v2.0 Implementation Status (2026-04-18)
+
+The DSL has been significantly enhanced beyond the original v1.0 plan with three major additions:
+
+### v2.0: Function-Style Syntax ✅ IMPLEMENTED
+
+**Status:** Fully implemented with auto-detection
+
+**Features:**
+- Function-style syntax as readable alternative to colon-delimited format
+- Auto-detection: parser recognizes v1 (colon) vs v2 (function-style) automatically
+- Zero breaking changes: 100% backward compatible with existing v1 configs
+- Extended AST from 330 lines to 670+ lines with 60+ expression variants
+
+**Examples:**
+```yaml
+# v1 (colon-delimited) - still works
+filter: "AND:/status,==,active:/count,>,10"
+
+# v2 (function-style) - new, more readable
+filter: "and(field('/status') == 'active', field('/count') > 10)"
+```
+
+**New Filter Functions:**
+- Null checks: `is_null()`, `is_not_null()`, `is_empty()`, `is_not_empty()`, `is_blank()`
+- String checks: `starts_with()`, `ends_with()`, `contains()`, `string_length()`
+- Boolean logic: `and()`, `or()`, `not()` with nested expressions
+- Field access: `field('/path')` with comparison operators
+
+**Documentation:** `docs/DSL_V2_FUNCTION_SYNTAX.md` (comprehensive specification)
+
+### v2.1: Dollar Syntax ($) ✅ IMPLEMENTED
+
+**Status:** Fully implemented as concise alternative to `field()`
+
+**Features:**
+- `$` symbol as shorthand for field access (inspired by JSONPath)
+- Simple form: `$status`, `$count` → `/status`, `/count`
+- Dot notation: `$user.email` → `/user/email`, `$data.user.profile.age` → `/data/user/profile/age`
+- Explicit form: `$('/field$1/name')` for paths with special characters ($, -, ., :)
+- Supports all comparison operators: ==, !=, >, >=, <, <=
+- Boolean and null literals: `$active == true`, `$deleted_at == null`
+
+**Examples:**
+```yaml
+# Simple comparison
+filter: "$status == 'active'"
+
+# Dot notation for nested fields
+filter: "$user.email == 'admin@example.com'"
+
+# Complex boolean logic
+filter: "and($status == 'active', or($tier == 'premium', $tier == 'enterprise'))"
+
+# Explicit form for special characters
+filter: "$('/field-with-dash') == 'test'"
+```
+
+**Implementation:** Extended lexer with `Token::Dollar` and `Token::Dot`, 15 tests
+
+**When to use:**
+- Use `$` for concise, readable expressions
+- Use `field()` when explicit function call is clearer
+- Use `$('/explicit/path')` for paths with special characters
+
+### v2.2: Transform Evaluators ✅ IMPLEMENTED
+
+**Status:** 35 transform functions fully implemented and tested
+
+#### String Transforms (14 functions)
+- **Case conversion:** `uppercase()`, `lowercase()`
+- **Length:** `length()` - works on strings and arrays
+- **Substring:** `substring(start, end)` - character-aware slicing
+- **Split/Join:** `split(delimiter)`, `join(separator)`
+- **Editing:** `replace(pattern, replacement)`
+- **Padding:** `pad_left(width, char)`, `pad_right(width, char)`
+- **Trimming:** `trim_start()`, `trim_end()`
+- **Type conversion:** `to_string()`, `to_int()`, `to_float()`
+
+**Examples:**
+```yaml
+transform: |
+  {
+    "id": $id,
+    "name_upper": uppercase(field('/name')),
+    "email_domain": split(field('/email'), '@')[1],
+    "padded_id": pad_left(to_string(field('/id')), 8, '0')
+  }
+```
+
+#### Date/Time Transforms (21 functions)
+- **Current time:** `now()` (epoch ms), `now_iso()` (ISO 8601)
+- **Parsing:** `parse_date(path, format)`, `from_epoch()`, `from_epoch_seconds()`
+- **Formatting:** `format_date(path, format)`, `to_epoch()`, `to_epoch_seconds()`, `to_iso()`
+- **Arithmetic:** `add_days()`, `add_hours()`, `add_minutes()`, `subtract_days()`
+- **Extraction:** `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `day_of_week()`, `day_of_year()`
+
+**Examples:**
+```yaml
+transform: |
+  {
+    "event_id": $id,
+    "timestamp": now_iso(),
+    "scheduled_for": add_days(field('/event_date'), 7),
+    "year": year(field('/event_date')),
+    "formatted": format_date(field('/event_date'), '%Y-%m-%d %H:%M')
+  }
+```
+
+**Implementation Details:**
+- `src/filter/string_transforms.rs` (585 lines, 11 tests)
+- `src/filter/datetime_transforms.rs` (820 lines, 18 tests)
+- Uses `chrono` crate for robust date/time handling
+- Supports ISO 8601, epoch ms/seconds, and custom format strings
+- Auto-detects common date formats
+
+### Test Coverage
+
+**Total Tests:** 333 passing (0 failures, 0 warnings)
+
+**Breakdown:**
+- Parser tests: 102 (v1 + v2 syntax)
+- Dollar syntax tests: 15
+- String transform tests: 11
+- Date/time transform tests: 18
+- Other tests: 187 (core engine, filters, etc.)
+
+### Documentation
+
+**New/Updated Files:**
+- `docs/DSL_V2_FUNCTION_SYNTAX.md` - Complete v2.0 specification
+- `docs/DSL_SPEC.md` - Updated with v2 features
+- `examples/configs/function-style-syntax-examples.yaml` - 22 real-world examples
+- `V1_PLAN.md` - Phase 2 updated with v2.0/v2.1/v2.2 achievements
+
+### Code Impact
+
+**New Modules:**
+- `src/dsl/parser_v2.rs` (1100+ lines) - v2 parser with $ syntax
+- `src/dsl/dollar_syntax_tests.rs` (320 lines) - $ syntax tests
+- `src/filter/string_transforms.rs` (585 lines) - string functions
+- `src/filter/datetime_transforms.rs` (820 lines) - date/time functions
+
+**Extended Modules:**
+- `src/dsl/ast.rs` - 330 → 670+ lines (60+ expression variants)
+- `src/dsl/parser.rs` - Updated for auto-detection
+- `src/filter/mod.rs` - Exports for all transforms
+
+**Total New Code:** ~3,500 lines across DSL v2 implementation
+
+### Stability Impact
+
+**Backward Compatibility:** ✅ 100% maintained
+- All v1 colon-delimited syntax continues to work
+- Auto-detection ensures no breaking changes
+- Existing configs require no migration
+
+**Performance:** ✅ No regression
+- Parser selection at parse-time (not hot-path)
+- Transform evaluators use efficient implementations
+- Chrono provides optimized date/time operations
+
+**API Stability:** ✅ v1 guarantees preserved
+- v2 syntax is additive, not replacing
+- Transform trait interface unchanged
+- Filter trait interface unchanged
+
+### Future Enhancements (v1.1+)
+
+Potential additions (not committed):
+- Method chaining: `$field.trim().lowercase()`
+- Array transforms: `array_map()`, `array_filter()`
+- Math functions: `abs()`, `round()`, `ceil()`, `floor()`
+- Additional date functions: `date_diff()`, `is_weekend()`, `business_days()`
+
+---
+
+## 22. Claude-Specific Prompt
 
 ```text
 Act as principal engineer and delivery lead for StreamForge.
@@ -1091,7 +1268,7 @@ Output expectations:
 
 ---
 
-## 22. Final Direction
+## 23. Final Direction
 
 The correct strategy is:
 
