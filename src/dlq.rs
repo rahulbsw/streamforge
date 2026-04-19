@@ -6,8 +6,25 @@
 use crate::{MessageEnvelope, MirrorMakerError, Result};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::ClientConfig;
+use std::cell::RefCell;
 use std::time::Duration;
 use tracing::{debug, error, warn};
+
+// Thread-local buffer for JSON serialization to reduce allocations
+thread_local! {
+    static SERIALIZE_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
+}
+
+/// Serialize a value to JSON bytes using thread-local buffer (reduces allocations)
+fn serialize_to_vec<T: serde::Serialize>(value: &T) -> Result<Vec<u8>> {
+    SERIALIZE_BUFFER.with(|buf_cell| {
+        let mut buf = buf_cell.borrow_mut();
+        buf.clear();
+        serde_json::to_writer(&mut *buf, value)
+            .map_err(|e| MirrorMakerError::Serialization(e.to_string()))?;
+        Ok(buf.clone())
+    })
+}
 
 /// DLQ configuration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -134,7 +151,7 @@ impl DeadLetterQueue {
 
         // Build DLQ message with error headers
         let mut headers = if self.config.include_original_headers {
-            dlq_msg.envelope.headers.clone()
+            (*dlq_msg.envelope.headers).clone()
         } else {
             std::collections::HashMap::new()
         };
@@ -142,14 +159,14 @@ impl DeadLetterQueue {
         // Add error metadata headers
         self.add_error_headers(&mut headers, &dlq_msg);
 
-        // Serialize key and value
+        // Serialize key and value using thread-local buffer
         let key_bytes = if let Some(key) = &dlq_msg.envelope.key {
-            Some(serde_json::to_vec(key)?)
+            Some(serialize_to_vec(key)?)
         } else {
             None
         };
 
-        let value_bytes = serde_json::to_vec(&dlq_msg.envelope.value)?;
+        let value_bytes = serialize_to_vec(&*dlq_msg.envelope.value)?;
 
         // Send with retry (rebuild record on each attempt since it doesn't implement Clone)
         let mut last_error = None;

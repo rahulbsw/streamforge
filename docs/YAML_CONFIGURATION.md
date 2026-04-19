@@ -357,6 +357,210 @@ routing:
       # ... config ...
 ```
 
+## Error Handling Configuration
+
+**New in v1.0.0**: Per-destination error policies provide fine-grained control over how the pipeline handles bad records.
+
+### Error Policy Options
+
+Each destination can specify an `error_policy` field that controls what happens when filter or transform evaluation fails:
+
+```yaml
+routing:
+  destinations:
+    - output: critical-topic
+      error_policy: "fail"         # Halt pipeline on any error (strictest)
+    
+    - output: standard-topic
+      error_policy: "dlq"          # Send to dead letter queue (recommended)
+    
+    - output: analytics-topic
+      error_policy: "skip_and_log" # Skip bad records, log errors (permissive)
+    
+    - output: enrichment-topic
+      error_policy: "continue"     # Continue despite errors (most permissive)
+```
+
+### Policy Descriptions
+
+| Policy | Behavior | Use Case | Risk Level |
+|--------|----------|----------|------------|
+| **fail** | Halt pipeline immediately | Financial transactions, audit logs, compliance data | 🔴 High (pipeline fragility) |
+| **dlq** | Send failed messages to DLQ, continue processing | Most production use cases | 🟡 Medium (requires DLQ monitoring) |
+| **skip_and_log** | Skip bad messages, log warnings, continue | Analytics, metrics, non-critical data | 🟢 Low (data loss possible) |
+| **continue** | Log error but don't DLQ, continue processing | Enrichment, optional fields | 🟢 Low (silent failures) |
+
+### Decision Matrix
+
+Choose your error policy based on data criticality:
+
+**Critical Data (never lose)**:
+```yaml
+- output: financial-transactions
+  error_policy: "fail"
+  # If any message fails → pipeline stops
+  # Pro: Never lose or corrupt data
+  # Con: Pipeline fragile to bad records
+```
+
+**Important Data (preserve for debugging)**:
+```yaml
+- output: user-events
+  error_policy: "dlq"
+  # If any message fails → send to DLQ, continue
+  # Pro: Pipeline continues, bad records preserved
+  # Con: Requires monitoring DLQ topic
+```
+
+**Analytics Data (high throughput)**:
+```yaml
+- output: pageview-metrics
+  error_policy: "skip_and_log"
+  # If any message fails → log error, skip, continue
+  # Pro: Maximum throughput, never blocks
+  # Con: Bad records lost (only logged)
+```
+
+**Best-Effort Enrichment**:
+```yaml
+- output: enriched-events
+  error_policy: "continue"
+  # If enrichment fails → log error, continue
+  # Pro: Main data flow unaffected
+  # Con: Enrichment may silently fail
+```
+
+### Complete Example
+
+```yaml
+appid: "error-handling-demo"
+bootstrap: "localhost:9092"
+input: "raw-events"
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Strategy 1: STRICT - Halt on error
+    - output: "financial-transactions"
+      filter: "$type == 'transaction'"
+      error_policy: "fail"
+    
+    # Strategy 2: DLQ - Recommended default
+    - output: "user-events"
+      filter: "$status == 'active'"
+      error_policy: "dlq"
+    
+    # Strategy 3: SKIP - High throughput
+    - output: "analytics-events"
+      filter: "$event_type == 'pageview'"
+      error_policy: "skip_and_log"
+
+# Dead letter queue configuration (required for error_policy: "dlq")
+dlq:
+  enabled: true
+  topic: "streamforge-dlq"
+  max_retries: 3
+```
+
+### Observability
+
+Track error handling with Prometheus metrics:
+
+```promql
+# Count of messages filtered due to errors
+streamforge_messages_filtered{reason="error"}
+
+# Error rate by destination
+rate(streamforge_processing_errors_total[5m])
+```
+
+**Alerting recommendations**:
+- Alert on DLQ message rate > threshold
+- Alert on skipped message rate > threshold  
+- Alert on pipeline halts (error_policy: fail)
+
+### Try() Function for Inline Error Handling
+
+**New in v1.0.0**: The `try()` function provides field-level fallback values for transform errors.
+
+While `error_policy` controls pipeline-level error handling, `try()` provides inline error handling at the transform level:
+
+```yaml
+routing:
+  destinations:
+    - output: "enriched-users"
+      transform: "TRY:STRING:UPPER,/name,'UNKNOWN'"
+      # If /name doesn't exist or transform fails → use 'UNKNOWN'
+    
+    - output: "orders"
+      transform: "TRY:/order/amount,0"
+      # If /order/amount doesn't exist → use 0
+    
+    - output: "emails"
+      transform: "TRY:/user/email,'invalid@example.com'"
+      # If /user/email doesn't exist → use fallback
+```
+
+**Try() Syntax:**
+```
+TRY:transform_expression,fallback_value
+```
+
+**Fallback Value Types:**
+- String: `'text'` or `"text"`
+- Number: `42` or `3.14`
+- Boolean: `true` or `false`
+- Null: `null`
+
+**Combining try() and error_policy:**
+
+```yaml
+- output: "safe-processing"
+  transform: "TRY:STRING:UPPER,/status,'UNKNOWN'"
+  error_policy: "skip_and_log"
+  # try() handles transform errors (missing fields)
+  # error_policy handles filter errors and other issues
+```
+
+**Use Cases:**
+
+1. **Optional Fields**: Provide defaults for missing optional data
+   ```yaml
+   transform: "TRY:/optional_field,'default'"
+   ```
+
+2. **Data Quality**: Handle poor data quality gracefully
+   ```yaml
+   transform: "TRY:/user/email,'invalid@example.com'"
+   ```
+
+3. **Type Conversions**: Safe type conversions with fallbacks
+   ```yaml
+   transform: "TRY:STRING:LENGTH,/text,0"
+   ```
+
+**Decision Guide: try() vs error_policy**
+
+| Scenario | Use try() | Use error_policy |
+|----------|-----------|------------------|
+| Optional field with default | ✅ Yes | Maybe |
+| Required field | No | ✅ Yes |
+| Per-field control | ✅ Yes | No |
+| Pipeline-level control | No | ✅ Yes |
+| Filter errors | No | ✅ Yes |
+| Transform errors | ✅ Yes | ✅ Yes |
+
+**Best Practice**: Use both together:
+- `try()` for optional fields and data quality issues
+- `error_policy` for pipeline resilience and routing control
+
+### See Also
+
+- [ERROR_HANDLING.md](ERROR_HANDLING.md) - Complete error handling guide
+- [DELIVERY_GUARANTEES.md](DELIVERY_GUARANTEES.md) - At-least-once semantics
+- [examples/configs/error-handling-strategies.yaml](../examples/configs/error-handling-strategies.yaml) - Policy examples
+- [examples/configs/try-function-examples.yaml](../examples/configs/try-function-examples.yaml) - Try() examples
+
 ## Best Practices
 
 ### 1. Use Comments Liberally

@@ -90,32 +90,37 @@ async fn main() -> Result<()> {
         build_single_destination_processor(&config, stats.clone(), cache_manager.clone()).await?
     };
 
-    // Wrap processor with retry and DLQ support
-    let retry_policy = RetryPolicy::new(config.retry.clone());
-    let dlq = if config.dlq.enabled {
-        info!(
-            "DLQ enabled: topic={}, max_retries={}",
-            config.dlq.topic, config.dlq.max_dlq_retries
-        );
-        Some(Arc::new(DeadLetterQueue::new(config.dlq.clone(), &config.bootstrap)?))
+    // Wrap processor with retry and DLQ support (skip wrapper if max_attempts=1 for performance)
+    let processor: Arc<dyn MessageProcessor> = if config.retry.max_attempts == 1 {
+        info!("Retry disabled (max_attempts=1) - using base processor directly");
+        base_processor
     } else {
-        info!("DLQ disabled - errors will halt pipeline");
-        None
+        let retry_policy = RetryPolicy::new(config.retry.clone());
+        let dlq = if config.dlq.enabled {
+            info!(
+                "DLQ enabled: topic={}, max_retries={}",
+                config.dlq.topic, config.dlq.max_dlq_retries
+            );
+            Some(Arc::new(DeadLetterQueue::new(config.dlq.clone(), &config.bootstrap)?))
+        } else {
+            info!("DLQ disabled - errors will halt pipeline");
+            None
+        };
+
+        info!(
+            "Retry policy: max_attempts={}, initial_delay={}ms, max_delay={}ms",
+            config.retry.max_attempts,
+            config.retry.initial_delay_ms,
+            config.retry.max_delay_ms
+        );
+
+        Arc::new(ProcessorWithRetry::new(
+            base_processor,
+            retry_policy,
+            dlq,
+            config.appid.clone(),
+        )) as Arc<dyn MessageProcessor>
     };
-
-    let processor = Arc::new(ProcessorWithRetry::new(
-        base_processor,
-        retry_policy,
-        dlq,
-        config.appid.clone(),
-    )) as Arc<dyn MessageProcessor>;
-
-    info!(
-        "Retry policy: max_attempts={}, initial_delay={}ms, max_delay={}ms",
-        config.retry.max_attempts,
-        config.retry.initial_delay_ms,
-        config.retry.max_delay_ms
-    );
 
     // Create Kafka consumer
     let consumer = create_consumer(&config)?;
@@ -279,8 +284,9 @@ async fn main() -> Result<()> {
 
                             // Extract headers
                             if let Some(headers) = msg.headers() {
+                                let headers_map = Arc::make_mut(&mut envelope.headers);
                                 for header in headers.iter() {
-                                    envelope.headers.insert(
+                                    headers_map.insert(
                                         header.key.to_string(),
                                         header.value.map(|v| v.to_vec()).unwrap_or_default()
                                     );
@@ -631,6 +637,7 @@ async fn build_multi_destination_processor(
             envelope_transforms,
             transform,
             dest.output.clone(),
+            dest.error_policy, // NEW: per-destination error handling policy
         );
 
         destinations.push(dest_processor);

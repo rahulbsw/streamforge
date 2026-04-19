@@ -1,0 +1,133 @@
+# Try Function Examples
+#
+# The try() function provides inline error handling for transforms.
+# Syntax: TRY:transform_expression,fallback_value
+
+appid: "try-function-demo"
+bootstrap: "localhost:9092"
+input: "raw-events"
+offset: "latest"
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Example 1: Try to extract email, fallback to default
+    - output: "user-emails"
+      transform: "TRY:/user/email,'unknown@example.com'"
+      # If /user/email doesn't exist → use 'unknown@example.com'
+
+    # Example 2: Try to uppercase name, fallback to 'ANONYMOUS'
+    - output: "uppercased-names"
+      transform: "TRY:STRING:UPPER,/name,'ANONYMOUS'"
+      # If name doesn't exist → use 'ANONYMOUS'
+
+    # Example 3: Try to extract amount, fallback to 0
+    - output: "amounts"
+      transform: "TRY:/order/amount,0"
+      # If amount doesn't exist → use 0
+
+    # Example 4: Try arithmetic, fallback to original value
+    - output: "discounted-prices"
+      transform: "TRY:ARITHMETIC:MUL,/price,0.9,/price"
+      # If price doesn't exist → use original message
+
+    # Example 5: Combine try() with error_policy
+    - output: "safe-processing"
+      transform: "TRY:STRING:UPPER,/status,'UNKNOWN'"
+      error_policy: "skip_and_log"
+      # Try() handles transform errors, error_policy handles other errors
+
+    # Example 6: Nested try() in CONSTRUCT (future v2 DSL)
+    # This syntax will be supported in the future:
+    # transform: "construct(
+    #   id = /user/id,
+    #   email = try(/user/email, 'unknown@example.com'),
+    #   age = try(/user/age, 0)
+    # )"
+
+# Dead letter queue for non-recoverable errors
+dlq:
+  enabled: true
+  topic: "try-function-dlq"
+  max_retries: 3
+
+---
+
+# Use Cases for try()
+
+## 1. Optional Fields with Defaults
+# Handle missing optional fields gracefully:
+#   transform: "TRY:/optional_field,'default_value'"
+
+## 2. Data Quality - Missing Fields
+# Provide fallbacks when data quality is poor:
+#   transform: "TRY:/user/email,'invalid@example.com'"
+
+## 3. Type Conversions with Fallbacks
+# Try to convert types, fallback if conversion fails:
+#   transform: "TRY:STRING:LENGTH,/description,0"
+
+## 4. Safe Arithmetic
+# Perform calculations with fallback for missing data:
+#   transform: "TRY:ARITHMETIC:MUL,/price,1.1,/price"
+
+## 5. Chaining Transforms
+# Try a complex transform, fallback to simple one:
+#   transform: "TRY:HASH:SHA256,/email,emailHash,/email"
+
+---
+
+# Comparison: try() vs error_policy
+
+# try() - Inline Error Handling (transform-level)
+# - Handles specific transform failures
+# - Provides fallback values
+# - Fine-grained control per field
+# - Use for: optional fields, data quality issues
+
+# error_policy - Destination Error Handling (destination-level)
+# - Handles all errors for a destination (filter + transform)
+# - Controls pipeline behavior (fail/dlq/skip/continue)
+# - Coarse-grained control per destination
+# - Use for: pipeline resilience, routing control
+
+# Best Practice: Use BOTH
+# - try() for optional fields and defaults
+# - error_policy for pipeline-level resilience
+
+---
+
+# Examples by Fallback Type
+
+# String Fallback:
+#   TRY:/name,'UNKNOWN'
+#   TRY:/email,'invalid@example.com'
+
+# Numeric Fallback:
+#   TRY:/count,0
+#   TRY:/price,9.99
+
+# Boolean Fallback:
+#   TRY:/active,false
+#   TRY:/verified,true
+
+# Null Fallback:
+#   TRY:/optional_data,null
+
+---
+
+# Error Handling Decision Tree
+
+# Question: Is the field optional or required?
+# → Optional: Use try() with sensible default
+# → Required: Use error_policy: "dlq" or "fail"
+
+# Question: What happens if the field is missing?
+# → Can provide default: Use try()
+# → Cannot provide default: Use error_policy: "dlq"
+# → Don't care: Use error_policy: "skip_and_log"
+
+# Question: How critical is this data?
+# → Critical: error_policy: "fail" + try() for optional fields
+# → Important: error_policy: "dlq" + try() for optional fields
+# → Analytics: error_policy: "skip_and_log" + try() everywhere

@@ -1,0 +1,143 @@
+# Error Handling Strategies Example
+#
+# This config demonstrates different error handling strategies for production resilience.
+# Choose the strategy that matches your data quality requirements.
+
+appid: "error-handling-demo"
+bootstrap: "localhost:9092"
+input: "raw-events"
+offset: "latest"
+
+routing:
+  routing_type: "filter"
+  destinations:
+    # Strategy 1: STRICT - Halt pipeline on any error (data integrity critical)
+    # Use for: Financial transactions, audit logs, compliance data
+    - output: "financial-transactions"
+      filter: "$type == 'transaction'"
+      transform: "construct(id = $id, amount = to_float($amount), currency = $currency)"
+      error_policy: "fail"  # NEW: Halt pipeline on error (default)
+      # If to_float($amount) fails → pipeline stops
+      # Pro: Never lose or corrupt data
+      # Con: Pipeline fragile to bad records
+
+    # Strategy 2: DLQ - Send bad records to dead letter queue (balanced)
+    # Use for: Most production use cases
+    - output: "user-events"
+      filter: "$status == 'active'"
+      transform: "construct(user_id = $user.id, timestamp = now_iso())"
+      error_policy: "dlq"  # NEW: Send to DLQ (recommended default)
+      dlq:
+        enabled: true
+        topic: "user-events-dlq"
+      # If $user.id is missing → send to DLQ, continue pipeline
+      # Pro: Pipeline continues, bad records preserved for debugging
+      # Con: Requires monitoring DLQ
+
+    # Strategy 3: SKIP - Skip bad records and log (high throughput)
+    # Use for: Analytics, metrics, non-critical data
+    - output: "analytics-events"
+      filter: "$event_type == 'pageview'"
+      transform: "construct(page = $page, user = $user_id)"
+      error_policy: "skip_and_log"  # NEW: Skip bad records, log error
+      # If $user_id is missing → log error, skip record, continue
+      # Pro: Maximum throughput, never blocks
+      # Con: Silently loses bad records (only logged)
+
+    # Strategy 4: FALLBACK - Provide default values (data completeness)
+    # Use for: Enrichment, optional fields, best-effort processing
+    - output: "enriched-events"
+      filter: "$type == 'user_action'"
+      transform: |
+        construct(
+          user_id = $user.id,
+          email = try($user.email, 'unknown@example.com'),
+          country = try($geo.country, 'US'),
+          age = try(to_int($user.age), 0)
+        )
+      error_policy: "skip_on_transform_error"  # NEW: Skip if entire transform fails
+      # Individual try() provides fallbacks for missing fields
+      # Top-level policy handles catastrophic transform failures
+
+    # Strategy 5: PARTIAL - Continue on filter errors only (filter lenient)
+    # Use for: Routing logic that shouldn't block data flow
+    - output: "catch-all"
+      filter: "try($priority == 'high', false)"  # NEW: try() in filter
+      transform: "field('/data')"
+      error_policy: "continue"  # NEW: Continue even if filter evaluation fails
+      # If $priority is missing → try() returns false, record not routed here
+      # If filter throws error → policy ensures pipeline continues
+
+    # Strategy 6: CONDITIONAL DLQ - Route to DLQ only for specific errors
+    # Use for: Known bad data patterns
+    - output: "validated-users"
+      filter: "$user.verified == true"
+      transform: "construct(id = $user.id, email = $user.email)"
+      error_policy: "dlq"
+      dlq:
+        enabled: true
+        topic: "validation-errors-dlq"
+        filter_errors: true   # NEW: Only DLQ-specific error types
+        filters:
+          - "JsonPathNotFound"
+          - "TransformEvaluation"
+        # Only these error types go to DLQ, others skip and log
+
+---
+
+# Implementation Strategy
+
+# 1. Development/Testing: Use 'fail' to catch issues early
+# 2. Staging: Use 'dlq' to identify production data issues
+# 3. Production Critical: Use 'dlq' with alerting
+# 4. Production Non-Critical: Use 'skip_and_log' for throughput
+
+# Dead Letter Queue Configuration
+dlq:
+  enabled: true
+  topic: "streamforge-dlq"
+  # NEW: Global DLQ behavior
+  max_retries: 3
+  on_dlq_failure: "log_and_continue"  # NEW: Don't halt if DLQ fails
+  # Options: "log_and_continue", "halt", "skip_and_log"
+
+# Observability for Error Tracking
+observability:
+  metrics:
+    - name: "errors_skipped_total"
+      type: "counter"
+      labels: ["destination", "error_type"]
+    - name: "errors_dlq_total"
+      type: "counter"
+      labels: ["destination", "error_type"]
+    - name: "errors_pipeline_halt_total"
+      type: "counter"
+      labels: ["reason"]
+
+---
+
+# Error Policy Decision Matrix
+
+# | Data Type          | Criticality | Error Policy        | Reason                        |
+# |--------------------|-------------|---------------------|-------------------------------|
+# | Financial          | Critical    | fail                | Cannot afford data loss       |
+# | Audit logs         | Critical    | dlq                 | Must preserve for compliance  |
+# | User actions       | Important   | dlq                 | Need for debugging            |
+# | Pageviews          | Nice to have| skip_and_log        | High volume, analytics only   |
+# | A/B test events    | Nice to have| skip_and_log        | Statistical, can lose some    |
+# | Debug telemetry    | Low         | skip_and_log        | Informational only            |
+
+---
+
+# Alerting Recommendations
+
+# 1. Alert on DLQ message rate > threshold
+# 2. Alert on skipped message rate > threshold
+# 3. Alert on pipeline halts (critical)
+# 4. Dashboard showing error rates by destination
+
+# Example Prometheus alert:
+# - alert: HighDLQRate
+#   expr: rate(streamforge_errors_dlq_total[5m]) > 10
+#   annotations:
+#     summary: "High error rate on {{ $labels.destination }}"

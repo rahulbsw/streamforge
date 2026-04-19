@@ -70,7 +70,8 @@ pub trait Transform: Send + Sync {
 /// - path="/message/siteId", op=">", value="10000"
 /// - path="/message/status", op="==", value="active"
 pub struct JsonPathFilter {
-    path: String,
+    path: String,  // Keep for error messages
+    path_segments: Vec<String>,  // Pre-parsed path segments
     operator: ComparisonOp,
     expected: ComparisonValue,
 }
@@ -133,20 +134,26 @@ impl JsonPathFilter {
             ComparisonValue::String(value.to_string())
         };
 
+        // Pre-parse path segments to avoid allocation on every message
+        let path_segments: Vec<String> = path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             path: path.to_string(),
+            path_segments,
             operator: op,
             expected,
         })
     }
 
-    /// Extract value from JSON using path
+    /// Extract value from JSON using pre-parsed path segments
     fn extract_value<'a>(&self, value: &'a Value) -> Option<&'a Value> {
-        let parts: Vec<&str> = self.path.trim_matches('/').split('/').collect();
-
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.path_segments {
+            current = current.get(part.as_str())?;
         }
 
         Some(current)
@@ -322,7 +329,8 @@ impl Filter for NotFilter {
 /// - "/message" - Extract entire message object
 /// - "/message/confId" - Extract specific field
 pub struct JsonPathTransform {
-    path: String,
+    path: String,  // Keep for error messages
+    path_segments: Vec<String>,  // Pre-parsed path segments
 }
 
 impl JsonPathTransform {
@@ -339,18 +347,24 @@ impl JsonPathTransform {
     /// let transform = JsonPathTransform::new("/message/confId").unwrap();
     /// ```
     pub fn new(path: &str) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let path_segments: Vec<String> = path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             path: path.to_string(),
+            path_segments,
         })
     }
 
-    /// Extract value from JSON using path
+    /// Extract value from JSON using pre-parsed path segments
     fn extract_value(&self, value: &Value) -> Option<Value> {
-        let parts: Vec<&str> = self.path.trim_matches('/').split('/').collect();
-
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.path_segments {
+            current = current.get(part.as_str())?;
         }
 
         Some(current.clone())
@@ -388,7 +402,7 @@ impl Transform for JsonPathTransform {
 /// let transform = ObjectConstructTransform::new(fields).unwrap();
 /// ```
 pub struct ObjectConstructTransform {
-    fields: Vec<(String, String)>, // (output_field_name, input_json_path)
+    fields: Vec<(String, String, Vec<String>)>, // (output_field_name, input_json_path, pre-parsed_segments)
 }
 
 impl ObjectConstructTransform {
@@ -396,17 +410,26 @@ impl ObjectConstructTransform {
     ///
     /// Fields map output field names to input JSON paths.
     pub fn new(fields: std::collections::HashMap<String, String>) -> Result<Self> {
-        let fields_vec: Vec<(String, String)> = fields.into_iter().collect();
+        // Pre-parse all path segments to avoid allocation on every message
+        let fields_vec: Vec<(String, String, Vec<String>)> = fields
+            .into_iter()
+            .map(|(name, path)| {
+                let segments: Vec<String> = path
+                    .trim_matches('/')
+                    .split('/')
+                    .map(|s| s.to_string())
+                    .collect();
+                (name, path, segments)
+            })
+            .collect();
         Ok(Self { fields: fields_vec })
     }
 
-    /// Extract value from JSON using path
-    fn extract_value<'a>(&self, value: &'a Value, path: &str) -> Option<&'a Value> {
-        let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
-
+    /// Extract value from JSON using pre-parsed path segments
+    fn extract_value<'a>(&self, value: &'a Value, segments: &[String]) -> Option<&'a Value> {
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in segments {
+            current = current.get(part.as_str())?;
         }
 
         Some(current)
@@ -417,8 +440,8 @@ impl Transform for ObjectConstructTransform {
     fn transform(&self, value: Value) -> Result<Value> {
         let mut result = Map::new();
 
-        for (output_name, input_path) in &self.fields {
-            if let Some(extracted) = self.extract_value(&value, input_path) {
+        for (output_name, _input_path, segments) in &self.fields {
+            if let Some(extracted) = self.extract_value(&value, segments) {
                 result.insert(output_name.clone(), extracted.clone());
             }
             // If field doesn't exist, just skip it (don't include in output)
@@ -446,6 +469,49 @@ impl Transform for IdentityTransform {
     }
 }
 
+/// Try transform with fallback value
+///
+/// Attempts to evaluate an inner transform. If it fails, returns the fallback value.
+/// This prevents pipeline failures due to bad data.
+///
+/// # Examples
+///
+/// ```
+/// // Try to extract email, fallback to default
+/// try($user.email, 'unknown@example.com')
+///
+/// // Try to convert to int, fallback to 0
+/// try(to_int($age), 0)
+/// ```
+pub struct TryTransform {
+    /// Inner transform to attempt
+    inner: Arc<dyn Transform>,
+    /// Fallback value if inner transform fails
+    fallback: Value,
+}
+
+impl TryTransform {
+    pub fn new(inner: Arc<dyn Transform>, fallback: Value) -> Self {
+        Self { inner, fallback }
+    }
+}
+
+impl Transform for TryTransform {
+    fn transform(&self, value: Value) -> Result<Value> {
+        match self.inner.transform(value) {
+            Ok(result) => Ok(result),
+            Err(_) => {
+                // Inner transform failed, use fallback
+                tracing::debug!(
+                    "Transform failed, using fallback value: {}",
+                    self.fallback
+                );
+                Ok(self.fallback.clone())
+            }
+        }
+    }
+}
+
 /// Regular expression filter
 ///
 /// Matches string fields against a regex pattern.
@@ -460,7 +526,8 @@ impl Transform for IdentityTransform {
 /// let filter = RegexFilter::new("/message/status", r"^active").unwrap();
 /// ```
 pub struct RegexFilter {
-    path: String,
+    path: String,  // Keep for error messages
+    path_segments: Vec<String>,  // Pre-parsed path segments
     regex: Regex,
 }
 
@@ -474,19 +541,25 @@ impl RegexFilter {
         let regex = Regex::new(pattern)
             .map_err(|e| MirrorMakerError::Config(format!("Invalid regex pattern: {}", e)))?;
 
+        // Pre-parse path segments to avoid allocation on every message
+        let path_segments: Vec<String> = path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             path: path.to_string(),
+            path_segments,
             regex,
         })
     }
 
-    /// Extract value from JSON using path
+    /// Extract value from JSON using pre-parsed path segments
     fn extract_value<'a>(&self, value: &'a Value) -> Option<&'a Value> {
-        let parts: Vec<&str> = self.path.trim_matches('/').split('/').collect();
-
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.path_segments {
+            current = current.get(part.as_str())?;
         }
 
         Some(current)
@@ -524,6 +597,7 @@ impl Filter for RegexFilter {
 /// ```
 pub struct ArrayFilter {
     path: String,
+    path_segments: Vec<String>,
     element_filter: Box<dyn Filter>,
     mode: ArrayFilterMode,
 }
@@ -542,20 +616,26 @@ impl ArrayFilter {
     /// * `element_filter` - Filter to apply to each element
     /// * `mode` - ALL or ANY matching mode
     pub fn new(path: &str, element_filter: Box<dyn Filter>, mode: ArrayFilterMode) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let path_segments: Vec<String> = path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             path: path.to_string(),
+            path_segments,
             element_filter,
             mode,
         })
     }
 
-    /// Extract value from JSON using path
+    /// Extract value from JSON using pre-parsed path segments
     fn extract_value<'a>(&self, value: &'a Value) -> Option<&'a Value> {
-        let parts: Vec<&str> = self.path.trim_matches('/').split('/').collect();
-
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.path_segments {
+            current = current.get(part.as_str())?;
         }
 
         Some(current)
@@ -606,6 +686,7 @@ impl Filter for ArrayFilter {
 /// ```
 pub struct ArrayMapTransform {
     path: String,
+    path_segments: Vec<String>,
     element_transform: Box<dyn Transform>,
 }
 
@@ -616,19 +697,25 @@ impl ArrayMapTransform {
     /// * `path` - JSON path to the array field
     /// * `element_transform` - Transform to apply to each element
     pub fn new(path: &str, element_transform: Box<dyn Transform>) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let path_segments: Vec<String> = path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             path: path.to_string(),
+            path_segments,
             element_transform,
         })
     }
 
-    /// Extract value from JSON using path
+    /// Extract value from JSON using pre-parsed path segments
     fn extract_value(&self, value: &Value) -> Option<Value> {
-        let parts: Vec<&str> = self.path.trim_matches('/').split('/').collect();
-
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.path_segments {
+            current = current.get(part.as_str())?;
         }
 
         Some(current.clone())
@@ -687,6 +774,7 @@ impl Transform for ArrayMapTransform {
 pub struct ArithmeticTransform {
     op: ArithmeticOp,
     left_path: String,
+    left_path_segments: Vec<String>,
     right: ArithmeticOperand,
 }
 
@@ -700,36 +788,56 @@ pub enum ArithmeticOp {
 
 #[derive(Debug, Clone)]
 enum ArithmeticOperand {
-    Path(String),
+    Path(String, Vec<String>), // (path_string, pre-parsed_segments)
     Constant(f64),
 }
 
 impl ArithmeticTransform {
     /// Create arithmetic transform with two paths
     pub fn new_with_paths(op: ArithmeticOp, left_path: &str, right_path: &str) -> Result<Self> {
+        // Pre-parse both paths to avoid allocation on every message
+        let left_path_segments: Vec<String> = left_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
+        let right_path_segments: Vec<String> = right_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             op,
             left_path: left_path.to_string(),
-            right: ArithmeticOperand::Path(right_path.to_string()),
+            left_path_segments,
+            right: ArithmeticOperand::Path(right_path.to_string(), right_path_segments),
         })
     }
 
     /// Create arithmetic transform with path and constant
     pub fn new_with_constant(op: ArithmeticOp, left_path: &str, constant: f64) -> Result<Self> {
+        // Pre-parse left path to avoid allocation on every message
+        let left_path_segments: Vec<String> = left_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             op,
             left_path: left_path.to_string(),
+            left_path_segments,
             right: ArithmeticOperand::Constant(constant),
         })
     }
 
-    /// Extract value from JSON using path
-    fn extract_value(&self, value: &Value, path: &str) -> Option<f64> {
-        let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
-
+    /// Extract value from JSON using pre-parsed path segments
+    fn extract_value(&self, value: &Value, segments: &[String]) -> Option<f64> {
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in segments {
+            current = current.get(part.as_str())?;
         }
 
         current.as_f64()
@@ -754,7 +862,7 @@ impl ArithmeticTransform {
 
 impl Transform for ArithmeticTransform {
     fn transform(&self, value: Value) -> Result<Value> {
-        let Some(left) = self.extract_value(&value, &self.left_path) else {
+        let Some(left) = self.extract_value(&value, &self.left_path_segments) else {
             tracing::debug!(
                 "ARITHMETIC: left operand '{}' not found or not a number, passing through",
                 self.left_path
@@ -763,8 +871,8 @@ impl Transform for ArithmeticTransform {
         };
 
         let right = match &self.right {
-            ArithmeticOperand::Path(path) => {
-                let Some(r) = self.extract_value(&value, path) else {
+            ArithmeticOperand::Path(path, segments) => {
+                let Some(r) = self.extract_value(&value, segments) else {
                     tracing::debug!(
                         "ARITHMETIC: right operand '{}' not found or not a number, passing through",
                         path
@@ -807,6 +915,7 @@ impl Transform for ArithmeticTransform {
 /// ```
 pub struct HashTransform {
     path: String,
+    path_segments: Vec<String>,
     algorithm: HashAlgorithm,
     output_field: Option<String>,
 }
@@ -818,8 +927,16 @@ impl HashTransform {
     /// * `path` - JSON path to the field to hash
     /// * `algorithm` - Hash algorithm to use
     pub fn new(path: &str, algorithm: HashAlgorithm) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let path_segments: Vec<String> = path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             path: path.to_string(),
+            path_segments,
             algorithm,
             output_field: None,
         })
@@ -836,20 +953,26 @@ impl HashTransform {
         algorithm: HashAlgorithm,
         output_field: &str,
     ) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let path_segments: Vec<String> = path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             path: path.to_string(),
+            path_segments,
             algorithm,
             output_field: Some(output_field.to_string()),
         })
     }
 
-    /// Extract value from JSON using path
+    /// Extract value from JSON using pre-parsed path segments
     fn extract_value(&self, value: &Value) -> Option<Value> {
-        let parts: Vec<&str> = self.path.trim_matches('/').split('/').collect();
-
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.path_segments {
+            current = current.get(part.as_str())?;
         }
 
         Some(current.clone())
@@ -895,6 +1018,7 @@ impl Transform for HashTransform {
 pub struct CacheLookupTransform {
     cache: Arc<SyncLookupCache>,
     key_path: String,
+    key_path_segments: Vec<String>,
     /// When `Some(field)` the lookup result is added under that field name.
     /// When `None` the lookup result is merged directly into the message object.
     output_field: Option<String>,
@@ -903,27 +1027,42 @@ pub struct CacheLookupTransform {
 impl CacheLookupTransform {
     /// Add the cached value as a new field in the message.
     pub fn new(cache: Arc<SyncLookupCache>, key_path: &str, output_field: &str) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let key_path_segments: Vec<String> = key_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             cache,
             key_path: key_path.to_string(),
+            key_path_segments,
             output_field: Some(output_field.to_string()),
         })
     }
 
     /// Merge the cached object directly into the message object.
     pub fn new_merge(cache: Arc<SyncLookupCache>, key_path: &str) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let key_path_segments: Vec<String> = key_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             cache,
             key_path: key_path.to_string(),
+            key_path_segments,
             output_field: None,
         })
     }
 
     fn extract_key(&self, value: &Value) -> Option<String> {
-        let parts: Vec<&str> = self.key_path.trim_matches('/').split('/').collect();
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.key_path_segments {
+            current = current.get(part.as_str())?;
         }
         match current {
             Value::String(s) => Some(s.clone()),
@@ -989,8 +1128,10 @@ impl Transform for CacheLookupTransform {
 pub struct CachePutTransform {
     cache: Arc<SyncLookupCache>,
     key_path: String,
+    key_path_segments: Vec<String>,
     /// When `Some(path)` only that field is stored. When `None` the whole message is stored.
     value_path: Option<String>,
+    value_path_segments: Option<Vec<String>>,
 }
 
 impl CachePutTransform {
@@ -999,24 +1140,40 @@ impl CachePutTransform {
         key_path: &str,
         value_path: Option<&str>,
     ) -> Result<Self> {
+        // Pre-parse key path segments to avoid allocation on every message
+        let key_path_segments: Vec<String> = key_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
+        // Pre-parse optional value path segments
+        let value_path_segments = value_path.map(|path| {
+            path.trim_matches('/')
+                .split('/')
+                .map(|s| s.to_string())
+                .collect()
+        });
+
         Ok(Self {
             cache,
             key_path: key_path.to_string(),
+            key_path_segments,
             value_path: value_path.map(|s| s.to_string()),
+            value_path_segments,
         })
     }
 
-    fn extract_path(&self, value: &Value, path: &str) -> Option<Value> {
-        let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+    fn extract_path(&self, value: &Value, segments: &[String]) -> Option<Value> {
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in segments {
+            current = current.get(part.as_str())?;
         }
         Some(current.clone())
     }
 
     fn extract_key(&self, value: &Value) -> Option<String> {
-        let extracted = self.extract_path(value, &self.key_path)?;
+        let extracted = self.extract_path(value, &self.key_path_segments)?;
         match extracted {
             Value::String(s) => Some(s),
             Value::Number(n) => Some(n.to_string()),
@@ -1035,8 +1192,8 @@ impl Transform for CachePutTransform {
             return Ok(value);
         };
 
-        let to_store = match &self.value_path {
-            Some(path) => match self.extract_path(&value, path) {
+        let to_store = match (&self.value_path, &self.value_path_segments) {
+            (Some(path), Some(segments)) => match self.extract_path(&value, segments) {
                 Some(v) => v,
                 None => {
                     tracing::debug!(
@@ -1046,7 +1203,7 @@ impl Transform for CachePutTransform {
                     return Ok(value);
                 }
             },
-            None => value.clone(),
+            _ => value.clone(),
         };
 
         self.cache.put(key.clone(), to_store);

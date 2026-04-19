@@ -16,6 +16,7 @@ pub mod labels {
     pub const FILTER_RESULT_PASS: &str = "pass";
     pub const FILTER_RESULT_FAIL: &str = "fail";
     pub const FILTER_REASON_FAILED: &str = "filter_failed";
+    pub const FILTER_REASON_ERROR: &str = "error";
 
     pub const TRANSFORM_TYPE_ENVELOPE: &str = "envelope";
     pub const TRANSFORM_TYPE_VALUE: &str = "value";

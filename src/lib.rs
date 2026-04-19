@@ -9,6 +9,7 @@ pub mod error;
 pub mod filter;
 pub mod filter_parser;
 pub mod hash;
+pub mod jsonpath;
 pub mod kafka;
 pub mod metrics;
 pub mod observability;
@@ -46,4 +47,5 @@ pub use filter_parser::{
     parse_timestamp_transform, parse_transform, parse_transform_with_cache,
 };
 pub use hash::{hash_bytes, hash_value, HashAlgorithm};
+pub use jsonpath::{extract_owned_with_segments, extract_with_segments, JsonPath};
 pub use kafka::sink::KafkaSink;

@@ -3,6 +3,7 @@ use crate::error::{MirrorMakerError, Result};
 use crate::hash::{hash_value, HashAlgorithm};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // ============================================================================
 // KEY TRANSFORMS
@@ -19,20 +20,28 @@ use std::collections::HashMap;
 /// ```
 pub struct KeyFromTransform {
     value_path: String,
+    value_path_segments: Vec<String>,
 }
 
 impl KeyFromTransform {
     pub fn new(value_path: &str) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let value_path_segments: Vec<String> = value_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             value_path: value_path.to_string(),
+            value_path_segments,
         })
     }
 
     fn extract_from_value(&self, value: &Value) -> Option<Value> {
-        let parts: Vec<&str> = self.value_path.trim_matches('/').split('/').collect();
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.value_path_segments {
+            current = current.get(part.as_str())?;
         }
         Some(current.clone())
     }
@@ -163,22 +172,30 @@ impl EnvelopeTransform for KeyTemplateTransform {
 /// ```
 pub struct KeyHashTransform {
     value_path: String,
+    value_path_segments: Vec<String>,
     algorithm: HashAlgorithm,
 }
 
 impl KeyHashTransform {
     pub fn new(value_path: &str, algorithm: HashAlgorithm) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let value_path_segments: Vec<String> = value_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             value_path: value_path.to_string(),
+            value_path_segments,
             algorithm,
         })
     }
 
     fn extract_from_value(&self, value: &Value) -> Option<Value> {
-        let parts: Vec<&str> = self.value_path.trim_matches('/').split('/').collect();
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.value_path_segments {
+            current = current.get(part.as_str())?;
         }
         Some(current.clone())
     }
@@ -213,19 +230,31 @@ impl EnvelopeTransform for KeyHashTransform {
 /// // Results in key: {"tenant":"t1","user":"u123"}
 /// ```
 pub struct KeyConstructTransform {
-    fields: HashMap<String, String>,
+    fields: HashMap<String, (String, Vec<String>)>, // (path_string, pre-parsed_segments)
 }
 
 impl KeyConstructTransform {
     pub fn new(fields: HashMap<String, String>) -> Result<Self> {
+        // Pre-parse all paths to avoid allocation on every message
+        let fields = fields
+            .into_iter()
+            .map(|(key, path)| {
+                let segments: Vec<String> = path
+                    .trim_matches('/')
+                    .split('/')
+                    .map(|s| s.to_string())
+                    .collect();
+                (key, (path, segments))
+            })
+            .collect();
+
         Ok(Self { fields })
     }
 
-    fn extract_from_path(&self, value: &Value, path: &str) -> Option<Value> {
-        let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+    fn extract_from_path(&self, value: &Value, segments: &[String]) -> Option<Value> {
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in segments {
+            current = current.get(part.as_str())?;
         }
         Some(current.clone())
     }
@@ -235,8 +264,8 @@ impl EnvelopeTransform for KeyConstructTransform {
     fn transform_envelope(&self, mut envelope: MessageEnvelope) -> Result<MessageEnvelope> {
         let mut result = Map::new();
 
-        for (output_name, input_path) in &self.fields {
-            if let Some(extracted) = self.extract_from_path(&envelope.value, input_path) {
+        for (output_name, (_path, segments)) in &self.fields {
+            if let Some(extracted) = self.extract_from_path(&envelope.value, segments) {
                 result.insert(output_name.clone(), extracted);
             }
         }
@@ -274,8 +303,7 @@ impl HeaderSetTransform {
 
 impl EnvelopeTransform for HeaderSetTransform {
     fn transform_envelope(&self, mut envelope: MessageEnvelope) -> Result<MessageEnvelope> {
-        envelope
-            .headers
+        Arc::make_mut(&mut envelope.headers)
             .insert(self.header_name.clone(), self.value.as_bytes().to_vec());
         Ok(envelope)
     }
@@ -293,21 +321,29 @@ impl EnvelopeTransform for HeaderSetTransform {
 pub struct HeaderFromTransform {
     header_name: String,
     value_path: String,
+    value_path_segments: Vec<String>,
 }
 
 impl HeaderFromTransform {
     pub fn new(header_name: &str, value_path: &str) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let value_path_segments: Vec<String> = value_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             header_name: header_name.to_string(),
             value_path: value_path.to_string(),
+            value_path_segments,
         })
     }
 
     fn extract_from_value(&self, value: &Value) -> Option<String> {
-        let parts: Vec<&str> = self.value_path.trim_matches('/').split('/').collect();
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.value_path_segments {
+            current = current.get(part.as_str())?;
         }
 
         match current {
@@ -322,8 +358,7 @@ impl HeaderFromTransform {
 impl EnvelopeTransform for HeaderFromTransform {
     fn transform_envelope(&self, mut envelope: MessageEnvelope) -> Result<MessageEnvelope> {
         if let Some(value_str) = self.extract_from_value(&envelope.value) {
-            envelope
-                .headers
+            Arc::make_mut(&mut envelope.headers)
                 .insert(self.header_name.clone(), value_str.as_bytes().to_vec());
             Ok(envelope)
         } else {
@@ -361,7 +396,7 @@ impl HeaderCopyTransform {
 impl EnvelopeTransform for HeaderCopyTransform {
     fn transform_envelope(&self, mut envelope: MessageEnvelope) -> Result<MessageEnvelope> {
         if let Some(value) = envelope.headers.get(&self.source_header).cloned() {
-            envelope.headers.insert(self.dest_header.clone(), value);
+            Arc::make_mut(&mut envelope.headers).insert(self.dest_header.clone(), value);
             Ok(envelope)
         } else {
             // Source header doesn't exist - just return envelope unchanged
@@ -392,7 +427,7 @@ impl HeaderRemoveTransform {
 
 impl EnvelopeTransform for HeaderRemoveTransform {
     fn transform_envelope(&self, mut envelope: MessageEnvelope) -> Result<MessageEnvelope> {
-        envelope.headers.remove(&self.header_name);
+        Arc::make_mut(&mut envelope.headers).remove(&self.header_name);
         Ok(envelope)
     }
 }
@@ -436,20 +471,28 @@ impl EnvelopeTransform for TimestampCurrentTransform {
 /// ```
 pub struct TimestampFromTransform {
     value_path: String,
+    value_path_segments: Vec<String>,
 }
 
 impl TimestampFromTransform {
     pub fn new(value_path: &str) -> Result<Self> {
+        // Pre-parse path segments to avoid allocation on every message
+        let value_path_segments: Vec<String> = value_path
+            .trim_matches('/')
+            .split('/')
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
             value_path: value_path.to_string(),
+            value_path_segments,
         })
     }
 
     fn extract_timestamp(&self, value: &Value) -> Option<i64> {
-        let parts: Vec<&str> = self.value_path.trim_matches('/').split('/').collect();
         let mut current = value;
-        for part in parts {
-            current = current.get(part)?;
+        for part in &self.value_path_segments {
+            current = current.get(part.as_str())?;
         }
 
         current.as_i64()

@@ -9,10 +9,27 @@ use rdkafka::message::OwnedHeaders;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
 use serde_json::Value;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
+
+// Thread-local buffer for JSON serialization to reduce allocations
+thread_local! {
+    static SERIALIZE_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
+}
+
+/// Serialize a value to JSON bytes using thread-local buffer (reduces allocations)
+fn serialize_to_vec<T: serde::Serialize>(value: &T) -> Result<Vec<u8>> {
+    SERIALIZE_BUFFER.with(|buf_cell| {
+        let mut buf = buf_cell.borrow_mut();
+        buf.clear();
+        serde_json::to_writer(&mut *buf, value)
+            .map_err(|e| MirrorMakerError::Serialization(e.to_string()))?;
+        Ok(buf.clone())
+    })
+}
 
 /// CustomKafkaSink - Rust equivalent of Java's CustomKafkaSink
 ///
@@ -244,11 +261,15 @@ impl KafkaSink {
             target_topic, partition, num_partitions
         );
 
-        // Serialize key (if present)
-        let key_bytes = envelope.key.as_ref().map(serde_json::to_vec).transpose()?;
+        // Serialize key (if present) using thread-local buffer
+        let key_bytes = envelope
+            .key
+            .as_ref()
+            .map(|k| serialize_to_vec(k))
+            .transpose()?;
 
-        // Serialize value
-        let mut value_bytes = serde_json::to_vec(&envelope.value)?;
+        // Serialize value using thread-local buffer
+        let mut value_bytes = serialize_to_vec(&*envelope.value)?;
 
         // Apply enveloped compression if configured
         if matches!(self.compressor.compression_type, CompressionType::Enveloped) {
@@ -257,7 +278,7 @@ impl KafkaSink {
 
         // Build headers from envelope
         let mut headers = OwnedHeaders::new();
-        for (name, value) in &envelope.headers {
+        for (name, value) in envelope.headers.iter() {
             headers = headers.insert(rdkafka::message::Header {
                 key: name,
                 value: Some(value),
