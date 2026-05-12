@@ -1,5 +1,5 @@
 title: Streamforge Documentation
-description: High-performance Kafka streaming toolkit built in Rust
+description: Selective replication for Kafka and Redpanda
 remote_theme: just-the-docs/just-the-docs
 url: "https://github.datasierra.com"
 baseurl: "/streamforge"
@@ -27,7 +27,7 @@ search_enabled: true
 search_tokenizer_separator: /[\s/]+/
 
 # Footer
-footer_content: "StreamForge — High-performance Kafka streaming toolkit. Apache 2.0 Licensed."
+footer_content: "StreamForge — selective replication for Kafka and Redpanda. Apache 2.0 Licensed."
 
 # Callouts (for notes/warnings in docs)
 callouts_level: quiet
@@ -49,8 +49,10 @@ callouts:
 aux_links:
   "GitHub":
     - "https://github.com/rahulbsw/streamforge"
-  "crates.io":
-    - "https://crates.io/crates/streamforge"
+  "Quickstart":
+    - "https://github.datasierra.com/streamforge/QUICKSTART"
+  "Compatibility":
+    - "https://github.datasierra.com/streamforge/COMPATIBILITY"
 aux_links_new_tab: true
 
 # Back to top
