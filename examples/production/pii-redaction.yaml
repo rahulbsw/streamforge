@@ -17,26 +17,31 @@ performance:
   linger_ms: 10
   compression: "zstd"
 
-commit_strategy: "time-based"
-commit_interval_ms: 2000
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 2000
 
 retry:
   max_attempts: 3
   initial_delay_ms: 100
   max_delay_ms: 30000
-  jitter: true
+  multiplier: 2.0
+  jitter: 0.1
 
 dlq:
   enabled: true
   topic: "pii-redaction-dlq"
-  include_error_headers: true
+  include_original_headers: true
+  include_stack_trace: false
+  max_dlq_retries: 3
 
 routing:
   routing_type: "filter"
   destinations:
     # Redact PII fields for analytics
     - output: "user-events-analytics"
-      filter: "EXISTS:/user/id"  # Ensure user ID exists
+      filter: "REGEX:/user/id,.+"  # Ensure user ID is present and non-empty
       transform: "CONSTRUCT:user_id=/user/id:event_type=/event_type:timestamp=/timestamp:region=/region:device=/device_type"
       key_transform: "HASH:SHA256,/user/id"  # Hash user ID
       partitioning: "hash"
@@ -45,10 +50,10 @@ routing:
         x-destination: "analytics"
         x-redacted: "true"
 
-    # Hash email addresses
+    # Consent-gated marketing stream with hashed email key
     - output: "user-events-marketing"
-      filter: "AND:EXISTS:/email:/consent/marketing,==,true"
-      transform: "CONSTRUCT:email_hash=HASH:MD5,/email:event=/event_type:timestamp=/timestamp"
+      filter: "/consent/marketing,==,true"
+      transform: "CONSTRUCT:event=/event_type:timestamp=/timestamp"
       key_transform: "HASH:MD5,/email"
       headers:
         x-pipeline: "pii-redaction"
@@ -58,7 +63,7 @@ routing:
     # Minimal data for third-party integrations
     - output: "events-third-party"
       filter: "/consent/third_party,==,true"
-      transform: "CONSTRUCT:anonymous_id=HASH:SHA256,/user/id:event=/event_type:properties=/properties/non_pii"
+      transform: "CONSTRUCT:event=/event_type:properties=/properties/non_pii"
       key_transform: "HASH:SHA256,/user/id"
       headers:
         x-pipeline: "pii-redaction"

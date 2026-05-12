@@ -33,4 +33,4 @@ CONFIG_FILE=examples/redpanda/selective-replication.yaml ./target/release/stream
 
 Send one record with `region=us` and `amount>=100`, then verify:
 - `analytics-orders` gets the shaped analytics payload
-- `pii-safe-orders` gets the hashed email version
+- `pii-safe-orders` gets a non-PII summary payload keyed by a hash of `customer.email`

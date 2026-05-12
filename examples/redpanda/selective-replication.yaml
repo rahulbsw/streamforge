@@ -16,9 +16,9 @@ routing:
         x-destination: "analytics"
 
     - output: "pii-safe-orders"
-      filter: "EXISTS:/customer/email"
-      transform: "CONSTRUCT:order_id=/order_id:email_hash=HASH:SHA256,/customer/email:amount=/amount:region=/region"
-      key_transform: "/order_id"
+      filter: "REGEX:/customer/email,^[^@]+@[^@]+\\.[^@]+$"
+      transform: "CONSTRUCT:order_id=/order_id:amount=/amount:region=/region:created_at=/created_at"
+      key_transform: "HASH:SHA256,/customer/email"
       headers:
         x-pipeline: "orders-analytics-demo"
         x-destination: "pii-safe"
