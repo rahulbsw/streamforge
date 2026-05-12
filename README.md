@@ -56,7 +56,7 @@ For concrete usage patterns and configs, see [docs/USAGE.md](docs/USAGE.md) and 
    ```
 3. Run StreamForge with the same config:
    ```bash
-   CONFIG_FILE=examples/configs/config.filter-transform.example.json ./target/release/streamforge
+   CONFIG_FILE=examples/configs/config.filter-transform.example.json cargo run --release --bin streamforge
    ```
 4. For the fuller local walkthrough and additional configs, see [docs/QUICKSTART.md](docs/QUICKSTART.md) and [examples/README.md](examples/README.md).
 
