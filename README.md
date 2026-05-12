@@ -56,6 +56,10 @@ For a detailed decision guide, see [docs/WHEN_TO_USE.md](docs/WHEN_TO_USE.md).
 - Explicit comparison guidance against MirrorMaker 2 and Arroyo
 - Kafka-first with Redpanda-tested examples
 
+## Compatibility
+
+StreamForge is built for Kafka-compatible brokers, with Kafka as the primary target and Redpanda-covered launch examples.
+
 ---
 
 ## What It Does
