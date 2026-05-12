@@ -43,6 +43,13 @@ jobs:
       - name: Run tests
         run: cargo test --all --verbose
 
+      - name: Validate promoted example configs
+        run: |
+          cargo run --quiet --bin streamforge-validate -- examples/configs/config.example.yaml
+          cargo run --quiet --bin streamforge-validate -- examples/redpanda/selective-replication.yaml
+          cargo run --quiet --bin streamforge-validate -- examples/production/pii-redaction.yaml
+          cargo run --quiet --bin streamforge-validate -- examples/production/cdc-to-datalake.yaml
+
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 

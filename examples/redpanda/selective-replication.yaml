@@ -1,0 +1,31 @@
+appid: "orders-analytics-demo"
+bootstrap: "localhost:9092"
+input: "raw-orders"
+offset: "earliest"
+threads: 2
+
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "analytics-orders"
+      filter: "AND:/region,==,us:/amount,>=,100"
+      transform: "CONSTRUCT:order_id=/order_id:customer_id=/customer/id:amount=/amount:region=/region:created_at=/created_at"
+      key_transform: "/order_id"
+      headers:
+        x-pipeline: "orders-analytics-demo"
+        x-destination: "analytics"
+
+    - output: "pii-safe-orders"
+      filter: "REGEX:/customer/email,^[^@]+@[^@]+\\.[^@]+$"
+      transform: "CONSTRUCT:order_id=/order_id:amount=/amount:region=/region:created_at=/created_at"
+      key_transform: "HASH:SHA256,/customer/email"
+      headers:
+        x-pipeline: "orders-analytics-demo"
+        x-destination: "pii-safe"
+
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30

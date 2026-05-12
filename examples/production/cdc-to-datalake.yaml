@@ -18,21 +18,26 @@ performance:
   compression: "zstd"
 
 # Commit every 10 seconds (data lake can tolerate some duplicates)
-commit_strategy: "manual"
-commit_interval_ms: 10000
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 10000
 
 # Retry policy
 retry:
   max_attempts: 3
   initial_delay_ms: 100
   max_delay_ms: 30000
-  jitter: true
+  multiplier: 2.0
+  jitter: 0.1
 
 # DLQ for schema errors
 dlq:
   enabled: true
   topic: "cdc-datalake-dlq"
-  include_error_headers: true
+  include_original_headers: true
+  include_stack_trace: false
+  max_dlq_retries: 3
 
 routing:
   routing_type: "filter"
@@ -65,6 +70,9 @@ routing:
         x-pipeline: "cdc-to-datalake"
         x-operation: "schema-change"
 
-metrics:
-  enabled: true
-  port: 8080
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30
