@@ -21,7 +21,7 @@ Curated, task-oriented navigation for the most important StreamForge documentati
 4. [examples/README.md](../examples/README.md) - Runnable configs
 
 ### Run in Production
-1. [OPERATIONS.md](OPERATIONS.md)
+1. [SECURITY_CONFIGURATION.md](SECURITY_CONFIGURATION.md)
 2. [KUBERNETES.md](KUBERNETES.md)
 3. [OBSERVABILITY_QUICKSTART.md](OBSERVABILITY_QUICKSTART.md)
 4. [DEPLOYMENT.md](DEPLOYMENT.md)

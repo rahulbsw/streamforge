@@ -22,7 +22,7 @@ StreamForge helps data teams filter, transform, redact, and route records betwee
 
 ## Run in Production
 
-- [Operations Guide](OPERATIONS.md)
+- [Security Configuration](SECURITY_CONFIGURATION.md)
 - [Kubernetes](KUBERNETES.md)
 - [Observability Quickstart](OBSERVABILITY_QUICKSTART.md)
 
