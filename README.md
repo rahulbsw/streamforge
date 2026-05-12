@@ -69,7 +69,7 @@ For concrete usage patterns and configs, see [docs/USAGE.md](docs/USAGE.md) and 
 
 ## Compatibility
 
-StreamForge is built for Kafka-compatible brokers. Kafka is the primary target in current docs and examples, and Redpanda is a compatibility target for selective replication.
+StreamForge is built for Kafka-compatible brokers. Kafka is the primary target in current docs and examples, and Redpanda is documented here as a compatibility target for the selective replication workflows covered in this repo.
 
 ---
 

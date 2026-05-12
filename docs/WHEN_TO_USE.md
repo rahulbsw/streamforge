@@ -31,4 +31,4 @@ Good claim:
 - StreamForge is more capable than MirrorMaker 2 for selective replication and data shaping.
 
 Bad claim:
-- StreamForge is better than MirrorMaker 2 in every replication scenario.
+- Any phrasing that frames StreamForge as a universal MirrorMaker 2 replacement.

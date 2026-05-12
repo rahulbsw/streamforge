@@ -1,6 +1,6 @@
 # Redpanda Demo
 
-Use this directory when you want the fastest local StreamForge demo without Kubernetes.
+Use this directory when you want a local StreamForge demo without Kubernetes.
 
 ## Files
 

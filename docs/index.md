@@ -7,7 +7,7 @@ nav_order: 1
 
 Selective replication for Kafka, with Redpanda as a compatibility target.
 
-StreamForge helps data teams filter, transform, redact, and route records between Kafka topics and clusters without standing up Kafka Connect or a full stream processing platform, with Redpanda supported as a Kafka-compatible target in the documented compatibility scope.
+StreamForge helps data teams filter, transform, redact, and route records between Kafka topics and clusters without standing up Kafka Connect or a full stream processing platform. Redpanda is documented as a Kafka-compatible target within the compatibility scope covered by this repo.
 
 ## Get Started
 
