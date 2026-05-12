@@ -1,85 +1,60 @@
 # StreamForge
 
-> High-performance Kafka message mirroring and transformation toolkit — built in Rust.
+> Selective replication for Kafka and Redpanda. Filter, transform, redact, and route data between topics and clusters without Kafka Connect.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 [![Version](https://img.shields.io/badge/version-1.0.0-brightgreen.svg)](CHANGELOG.md)
+[![Kafka](https://img.shields.io/badge/broker-Kafka-black.svg)](#compatibility)
+[![Redpanda](https://img.shields.io/badge/broker-Redpanda-red.svg)](#compatibility)
 [![CI](https://github.com/rahulbsw/streamforge/workflows/CI/badge.svg)](https://github.com/rahulbsw/streamforge/actions)
-[![Tests](https://img.shields.io/badge/tests-333%20passing-brightgreen.svg)](https://github.com/rahulbsw/streamforge/actions)
-[![CVEs](https://img.shields.io/badge/CVEs-0-brightgreen.svg)](https://github.com/rahulbsw/streamforge)
 
 ---
 
-StreamForge is a Rust-native Kafka streaming toolkit for pipelines that need content-based filtering, message transformation, and multi-destination routing. Where MirrorMaker 1/2 mirror topics wholesale, StreamForge lets you decide — per message — what gets forwarded, how it is shaped, and where it goes. It runs as a single binary with ~50MB memory and no Kafka Connect dependency.
+StreamForge helps data teams move only the records and fields downstream systems actually need. Instead of mirroring whole topics, StreamForge lets you filter, reshape, redact, and route messages before they land in analytics, lake, or lower-trust environments.
 
-**[Full Documentation](https://github.datasierra.com/streamforge)** | [Quick Start](#quick-start) | [DSL Reference](#dsl-reference) | [Performance](#performance)
+**[5-Minute Demo](docs/QUICKSTART.md)** | **[When to Use StreamForge](docs/WHEN_TO_USE.md)** | **[Compatibility](docs/COMPATIBILITY.md)** | **[Full Documentation](https://github.datasierra.com/streamforge)**
 
 ---
 
-## How StreamForge Compares
+## Why Teams Use StreamForge
 
-### Resource and Performance
+- Replicate only analytics-safe fields instead of whole topics
+- Split one source topic into multiple downstream topics
+- Hash or drop PII before data crosses trust boundaries
+- Keep the deployment surface small with a single binary, operator, and Helm chart
 
-| Metric | MirrorMaker 1 (Java) | MirrorMaker 2 (Kafka Connect) | StreamForge (Rust) |
-|--------|----------------------|-------------------------------|-------------------|
-| Throughput | ~10K msg/s | ~20–50K msg/s (tuned) | **25K–45K msg/s** |
-| JVM heap / memory | ~500MB | ~512MB–2GB (Connect workers) | **~50MB** |
-| Filter latency | ~4 µs | ~2–5 µs (SMT chain) | **~50 ns** |
-| Latency p99 | ~50ms | ~20–40ms | **~12ms** |
-| Startup time | ~5s | ~10–30s (Connect + connectors) | **~0.1s** |
-| Container image | ~200MB | ~300MB+ (JRE + Connect) | **~20MB** |
-| Operational footprint | Single process | Connect cluster + 3 connectors | **Single binary** |
+## When to Use StreamForge
 
-### Feature Comparison
+Use StreamForge when you need:
+- selective replication to analytics or data lake pipelines
+- PII-safe replication across environments
+- topic fan-out with payload shaping
+- a smaller operational footprint than Kafka Connect
 
-| Capability | MirrorMaker 1 | MirrorMaker 2 | StreamForge |
-|------------|:---:|:---:|:---:|
-| Cross-cluster mirroring | yes | yes | yes |
-| Active-active (bidirectional) replication | no | **yes** | no |
-| Consumer group offset sync across clusters | no | **yes** | no |
-| Topic config / partition count sync | no | **yes** | no |
-| ACL synchronization | no | **yes** | no |
-| Cycle detection (active-active loops) | no | **yes** | no |
-| Exactly-once semantics | no | **yes (Kafka 3.3+)** | planned v1.0 |
-| Schema Registry integration | no | **yes (Confluent)** | planned v0.5 |
-| Topic-regex selection (which topics to mirror) | limited | **yes** | no |
-| **Content-based filtering (JSON path)** | no | no | **yes** |
-| **Boolean filter logic (AND/OR/NOT)** | no | no | **yes** |
-| **Regex field filters** | no | no | **yes** |
-| **Array filter operations** | no | no | **yes** |
-| **Key / header / timestamp filters** | no | no | **yes** |
-| **Message transformation DSL** | no | SMTs only | **full DSL** |
-| **Multi-destination content routing** | no | no | **yes** |
-| **PII hashing (MD5/SHA256/Murmur)** | no | no | **yes** |
-| **Envelope ops (key/header/timestamp rewrite)** | no | no | **yes** |
-| **Arithmetic transforms** | no | no | **yes** |
-| **Multi-level caching (local/Redis/Kafka)** | no | no | **yes** |
-| Dead letter queue with retry backoff | no | no | **yes** |
-| Prometheus metrics | no | yes (JMX export) | **yes (native)** |
-| Kubernetes operator + Web UI | no | no | **yes** |
-| Zero CVE base image (Chainguard) | no | no | **yes** |
+Do not position StreamForge as:
+- a full replacement for MirrorMaker 2 active-active or offset-sync workflows
+- a general-purpose stateful stream processor
 
-### When to Choose What
+For a detailed decision guide, see [docs/WHEN_TO_USE.md](docs/WHEN_TO_USE.md).
 
-**MirrorMaker 2** is the right tool when you need:
-- **Active-active / bidirectional** replication between clusters
-- **Consumer group offset checkpointing** so consumers can fail over between clusters
-- **Topic and ACL mirroring** — full cluster-to-cluster sync
-- **Exactly-once guarantees** (Kafka 3.3+ with transactional producers)
-- **Schema Registry** passthrough with Confluent Platform
-- Deep integration with the **existing Kafka Connect** plugin ecosystem
+## 5-Minute Demo
 
-**StreamForge** is the right tool when you need:
-- **Content-based filtering** — only forward messages that match JSON path conditions
-- **Message transformation** — reshape payloads, extract fields, build new objects
-- **Multi-destination routing** — fan out one topic to many based on payload content
-- **PII redaction** — hash or drop sensitive fields before crossing a trust boundary
-- **Minimal footprint** — constrained environments, edge deployments, or tight cost budgets
-- **Fast startup** — ephemeral workloads, short-lived containers, or frequent redeploys
-- **No Kafka Connect dependency** — avoid the operational overhead of a Connect cluster
+1. Start a local Redpanda broker with [`examples/redpanda/docker-compose.yml`](examples/redpanda/docker-compose.yml).
+2. Validate the demo config:
+   ```bash
+   cargo run --quiet --bin streamforge-validate -- examples/redpanda/selective-replication.yaml
+   ```
+3. Run StreamForge with [`examples/redpanda/selective-replication.yaml`](examples/redpanda/selective-replication.yaml).
+4. Produce sample records to `raw-orders` and watch `analytics-orders` and `pii-safe-orders`.
 
-> StreamForge is not a drop-in replacement for MirrorMaker 2 in active-active or offset-sync scenarios. It is purpose-built for filtered, transformed, and routed pipelines where MM2's SMT model is insufficient.
+## Production Trust Signals
+
+- At-least-once delivery with retry and DLQ support
+- Native Prometheus metrics and lag monitoring
+- Kubernetes operator, Helm chart, and web UI
+- Explicit comparison guidance against MirrorMaker 2 and Arroyo
+- Kafka-first with Redpanda-tested examples
 
 ---
 
