@@ -40,10 +40,25 @@ For concrete usage patterns and configs, see [docs/USAGE.md](docs/USAGE.md) and 
 
 ## 5-Minute Demo
 
-1. Follow [docs/QUICKSTART.md](docs/QUICKSTART.md) for the local Docker Kafka walkthrough.
-2. Start with [examples/configs/config.example.yaml](examples/configs/config.example.yaml) for a basic source-to-destination flow.
-3. Move to [examples/configs/config.multidest.yaml](examples/configs/config.multidest.yaml) or [examples/production/pii-redaction.yaml](examples/production/pii-redaction.yaml) to see selective replication patterns.
-4. If you plan to run in Kubernetes, browse [examples/pipelines/README.md](examples/pipelines/README.md) for operator-backed pipeline examples.
+1. Start a local Redpanda broker:
+   ```bash
+   docker run --rm -d --name redpanda \
+     -p 9092:9092 -p 9644:9644 \
+     docker.redpanda.com/redpandadata/redpanda:v24.1.10 \
+     redpanda start --overprovisioned --smp 1 --memory 1G --reserve-memory 0M \
+     --node-id 0 --check=false \
+     --kafka-addr 0.0.0.0:9092 \
+     --advertise-kafka-addr localhost:9092
+   ```
+2. Validate the selective replication config:
+   ```bash
+   cargo run --quiet --bin streamforge-validate -- examples/configs/config.filter-transform.example.json
+   ```
+3. Run StreamForge with the same config:
+   ```bash
+   CONFIG_FILE=examples/configs/config.filter-transform.example.json ./target/release/streamforge
+   ```
+4. For the fuller local walkthrough and additional configs, see [docs/QUICKSTART.md](docs/QUICKSTART.md) and [examples/README.md](examples/README.md).
 
 ## Production Trust Signals
 
