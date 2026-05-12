@@ -1,5 +1,5 @@
-title: Streamforge Documentation
-description: Selective replication for Kafka and Redpanda
+title: StreamForge Documentation
+description: Selective replication for Kafka, with Redpanda as a compatibility target
 remote_theme: just-the-docs/just-the-docs
 url: "https://github.datasierra.com"
 baseurl: "/streamforge"
@@ -27,7 +27,7 @@ search_enabled: true
 search_tokenizer_separator: /[\s/]+/
 
 # Footer
-footer_content: "StreamForge — selective replication for Kafka and Redpanda. Apache 2.0 Licensed."
+footer_content: "StreamForge — selective replication for Kafka, with Redpanda as a compatibility target. Apache 2.0 Licensed."
 
 # Callouts (for notes/warnings in docs)
 callouts_level: quiet

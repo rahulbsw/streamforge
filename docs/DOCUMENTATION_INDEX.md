@@ -1,11 +1,11 @@
 ---
-title: All Docs
+title: Documentation Map
 nav_order: 14
 ---
 
-# Documentation Index
+# StreamForge Documentation Map
 
-Complete guide to all Streamforge documentation.
+Curated, task-oriented navigation for the most important StreamForge documentation.
 
 ## Quick Navigation
 
@@ -17,14 +17,20 @@ Complete guide to all Streamforge documentation.
 ### Build Pipelines
 1. [USAGE.md](USAGE.md) - End-to-end pipeline patterns
 2. [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Full filter/transform reference
-3. [examples/README.md](../examples/README.md) - Runnable configs
+3. [YAML_CONFIGURATION.md](YAML_CONFIGURATION.md) - Author and review pipeline configs
+4. [examples/README.md](../examples/README.md) - Runnable configs
 
 ### Run in Production
-1. [DEPLOYMENT.md](DEPLOYMENT.md)
+1. [OPERATIONS.md](OPERATIONS.md)
 2. [KUBERNETES.md](KUBERNETES.md)
 3. [OBSERVABILITY_QUICKSTART.md](OBSERVABILITY_QUICKSTART.md)
+4. [DEPLOYMENT.md](DEPLOYMENT.md)
 
-### Compatibility and Reference
+### Compatibility
 1. [COMPATIBILITY.md](COMPATIBILITY.md)
-2. [DELIVERY_GUARANTEES.md](DELIVERY_GUARANTEES.md)
-3. [SECURITY_CONFIGURATION.md](SECURITY_CONFIGURATION.md)
+2. [WHEN_TO_USE.md](WHEN_TO_USE.md)
+
+### Reference
+1. [DELIVERY_GUARANTEES.md](DELIVERY_GUARANTEES.md)
+2. [SECURITY_CONFIGURATION.md](SECURITY_CONFIGURATION.md)
+3. [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) - This curated doc map
