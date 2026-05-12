@@ -50,10 +50,12 @@ routing:
         x-destination: "analytics"
         x-redacted: "true"
 
-    # Consent-gated marketing stream with hashed email key
+    # Current runtime parser cannot safely hash email into a value field while also
+    # constructing a new payload that drops the raw source email. Preserve an opaque
+    # app-level pseudonymous identifier in the value, and use the hashed email as the key.
     - output: "user-events-marketing"
       filter: "/consent/marketing,==,true"
-      transform: "CONSTRUCT:event=/event_type:timestamp=/timestamp"
+      transform: "CONSTRUCT:anonymous_id=/user/id:event=/event_type:timestamp=/timestamp"
       key_transform: "HASH:MD5,/email"
       headers:
         x-pipeline: "pii-redaction"
@@ -80,9 +82,12 @@ routing:
         x-destination: "compliance"
         x-pii: "full"
 
-metrics:
-  enabled: true
-  port: 8080
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30
 
 # Note: For production PII handling, consider:
 # 1. Encrypting Kafka topics (encryption at rest)

@@ -70,6 +70,9 @@ routing:
         x-pipeline: "cdc-to-datalake"
         x-operation: "schema-change"
 
-metrics:
-  enabled: true
-  port: 8080
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30
