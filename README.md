@@ -1,6 +1,6 @@
 # StreamForge
 
-> Selective replication for Kafka and Redpanda. Filter, transform, redact, and route data between topics and clusters without Kafka Connect.
+> Selective replication for Kafka, with Redpanda as a compatibility target. Filter, transform, redact, and route data between topics and clusters without Kafka Connect.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
@@ -69,7 +69,7 @@ For concrete usage patterns and configs, see [docs/USAGE.md](docs/USAGE.md) and 
 
 ## Compatibility
 
-StreamForge is built for Kafka-compatible brokers. Kafka is the primary target in current docs and examples, and the launch story positions Redpanda as a compatible selective-replication destination.
+StreamForge is built for Kafka-compatible brokers. Kafka is the primary target in current docs and examples, and Redpanda is a compatibility target for selective replication.
 
 ---
 
