@@ -30,6 +30,8 @@ CONFIG_FILE=examples/redpanda/selective-replication.yaml \
   cargo run --release --bin streamforge
 ```
 
+Leave StreamForge running in this terminal. Open a second terminal for the remaining steps.
+
 ## 4. Produce Sample Orders
 
 Create the demo topics:

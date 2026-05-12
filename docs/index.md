@@ -12,7 +12,7 @@ StreamForge helps data teams filter, transform, redact, and route records betwee
 ## Get Started
 
 - [Quickstart](QUICKSTART.md) - Run the five-minute selective replication demo
-- [Examples](../examples/README.md) - Jump to runnable configs
+- [Examples](EXAMPLES.md) - Browse validated demo and production configs
 
 ## Build Pipelines
 

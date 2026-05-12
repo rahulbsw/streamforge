@@ -40,25 +40,21 @@ For concrete usage patterns and configs, see [docs/USAGE.md](docs/USAGE.md) and 
 
 ## 5-Minute Demo
 
-1. Start a local Redpanda broker:
+1. Start the local Redpanda demo broker:
    ```bash
-   docker run --rm -d --name redpanda \
-     -p 9092:9092 -p 9644:9644 \
-     docker.redpanda.com/redpandadata/redpanda:v24.1.10 \
-     redpanda start --overprovisioned --smp 1 --memory 1G --reserve-memory 0M \
-     --node-id 0 --check=false \
-     --kafka-addr 0.0.0.0:9092 \
-     --advertise-kafka-addr localhost:9092
+   docker compose -f examples/redpanda/docker-compose.yml up -d
    ```
 2. Validate the selective replication config:
    ```bash
-   cargo run --quiet --bin streamforge-validate -- examples/configs/config.filter-transform.example.json
+   cargo run --quiet --bin streamforge-validate -- examples/redpanda/selective-replication.yaml
    ```
 3. Run StreamForge with the same config:
    ```bash
-   CONFIG_FILE=examples/configs/config.filter-transform.example.json cargo run --release --bin streamforge
+   CONFIG_FILE=examples/redpanda/selective-replication.yaml \
+     cargo run --release --bin streamforge
    ```
-4. For the fuller local walkthrough and additional configs, see [docs/QUICKSTART.md](docs/QUICKSTART.md) and [examples/README.md](examples/README.md).
+   Leave StreamForge running in this terminal.
+4. Open a second terminal and follow [docs/QUICKSTART.md](docs/QUICKSTART.md) to create the demo topics, produce a sample order, and inspect `analytics-orders` and `pii-safe-orders`.
 
 ## Production Trust Signals
 
@@ -84,7 +80,7 @@ StreamForge is built for Kafka-compatible brokers. Kafka is the primary target i
 ## Example Pipelines
 
 - [examples/configs/config.example.yaml](examples/configs/config.example.yaml) for a minimal standalone pipeline
-- [examples/configs/config.multidest.yaml](examples/configs/config.multidest.yaml) for multi-destination routing
+- [examples/redpanda/selective-replication.yaml](examples/redpanda/selective-replication.yaml) for the validated local Redpanda selective replication demo
 - [examples/production/pii-redaction.yaml](examples/production/pii-redaction.yaml) for analytics-safe redaction
 - [examples/production/cdc-to-datalake.yaml](examples/production/cdc-to-datalake.yaml) for CDC-to-lake shaping
 - [examples/pipelines/README.md](examples/pipelines/README.md) for operator-backed Kubernetes manifests

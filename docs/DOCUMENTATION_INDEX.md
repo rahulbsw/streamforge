@@ -10,7 +10,7 @@ Curated, task-oriented navigation for the most important StreamForge documentati
 ## Quick Navigation
 
 ### Start Here
-1. [README.md](../README.md) - Product overview and decision framing
+1. [Home](index.md) - Product overview and decision framing
 2. [QUICKSTART.md](QUICKSTART.md) - Five-minute demo
 3. [WHEN_TO_USE.md](WHEN_TO_USE.md) - StreamForge vs MM2 vs Arroyo
 
@@ -18,7 +18,7 @@ Curated, task-oriented navigation for the most important StreamForge documentati
 1. [USAGE.md](USAGE.md) - End-to-end pipeline patterns
 2. [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Full filter/transform reference
 3. [YAML_CONFIGURATION.md](YAML_CONFIGURATION.md) - Author and review pipeline configs
-4. [examples/README.md](../examples/README.md) - Runnable configs
+4. [EXAMPLES.md](EXAMPLES.md) - Runnable configs and example packs
 
 ### Run in Production
 1. [SECURITY_CONFIGURATION.md](SECURITY_CONFIGURATION.md)
