@@ -12,15 +12,77 @@ render_with_liquid: false
 # Exclude non-documentation files
 exclude:
   - "*.sh"
-  - "development/internal"
+  - "archive"
+  - "benchmarks"
+  - "development"
+  - "superpowers"
+  - "CONFIG_SCHEMA.json"
   - Gemfile
   - Gemfile.lock
+  - "ADVANCED_FILTERS.md"
+  - "AT_LEAST_ONCE_AND_CACHE_BACKENDS.md"
+  - "DSL_ARCHITECTURE.md"
+  - "DSL_FEATURES.md"
+  - "DSL_SIMPLIFICATION_INVENTORY.md"
+  - "DSL_SPEC.md"
+  - "DSL_V2_FUNCTION_SYNTAX.md"
+  - "ENVELOPE_FEATURE_DESIGN.md"
+  - "ENVELOPE_MIGRATION_GUIDE.md"
+  - "ERROR_HANDLING.md"
+  - "FUNCTION_STYLE_DSL_IMPLEMENTATION.md"
+  - "HASH_AND_CACHE.md"
+  - "IMPLEMENTATION_NOTES.md"
+  - "IMPLEMENTATION_STATUS.md"
+  - "OBSERVABILITY_IMPLEMENTATION_SUMMARY.md"
+  - "OBSERVABILITY_METRICS_DESIGN.md"
+  - "PARSER_REFACTOR_PLAN.md"
+  - "PERFORMANCE_TESTING.md"
+  - "PROJECT_SUMMARY.md"
+  - "QUICK_REFERENCE.md"
+  - "TEST_COVERAGE.md"
+  - "TYPED_ENVELOPE_DESIGN.md"
+  - "V1_GUARANTEES.md"
 
 # just-the-docs configuration
 color_scheme: dark   # options: default (light), dark
 
 # Navigation
 nav_sort: case_insensitive
+
+defaults:
+  - scope:
+      path: "USAGE.md"
+    values:
+      has_children: true
+  - scope:
+      path: "ADVANCED_DSL_GUIDE.md"
+    values:
+      parent: "Usage Guide"
+  - scope:
+      path: "YAML_CONFIGURATION.md"
+    values:
+      parent: "Usage Guide"
+  - scope:
+      path: "DEPLOYMENT.md"
+    values:
+      title: Deployment
+      nav_order: 7
+      has_children: true
+  - scope:
+      path: "DELIVERY_GUARANTEES.md"
+    values:
+      title: Delivery Guarantees
+      nav_order: 8
+  - scope:
+      path: "OPERATIONS.md"
+    values:
+      title: Operations Runbook
+      parent: "Deployment"
+  - scope:
+      path: "TROUBLESHOOTING.md"
+    values:
+      title: Troubleshooting
+      parent: "Deployment"
 
 # Search
 search_enabled: true
