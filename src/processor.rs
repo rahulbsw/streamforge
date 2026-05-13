@@ -506,7 +506,7 @@ pub struct DestinationProcessor {
 
 enum DestinationProcessorKind {
     Immediate(ImmediateDestinationProcessor),
-    Aggregating(AggregatingDestinationProcessor),
+    Aggregating(Box<AggregatingDestinationProcessor>),
 }
 
 impl DestinationProcessor {
@@ -539,14 +539,16 @@ impl DestinationProcessor {
         error_policy: crate::config::ErrorPolicy,
     ) -> Result<Self> {
         Ok(Self {
-            kind: DestinationProcessorKind::Aggregating(AggregatingDestinationProcessor::new(
-                sink,
-                filter,
-                transform,
-                aggregation,
-                name,
-                error_policy,
-            )?),
+            kind: DestinationProcessorKind::Aggregating(Box::new(
+                AggregatingDestinationProcessor::new(
+                    sink,
+                    filter,
+                    transform,
+                    aggregation,
+                    name,
+                    error_policy,
+                )?,
+            )),
         })
     }
 
