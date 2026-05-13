@@ -17,6 +17,7 @@ StreamForge helps data teams filter, transform, redact, and route records betwee
 ## Build Pipelines
 
 - [Usage Guide](USAGE.md)
+- [Aggregations](AGGREGATIONS.md)
 - [Advanced DSL Guide](ADVANCED_DSL_GUIDE.md)
 - [YAML Configuration](YAML_CONFIGURATION.md)
 

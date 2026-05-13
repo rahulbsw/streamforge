@@ -1,0 +1,39 @@
+appid: "orders-windowed-metrics"
+bootstrap: "localhost:9092"
+input: "raw-orders"
+offset: "earliest"
+threads: 2
+
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "orders-metrics-1m"
+      filter: "AND:/event_type,==,order_completed:/region,==,us"
+      transform: "CONSTRUCT:region=/region:customer_id=/customer_id:amount=/amount"
+      aggregation:
+        group_by:
+          - name: region
+            path: "/region"
+        window:
+          type: tumbling
+          size_seconds: 60
+          emit_interval_seconds: 5
+        metrics:
+          - name: order_count
+            op: count
+          - name: gross_amount
+            op: sum
+            path: "/amount"
+          - name: avg_amount
+            op: avg
+            path: "/amount"
+          - name: unique_customers
+            op: approx_distinct
+            path: "/customer_id"
+
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30

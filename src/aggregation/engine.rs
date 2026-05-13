@@ -198,6 +198,10 @@ impl AggregationEngine {
         Ok(emitted)
     }
 
+    pub fn open_window_count(&self) -> usize {
+        self.windows.len()
+    }
+
     fn group_key_for(&self, value: &Value) -> Result<GroupKey> {
         let fields = self
             .group_by

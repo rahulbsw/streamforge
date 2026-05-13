@@ -5,7 +5,7 @@ use crate::{
     AggregateEmission, AggregationConfig, AggregationEngine, MessageEnvelope, MirrorMakerError,
     Result,
 };
-use prometheus::{Counter, Histogram};
+use prometheus::{Counter, Gauge, Histogram};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -95,6 +95,16 @@ struct DestinationMetrics {
     messages_produced_counter: Counter,
 }
 
+struct AggregationRuntimeMetrics {
+    accepted_updates: Vec<Counter>,
+    rejected_updates: Vec<Counter>,
+    windows_open: Gauge,
+    flushes_emitted: Counter,
+    flushes_empty: Counter,
+    flushes_failed: Counter,
+    records_emitted: Counter,
+}
+
 impl DestinationMetrics {
     fn new(name: &str) -> Self {
         Self {
@@ -119,6 +129,85 @@ impl DestinationMetrics {
                 .with_label_values(&[name, labels::TRANSFORM_TYPE_VALUE]),
             messages_produced_counter: METRICS.messages_produced.with_label_values(&[name]),
         }
+    }
+}
+
+impl AggregationRuntimeMetrics {
+    fn new(destination: &str, metric_names: &[String]) -> Self {
+        let accepted_updates = metric_names
+            .iter()
+            .map(|metric_name| {
+                METRICS.aggregation_updates.with_label_values(&[
+                    destination,
+                    metric_name,
+                    labels::AGGREGATION_UPDATE_STATUS_ACCEPTED,
+                ])
+            })
+            .collect();
+        let rejected_updates = metric_names
+            .iter()
+            .map(|metric_name| {
+                METRICS.aggregation_updates.with_label_values(&[
+                    destination,
+                    metric_name,
+                    labels::AGGREGATION_UPDATE_STATUS_REJECTED,
+                ])
+            })
+            .collect();
+        let windows_open = METRICS
+            .aggregation_windows_open
+            .with_label_values(&[destination]);
+        windows_open.set(0.0);
+
+        Self {
+            accepted_updates,
+            rejected_updates,
+            windows_open,
+            flushes_emitted: METRICS
+                .aggregation_flushes
+                .with_label_values(&[destination, labels::AGGREGATION_FLUSH_STATUS_EMITTED]),
+            flushes_empty: METRICS
+                .aggregation_flushes
+                .with_label_values(&[destination, labels::AGGREGATION_FLUSH_STATUS_EMPTY]),
+            flushes_failed: METRICS
+                .aggregation_flushes
+                .with_label_values(&[destination, labels::AGGREGATION_FLUSH_STATUS_FAILED]),
+            records_emitted: METRICS
+                .aggregation_records_emitted
+                .with_label_values(&[destination]),
+        }
+    }
+
+    fn inc_accepted_updates(&self) {
+        for counter in &self.accepted_updates {
+            counter.inc();
+        }
+    }
+
+    fn inc_rejected_updates(&self) {
+        for counter in &self.rejected_updates {
+            counter.inc();
+        }
+    }
+
+    fn set_windows_open(&self, count: usize) {
+        self.windows_open.set(count as f64);
+    }
+
+    fn inc_flush_emitted(&self) {
+        self.flushes_emitted.inc();
+    }
+
+    fn inc_flush_empty(&self) {
+        self.flushes_empty.inc();
+    }
+
+    fn inc_flush_failed(&self) {
+        self.flushes_failed.inc();
+    }
+
+    fn inc_records_emitted(&self) {
+        self.records_emitted.inc();
     }
 }
 
@@ -291,6 +380,7 @@ impl ImmediateDestinationProcessor {
 struct AggregatingDestinationProcessor {
     sink: Arc<dyn SinkWriter>,
     aggregation: Mutex<AggregationEngine>,
+    aggregation_metrics: AggregationRuntimeMetrics,
     runtime: DestinationRuntime,
 }
 
@@ -303,11 +393,17 @@ impl AggregatingDestinationProcessor {
         name: String,
         error_policy: crate::config::ErrorPolicy,
     ) -> Result<Self> {
+        let metric_names = aggregation
+            .metrics
+            .iter()
+            .map(|metric| metric.name.clone())
+            .collect::<Vec<_>>();
         let engine = AggregationEngine::new(aggregation, name.clone())?;
 
         Ok(Self {
             sink,
             aggregation: Mutex::new(engine),
+            aggregation_metrics: AggregationRuntimeMetrics::new(name.as_str(), &metric_names),
             runtime: DestinationRuntime::new(filter, transform, name, error_policy),
         })
     }
@@ -325,40 +421,80 @@ impl AggregatingDestinationProcessor {
         }
 
         let timestamp_ms = observation_timestamp_ms(&envelope)?;
-        let observe_result = self
-            .aggregation
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .observe(&envelope.value, timestamp_ms);
+        let observe_result = {
+            let mut aggregation = self.aggregation.lock().unwrap_or_else(|e| e.into_inner());
+            match aggregation.observe(&envelope.value, timestamp_ms) {
+                Ok(()) => Ok(aggregation.open_window_count()),
+                Err(err) => Err(err),
+            }
+        };
 
         match observe_result {
-            Ok(()) => {
+            Ok(open_window_count) => {
+                self.aggregation_metrics.inc_accepted_updates();
+                self.aggregation_metrics.set_windows_open(open_window_count);
                 timer.observe_duration();
                 Ok(true)
             }
-            Err(e) => self.runtime.handle_error(e, "aggregation observe"),
+            Err(e) => {
+                self.aggregation_metrics.inc_rejected_updates();
+                self.runtime.handle_error(e, "aggregation observe")
+            }
         }
     }
 
     async fn flush(&self) -> Result<()> {
-        let emitted = self
-            .aggregation
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .prepare_flush_expired(current_time_millis()?)?;
+        let now_ms = match current_time_millis() {
+            Ok(now_ms) => now_ms,
+            Err(err) => {
+                self.aggregation_metrics.inc_flush_failed();
+                return Err(err);
+            }
+        };
 
+        let emitted = {
+            let mut aggregation = self.aggregation.lock().unwrap_or_else(|e| e.into_inner());
+            match aggregation.prepare_flush_expired(now_ms) {
+                Ok(emitted) => {
+                    self.aggregation_metrics
+                        .set_windows_open(aggregation.open_window_count());
+                    emitted
+                }
+                Err(err) => {
+                    self.aggregation_metrics.inc_flush_failed();
+                    return Err(err);
+                }
+            }
+        };
+
+        let emitted_count = emitted.len();
         for emission in emitted {
-            self.sink
+            if let Err(err) = self
+                .sink
                 .send(aggregate_emission_to_envelope(emission))
-                .await?;
+                .await
+            {
+                self.aggregation_metrics.inc_flush_failed();
+                return Err(err);
+            }
+            self.aggregation_metrics.inc_records_emitted();
             self.runtime.metrics.messages_produced_counter.inc();
         }
 
-        self.sink.flush().await?;
+        if let Err(err) = self.sink.flush().await {
+            self.aggregation_metrics.inc_flush_failed();
+            return Err(err);
+        }
         self.aggregation
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .commit_flush();
+
+        if emitted_count == 0 {
+            self.aggregation_metrics.inc_flush_empty();
+        } else {
+            self.aggregation_metrics.inc_flush_emitted();
+        }
         Ok(())
     }
 }
@@ -668,6 +804,34 @@ mod tests {
         }
     }
 
+    fn aggregation_update_metric_value(destination: &str, metric: &str, status: &str) -> f64 {
+        METRICS
+            .aggregation_updates
+            .with_label_values(&[destination, metric, status])
+            .get()
+    }
+
+    fn aggregation_windows_open_value(destination: &str) -> f64 {
+        METRICS
+            .aggregation_windows_open
+            .with_label_values(&[destination])
+            .get()
+    }
+
+    fn aggregation_flush_metric_value(destination: &str, status: &str) -> f64 {
+        METRICS
+            .aggregation_flushes
+            .with_label_values(&[destination, status])
+            .get()
+    }
+
+    fn aggregation_records_emitted_value(destination: &str) -> f64 {
+        METRICS
+            .aggregation_records_emitted
+            .with_label_values(&[destination])
+            .get()
+    }
+
     #[test]
     fn test_extract_routing_value() {
         let processor = MultiDestinationProcessor {
@@ -772,6 +936,105 @@ mod tests {
         assert!(flushed.is_ok());
         assert_eq!(sink.flush_count(), 1);
         assert_eq!(sink.sent_messages().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_aggregation_metrics_track_updates_flushes_and_open_windows() {
+        let destination_name = "aggregates.metrics.runtime";
+        let sink = Arc::new(RecordingSink::new());
+        let destination = DestinationProcessor::with_aggregation(
+            sink.clone(),
+            None,
+            None,
+            aggregation_config(1),
+            destination_name.to_string(),
+            ErrorPolicy::Fail,
+        )
+        .unwrap();
+
+        let update_before = aggregation_update_metric_value(
+            destination_name,
+            "count",
+            labels::AGGREGATION_UPDATE_STATUS_ACCEPTED,
+        );
+        let windows_before = aggregation_windows_open_value(destination_name);
+        let flush_before = aggregation_flush_metric_value(
+            destination_name,
+            labels::AGGREGATION_FLUSH_STATUS_EMITTED,
+        );
+        let records_before = aggregation_records_emitted_value(destination_name);
+
+        destination
+            .process(MessageEnvelope::new(json!({"tenant": "tenant-a"})).timestamp(0))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            aggregation_update_metric_value(
+                destination_name,
+                "count",
+                labels::AGGREGATION_UPDATE_STATUS_ACCEPTED,
+            ),
+            update_before + 1.0
+        );
+        assert_eq!(
+            aggregation_windows_open_value(destination_name),
+            windows_before + 1.0
+        );
+
+        destination.flush().await.unwrap();
+
+        assert_eq!(
+            aggregation_windows_open_value(destination_name),
+            windows_before
+        );
+        assert_eq!(
+            aggregation_flush_metric_value(
+                destination_name,
+                labels::AGGREGATION_FLUSH_STATUS_EMITTED,
+            ),
+            flush_before + 1.0
+        );
+        assert_eq!(
+            aggregation_records_emitted_value(destination_name),
+            records_before + 1.0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_aggregation_metrics_track_rejected_updates() {
+        let destination_name = "aggregates.metrics.rejected";
+        let sink = Arc::new(RecordingSink::new());
+        let destination = DestinationProcessor::with_aggregation(
+            sink,
+            None,
+            None,
+            aggregation_config(1),
+            destination_name.to_string(),
+            ErrorPolicy::Fail,
+        )
+        .unwrap();
+
+        let rejected_before = aggregation_update_metric_value(
+            destination_name,
+            "count",
+            labels::AGGREGATION_UPDATE_STATUS_REJECTED,
+        );
+
+        let err = destination
+            .process(MessageEnvelope::new(json!({"other": "value"})).timestamp(0))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, MirrorMakerError::JsonPathNotFound { .. }));
+        assert_eq!(
+            aggregation_update_metric_value(
+                destination_name,
+                "count",
+                labels::AGGREGATION_UPDATE_STATUS_REJECTED,
+            ),
+            rejected_before + 1.0
+        );
     }
 
     #[tokio::test]
