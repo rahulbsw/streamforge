@@ -88,6 +88,9 @@ Good fit:
 Boundaries:
 - aggregations run after the destination filter and value transform
 - aggregated outputs go to the destination `output` topic
+- windowing is processing-time and in-memory in v1
+- `emit_interval_seconds` controls how often StreamForge checks for completed windows
+- `commit_strategy.manual_commit: true` is not supported for aggregation destinations
 - this mode is for lightweight rollups, not joins, SQL, sliding windows, session windows, or durable state
 
 See:

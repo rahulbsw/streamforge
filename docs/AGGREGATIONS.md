@@ -36,7 +36,7 @@ routing:
         window:
           type: tumbling
           size_seconds: 60
-          emit_interval_seconds: 5
+          emit_interval_seconds: 5 # poll interval for completed windows
         metrics:
           - name: order_count
             op: count
@@ -58,8 +58,12 @@ routing:
 ## Execution Model
 
 - Aggregations run after the destination `filter` and value `transform`.
+- v1 aggregation uses processing time for window assignment and window closure checks.
+- State is in-memory only for this first release.
 - Aggregated records are emitted to the destination `output` topic.
 - The emitted record key is the canonical JSON encoding of the ordered `group_by` name/value pair list, for example `[{"name":"region","value":"us"}]`.
+- `emit_interval_seconds` is the poll/check interval for completed windows. It is not a promise that output is emitted exactly every N seconds.
+- Aggregation destinations are incompatible with `commit_strategy.manual_commit: true` in v1.
 - `quantiles` outputs use the currently implemented key format: `p0.5`, `p0.95`, `p0.99`.
 
 ## Output JSON Shape
@@ -105,6 +109,7 @@ This first aggregation lane intentionally does not include:
 - sliding windows
 - session windows
 - durable aggregation state
+- `commit_strategy.manual_commit: true`
 - key/header/timestamp transforms on aggregation destinations
 
 If you need broad stateful stream processing semantics, use a tool built for that job. StreamForge keeps the scope narrow: selective replication plus lightweight derived metrics.

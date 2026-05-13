@@ -17,7 +17,7 @@ routing:
         window:
           type: tumbling
           size_seconds: 60
-          emit_interval_seconds: 5
+          emit_interval_seconds: 5 # completion-check poll interval
         metrics:
           - name: amount_quantiles
             op: quantiles

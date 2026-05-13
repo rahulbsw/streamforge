@@ -650,6 +650,12 @@ impl MirrorMakerConfig {
         if let Some(routing) = &self.routing {
             for dest in &routing.destinations {
                 if let Some(aggregation) = &dest.aggregation {
+                    if self.commit_strategy.manual_commit {
+                        return Err(config_error(
+                            "aggregation destinations do not support commit_strategy.manual_commit=true in v1",
+                        ));
+                    }
+
                     if dest.key_transform.is_some() {
                         return Err(config_error(
                             "aggregation destinations cannot use key_transform",

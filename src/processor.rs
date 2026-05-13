@@ -420,7 +420,7 @@ impl AggregatingDestinationProcessor {
             return Ok(false);
         }
 
-        let timestamp_ms = observation_timestamp_ms(&envelope)?;
+        let timestamp_ms = observation_timestamp_ms()?;
         let observe_result = {
             let mut aggregation = self.aggregation.lock().unwrap_or_else(|e| e.into_inner());
             match aggregation.observe(&envelope.value, timestamp_ms) {
@@ -579,16 +579,8 @@ fn current_time_millis() -> Result<u64> {
         .as_millis() as u64)
 }
 
-fn observation_timestamp_ms(envelope: &MessageEnvelope) -> Result<u64> {
-    match envelope.timestamp {
-        Some(timestamp) => u64::try_from(timestamp).map_err(|_| {
-            MirrorMakerError::Processing(format!(
-                "message timestamp must be non-negative for aggregation: {}",
-                timestamp
-            ))
-        }),
-        None => current_time_millis(),
-    }
+fn observation_timestamp_ms() -> Result<u64> {
+    current_time_millis()
 }
 
 fn aggregate_emission_to_envelope(emission: AggregateEmission) -> MessageEnvelope {
@@ -832,6 +824,10 @@ mod tests {
             .get()
     }
 
+    async fn wait_for_aggregation_window_to_close() {
+        tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+    }
+
     #[test]
     fn test_extract_routing_value() {
         let processor = MultiDestinationProcessor {
@@ -930,6 +926,7 @@ mod tests {
 
         let envelope = MessageEnvelope::new(json!({"tenant": "tenant-a"})).timestamp(0);
         let processed = destination.process(envelope).await.unwrap();
+        wait_for_aggregation_window_to_close().await;
         let flushed = destination.flush().await;
 
         assert!(processed);
@@ -982,6 +979,7 @@ mod tests {
             windows_before + 1.0
         );
 
+        wait_for_aggregation_window_to_close().await;
         destination.flush().await.unwrap();
 
         assert_eq!(
@@ -1038,6 +1036,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_aggregation_runtime_uses_processing_time_not_record_timestamp() {
+        let sink = Arc::new(RecordingSink::new());
+        let destination = DestinationProcessor::with_aggregation(
+            sink,
+            None,
+            None,
+            aggregation_config(1),
+            "aggregates.processing-time".to_string(),
+            ErrorPolicy::Fail,
+        )
+        .unwrap();
+
+        let processed = destination
+            .process(MessageEnvelope::new(json!({"tenant": "tenant-a"})).timestamp(-1))
+            .await
+            .unwrap();
+
+        assert!(processed);
+    }
+
+    #[tokio::test]
     async fn test_multi_destination_flush_fans_out_to_immediate_and_aggregation_destinations() {
         let immediate_sink = Arc::new(RecordingSink::new());
         let aggregation_sink = Arc::new(RecordingSink::new());
@@ -1068,6 +1087,7 @@ mod tests {
             .process(MessageEnvelope::new(json!({"tenant": "tenant-a"})).timestamp(0))
             .await
             .unwrap();
+        wait_for_aggregation_window_to_close().await;
         processor.flush().await.unwrap();
 
         assert_eq!(immediate_sink.flush_count(), 1);
@@ -1137,6 +1157,7 @@ mod tests {
             .await
             .unwrap();
 
+        wait_for_aggregation_window_to_close().await;
         let first_flush = destination.flush().await;
         let second_flush = destination.flush().await;
 
@@ -1163,6 +1184,7 @@ mod tests {
             .await
             .unwrap();
 
+        wait_for_aggregation_window_to_close().await;
         let first_flush = destination.flush().await;
         let second_flush = destination.flush().await;
 

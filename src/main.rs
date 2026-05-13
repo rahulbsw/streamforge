@@ -128,7 +128,7 @@ async fn main() -> Result<()> {
 
     if let Some(interval_seconds) = aggregation_flush_interval_seconds(&config) {
         info!(
-            "Starting aggregation flush ticker (interval: {}s)",
+            "Starting aggregation completion-check ticker (poll interval: {}s)",
             interval_seconds
         );
 
@@ -625,7 +625,7 @@ async fn build_multi_destination_processor(
 
         let dest_processor = if let Some(aggregation) = dest.aggregation.clone() {
             info!(
-                "  Aggregation: {} metric(s), emit every {}s",
+                "  Aggregation: {} metric(s), completion check every {}s",
                 aggregation.metrics.len(),
                 aggregation.window.emit_interval_seconds
             );

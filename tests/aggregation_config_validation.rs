@@ -76,6 +76,36 @@ fn rejects_aggregation_with_header_or_timestamp_transforms() {
 }
 
 #[test]
+fn rejects_aggregation_with_manual_commit() {
+    let yaml = format!(
+        r#"
+appid: agg-test
+bootstrap: localhost:9092
+input: raw-orders
+commit_strategy:
+  manual_commit: true
+routing:
+  routing_type: filter
+  destinations:
+    - output: orders-metrics-1m
+{}
+"#,
+        aggregation_block(
+            "",
+            "          - name: order_count\n            op: count\n",
+            "          type: tumbling\n          size_seconds: 60\n          emit_interval_seconds: 5\n",
+        )
+    );
+
+    let cfg = parse_config(&yaml);
+    let err = cfg.validate().unwrap_err();
+
+    assert!(err.to_string().contains(
+        "aggregation destinations do not support commit_strategy.manual_commit=true in v1"
+    ));
+}
+
+#[test]
 fn rejects_quantiles_without_percentiles() {
     let yaml = base_aggregation_yaml(&aggregation_block(
         "",
