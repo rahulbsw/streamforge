@@ -23,9 +23,10 @@ pub use cache::{
 };
 pub use cache_backend::CacheBackend;
 pub use config::{
-    CacheBackendConfig, CacheBackendType, CommitMode, CommitStrategyConfig, DestinationConfig,
-    HeaderTransformConfig, KafkaCacheConfig, LocalCacheConfig, MirrorMakerConfig, RedisCacheConfig,
-    RoutingConfig,
+    AggregationConfig, AggregationGroupBy, AggregationMetricConfig, AggregationOp,
+    AggregationWindowConfig, AggregationWindowType, CacheBackendConfig, CacheBackendType,
+    CommitMode, CommitStrategyConfig, DestinationConfig, HeaderTransformConfig, KafkaCacheConfig,
+    LocalCacheConfig, MirrorMakerConfig, RedisCacheConfig, RoutingConfig,
 };
 pub use dlq::{DeadLetterQueue, DlqConfig, DlqMessage};
 pub use envelope::MessageEnvelope;

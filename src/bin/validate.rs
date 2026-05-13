@@ -62,6 +62,12 @@ fn main() {
         }
     };
 
+    if let Err(e) = config.validate() {
+        eprintln!("❌ Error: Invalid configuration:");
+        eprintln!("{}", e);
+        std::process::exit(1);
+    }
+
     println!("✅ YAML syntax valid");
     println!("📋 Validating StreamForge configuration...\n");
 
