@@ -92,6 +92,69 @@ fn rejects_quantiles_without_percentiles() {
 }
 
 #[test]
+fn rejects_quantiles_with_out_of_range_percentiles() {
+    let yaml = base_aggregation_yaml(&aggregation_block(
+        "",
+        concat!(
+            "          - name: amount_quantiles\n",
+            "            op: quantiles\n",
+            "            path: /amount\n",
+            "            percentiles:\n",
+            "              - 1.1\n"
+        ),
+        "          type: tumbling\n          size_seconds: 60\n          emit_interval_seconds: 5\n",
+    ));
+
+    let cfg = parse_config(&yaml);
+    let err = cfg.validate().unwrap_err();
+
+    assert!(err.to_string().contains("percentile must be in [0.0, 1.0]"));
+}
+
+#[test]
+fn rejects_quantiles_with_duplicate_percentiles() {
+    let yaml = base_aggregation_yaml(&aggregation_block(
+        "",
+        concat!(
+            "          - name: amount_quantiles\n",
+            "            op: quantiles\n",
+            "            path: /amount\n",
+            "            percentiles:\n",
+            "              - 0.5\n",
+            "              - 0.50\n"
+        ),
+        "          type: tumbling\n          size_seconds: 60\n          emit_interval_seconds: 5\n",
+    ));
+
+    let cfg = parse_config(&yaml);
+    let err = cfg.validate().unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("contains duplicate percentile key"));
+}
+
+#[test]
+fn rejects_quantiles_with_non_finite_percentiles() {
+    let yaml = base_aggregation_yaml(&aggregation_block(
+        "",
+        concat!(
+            "          - name: amount_quantiles\n",
+            "            op: quantiles\n",
+            "            path: /amount\n",
+            "            percentiles:\n",
+            "              - .nan\n"
+        ),
+        "          type: tumbling\n          size_seconds: 60\n          emit_interval_seconds: 5\n",
+    ));
+
+    let cfg = parse_config(&yaml);
+    let err = cfg.validate().unwrap_err();
+
+    assert!(err.to_string().contains("has non-finite percentile"));
+}
+
+#[test]
 fn rejects_value_metrics_without_path() {
     let yaml = base_aggregation_yaml(&aggregation_block(
         "",

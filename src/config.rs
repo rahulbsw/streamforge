@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MirrorMakerConfig {
@@ -814,14 +814,49 @@ impl AggregationMetricConfig {
         }
 
         if matches!(self.op, AggregationOp::Quantiles) {
-            match self.percentiles.as_ref() {
-                Some(percentiles) if !percentiles.is_empty() => {}
-                _ => return Err(config_error("quantiles metrics require percentiles")),
-            }
+            validate_quantile_percentiles(&self.name, self.percentiles.as_ref())?;
         }
 
         Ok(())
     }
+}
+
+fn validate_quantile_percentiles(name: &str, percentiles: Option<&Vec<f64>>) -> crate::Result<()> {
+    let percentiles =
+        percentiles.ok_or_else(|| config_error("quantiles metrics require percentiles"))?;
+    if percentiles.is_empty() {
+        return Err(config_error("quantiles metrics require percentiles"));
+    }
+
+    let mut keys = HashSet::new();
+    for percentile in percentiles {
+        if !percentile.is_finite() {
+            return Err(config_error(format!(
+                "quantiles metric '{}' has non-finite percentile",
+                name
+            )));
+        }
+        if !(0.0..=1.0).contains(percentile) {
+            return Err(config_error(format!(
+                "quantiles metric '{}' percentile must be in [0.0, 1.0], got {}",
+                name, percentile
+            )));
+        }
+
+        let key = quantile_percentile_key(*percentile);
+        if !keys.insert(key.clone()) {
+            return Err(config_error(format!(
+                "quantiles metric '{}' contains duplicate percentile key '{}'",
+                name, key
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn quantile_percentile_key(percentile: f64) -> String {
+    format!("p{}", percentile)
 }
 
 impl AggregationOp {
