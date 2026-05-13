@@ -1,3 +1,4 @@
+pub mod aggregation;
 pub mod cache;
 pub mod cache_backend;
 pub mod compression;
@@ -18,6 +19,7 @@ pub mod processor;
 pub mod processor_with_retry;
 pub mod retry;
 
+pub use aggregation::{AggregateEmission, AggregationEngine, GroupKey};
 pub use cache::{
     CacheConfig, CacheManager, CacheStats, LookupCache, SyncCacheManager, SyncLookupCache,
 };
