@@ -20,6 +20,7 @@ pub struct AggregationEngine {
     group_by: Vec<GroupByField>,
     metrics: Vec<CompiledMetric>,
     windows: BTreeMap<u64, BTreeMap<GroupKey, AggregateBucket>>,
+    pending_flush: Option<Vec<AggregateEmission>>,
 }
 
 #[derive(Debug)]
@@ -97,6 +98,7 @@ impl AggregationEngine {
             group_by,
             metrics,
             windows: BTreeMap::new(),
+            pending_flush: None,
         })
     }
 
@@ -125,7 +127,11 @@ impl AggregationEngine {
         Ok(())
     }
 
-    pub fn flush_expired(&mut self, now_ms: u64) -> Result<Vec<AggregateEmission>> {
+    pub fn prepare_flush_expired(&mut self, now_ms: u64) -> Result<Vec<AggregateEmission>> {
+        if let Some(pending_flush) = &self.pending_flush {
+            return Ok(pending_flush.clone());
+        }
+
         let latest_expired_start = match now_ms.checked_sub(self.window_size_ms) {
             Some(value) => value,
             None => return Ok(Vec::new()),
@@ -157,19 +163,38 @@ impl AggregationEngine {
             }
         }
 
-        for start_ms in self
+        let flushed_starts = self
             .windows
             .range(..=latest_expired_start)
             .map(|(start, _)| *start)
-            .collect::<Vec<_>>()
-        {
-            self.windows.remove(&start_ms);
+            .collect::<Vec<_>>();
+
+        for start_ms in &flushed_starts {
+            self.windows.remove(start_ms);
+        }
+
+        if !flushed_starts.is_empty() {
+            self.pending_flush = Some(emitted.clone());
         }
 
         self.min_open_window_start_ms = self
             .min_open_window_start_ms
             .max(now_ms - (now_ms % self.window_size_ms));
 
+        Ok(emitted)
+    }
+
+    pub fn commit_flush(&mut self) {
+        self.pending_flush = None;
+    }
+
+    pub fn flush_expired(&mut self, now_ms: u64) -> Result<Vec<AggregateEmission>> {
+        let emitted = self.prepare_flush_expired(now_ms)?;
+        if emitted.is_empty() {
+            return Ok(emitted);
+        }
+
+        self.commit_flush();
         Ok(emitted)
     }
 
