@@ -16,9 +16,10 @@ Curated, task-oriented navigation for the most important StreamForge documentati
 
 ### Build Pipelines
 1. [USAGE.md](USAGE.md) - End-to-end pipeline patterns
-2. [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Full filter/transform reference
-3. [YAML_CONFIGURATION.md](YAML_CONFIGURATION.md) - Author and review pipeline configs
-4. [EXAMPLES.md](EXAMPLES.md) - Runnable configs and example packs
+2. [AGGREGATIONS.md](AGGREGATIONS.md) - Windowed derived metrics for selective replication pipelines
+3. [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Full filter/transform reference
+4. [YAML_CONFIGURATION.md](YAML_CONFIGURATION.md) - Author and review pipeline configs
+5. [EXAMPLES.md](EXAMPLES.md) - Runnable configs and example packs
 
 ### Run in Production
 1. [SECURITY_CONFIGURATION.md](SECURITY_CONFIGURATION.md)

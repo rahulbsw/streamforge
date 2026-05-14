@@ -1,0 +1,32 @@
+appid: "orders-quantiles"
+bootstrap: "localhost:9092"
+input: "raw-orders"
+offset: "earliest"
+threads: 2
+
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "orders-amount-quantiles-1m"
+      filter: "/event_type,==,order_completed"
+      transform: "CONSTRUCT:region=/region:amount=/amount"
+      aggregation:
+        group_by:
+          - name: region
+            path: "/region"
+        window:
+          type: tumbling
+          size_seconds: 60
+          emit_interval_seconds: 5 # completion-check poll interval
+        metrics:
+          - name: amount_quantiles
+            op: quantiles
+            path: "/amount"
+            percentiles: [0.5, 0.95, 0.99]
+
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30

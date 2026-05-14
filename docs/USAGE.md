@@ -71,6 +71,33 @@ Good fit:
 - service-specific integration topics
 - separating high-volume raw streams from narrower downstream contracts
 
+### Derived Metrics with Aggregations
+
+Use an `aggregation:` block inside a routing destination when the downstream system needs a compact metrics topic instead of every raw event.
+
+Typical flow:
+- filter to the events that should count toward the rollup
+- reshape the value so aggregation reads a stable payload
+- emit tumbling-window metrics to a dedicated Kafka topic
+
+Good fit:
+- per-region or per-tenant rollups for analytics
+- low-overhead operational metrics streams derived from business events
+- approximate distinct counts or quantile summaries without standing up a separate streaming stack
+
+Boundaries:
+- aggregations run after the destination filter and value transform
+- aggregated outputs go to the destination `output` topic
+- windowing is processing-time and in-memory in v1
+- `emit_interval_seconds` controls how often StreamForge checks for completed windows
+- `commit_strategy.manual_commit: true` is not supported for aggregation destinations
+- this mode is for lightweight rollups, not joins, SQL, sliding windows, session windows, or durable state
+
+See:
+- [AGGREGATIONS.md](AGGREGATIONS.md)
+- [../examples/aggregation/orders-windowed-metrics.yaml](../examples/aggregation/orders-windowed-metrics.yaml)
+- [../examples/aggregation/orders-quantiles.yaml](../examples/aggregation/orders-quantiles.yaml)
+
 ### Cross-Cluster Replication with Shaping
 
 Use StreamForge when you need to move data between clusters but do not want to mirror whole topics unchanged.
@@ -133,7 +160,7 @@ Do not use StreamForge as your primary answer for:
 - MirrorMaker 2 active-active replication
 - consumer offset synchronization across clusters
 - general SQL stream processing
-- joins and broad stateful event computation
+- joins, session/sliding windows, and broad stateful event computation
 
 That boundary is intentional. StreamForge is the selective replication and shaping layer. Heavier stateful analytics belongs in tools built for that purpose.
 

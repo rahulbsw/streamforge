@@ -20,6 +20,13 @@ pub mod labels {
 
     pub const TRANSFORM_TYPE_ENVELOPE: &str = "envelope";
     pub const TRANSFORM_TYPE_VALUE: &str = "value";
+
+    pub const AGGREGATION_UPDATE_STATUS_ACCEPTED: &str = "accepted";
+    pub const AGGREGATION_UPDATE_STATUS_REJECTED: &str = "rejected";
+
+    pub const AGGREGATION_FLUSH_STATUS_EMITTED: &str = "emitted";
+    pub const AGGREGATION_FLUSH_STATUS_EMPTY: &str = "empty";
+    pub const AGGREGATION_FLUSH_STATUS_FAILED: &str = "failed";
 }
 
 lazy_static! {
@@ -63,6 +70,12 @@ pub struct Metrics {
     pub consumer_offset: GaugeVec,
     pub consumer_high_watermark: GaugeVec,
     pub time_since_last_commit: Gauge,
+
+    // Aggregation metrics
+    pub aggregation_updates: CounterVec,
+    pub aggregation_windows_open: GaugeVec,
+    pub aggregation_flushes: CounterVec,
+    pub aggregation_records_emitted: CounterVec,
 
     // System health
     pub uptime_seconds: Gauge,
@@ -262,6 +275,42 @@ impl Metrics {
             )
             .unwrap(),
 
+            aggregation_updates: CounterVec::new(
+                Opts::new(
+                    "streamforge_aggregation_updates_total",
+                    "Aggregation update attempts by destination, metric, and status",
+                ),
+                &["destination", "metric", "status"],
+            )
+            .unwrap(),
+
+            aggregation_windows_open: GaugeVec::new(
+                Opts::new(
+                    "streamforge_aggregation_windows_open",
+                    "Currently open aggregation windows per destination",
+                ),
+                &["destination"],
+            )
+            .unwrap(),
+
+            aggregation_flushes: CounterVec::new(
+                Opts::new(
+                    "streamforge_aggregation_flushes_total",
+                    "Aggregation flush attempts by destination and status",
+                ),
+                &["destination", "status"],
+            )
+            .unwrap(),
+
+            aggregation_records_emitted: CounterVec::new(
+                Opts::new(
+                    "streamforge_aggregation_records_emitted_total",
+                    "Aggregation records emitted to destination topics",
+                ),
+                &["destination"],
+            )
+            .unwrap(),
+
             uptime_seconds: Gauge::new("streamforge_uptime_seconds", "Service uptime in seconds")
                 .unwrap(),
 
@@ -297,6 +346,10 @@ pub fn register_metrics() -> Result<(), Box<dyn std::error::Error>> {
     REGISTRY.register(Box::new(METRICS.consumer_offset.clone()))?;
     REGISTRY.register(Box::new(METRICS.consumer_high_watermark.clone()))?;
     REGISTRY.register(Box::new(METRICS.time_since_last_commit.clone()))?;
+    REGISTRY.register(Box::new(METRICS.aggregation_updates.clone()))?;
+    REGISTRY.register(Box::new(METRICS.aggregation_windows_open.clone()))?;
+    REGISTRY.register(Box::new(METRICS.aggregation_flushes.clone()))?;
+    REGISTRY.register(Box::new(METRICS.aggregation_records_emitted.clone()))?;
     REGISTRY.register(Box::new(METRICS.uptime_seconds.clone()))?;
     REGISTRY.register(Box::new(METRICS.kafka_connections.clone()))?;
 
@@ -343,5 +396,33 @@ mod tests {
             .with_label_values(&["test-dest"])
             .observe(0.025);
         // Should not panic
+    }
+
+    #[test]
+    fn test_aggregation_metrics_with_labels() {
+        let metrics = Metrics::new();
+        metrics
+            .aggregation_updates
+            .with_label_values(&[
+                "orders-metrics-1m",
+                "order_count",
+                labels::AGGREGATION_UPDATE_STATUS_ACCEPTED,
+            ])
+            .inc();
+        metrics
+            .aggregation_windows_open
+            .with_label_values(&["orders-metrics-1m"])
+            .set(2.0);
+        metrics
+            .aggregation_flushes
+            .with_label_values(&[
+                "orders-metrics-1m",
+                labels::AGGREGATION_FLUSH_STATUS_EMITTED,
+            ])
+            .inc();
+        metrics
+            .aggregation_records_emitted
+            .with_label_values(&["orders-metrics-1m"])
+            .inc_by(3.0);
     }
 }

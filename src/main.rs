@@ -126,6 +126,27 @@ async fn main() -> Result<()> {
         )) as Arc<dyn MessageProcessor>
     };
 
+    if let Some(interval_seconds) = aggregation_flush_interval_seconds(&config) {
+        info!(
+            "Starting aggregation completion-check ticker (poll interval: {}s)",
+            interval_seconds
+        );
+
+        let flush_processor = processor.clone();
+        tokio::spawn(async move {
+            let mut ticker = interval(Duration::from_secs(interval_seconds));
+            ticker.tick().await;
+
+            loop {
+                ticker.tick().await;
+
+                if let Err(err) = flush_processor.flush().await {
+                    error!("Aggregation flush failed: {}", err);
+                }
+            }
+        });
+    }
+
     // Create Kafka consumer
     let consumer = create_consumer(&config)?;
 
@@ -575,9 +596,11 @@ async fn build_multi_destination_processor(
 
     for dest in &routing.destinations {
         info!("Setting up destination: {}", dest.output);
+        validate_aggregation_destination(dest)?;
 
         // Create sink
-        let sink = KafkaSink::new(config, dest.output.clone(), dest.partition.clone()).await?;
+        let sink =
+            Arc::new(KafkaSink::new(config, dest.output.clone(), dest.partition.clone()).await?);
 
         // Create filter if specified
         let filter: Option<Arc<dyn Filter>> = if let Some(ref filter_expr) = dest.filter {
@@ -586,40 +609,6 @@ async fn build_multi_destination_processor(
         } else {
             None
         };
-
-        // Parse envelope transforms
-        let mut envelope_transforms: Vec<Arc<dyn EnvelopeTransform>> = Vec::new();
-
-        // Parse key transform if specified
-        if let Some(ref key_transform_expr) = dest.key_transform {
-            info!("  Key transform: {}", key_transform_expr);
-            envelope_transforms.push(parse_key_transform(key_transform_expr)?);
-        }
-
-        // Parse static headers if specified
-        if let Some(ref headers) = dest.headers {
-            info!("  Static headers: {} header(s)", headers.len());
-            envelope_transforms.extend(parse_static_headers(headers));
-        }
-
-        // Parse header transforms if specified
-        if let Some(ref header_transforms) = dest.header_transforms {
-            info!(
-                "  Dynamic header transforms: {} operation(s)",
-                header_transforms.len()
-            );
-            for header_config in header_transforms {
-                let transform =
-                    parse_header_transform(&header_config.header, &header_config.operation)?;
-                envelope_transforms.push(transform);
-            }
-        }
-
-        // Parse timestamp transform if specified
-        if let Some(ref timestamp_expr) = dest.timestamp {
-            info!("  Timestamp transform: {}", timestamp_expr);
-            envelope_transforms.push(parse_timestamp_transform(timestamp_expr)?);
-        }
 
         // Create value transform — cache_manager is threaded through so
         // CACHE_LOOKUP / CACHE_PUT expressions resolve named stores
@@ -634,15 +623,60 @@ async fn build_multi_destination_processor(
             None
         };
 
-        // Create destination processor with envelope transforms
-        let dest_processor = DestinationProcessor::new(
-            Arc::new(sink),
-            filter,
-            envelope_transforms,
-            transform,
-            dest.output.clone(),
-            dest.error_policy, // NEW: per-destination error handling policy
-        );
+        let dest_processor = if let Some(aggregation) = dest.aggregation.clone() {
+            info!(
+                "  Aggregation: {} metric(s), completion check every {}s",
+                aggregation.metrics.len(),
+                aggregation.window.emit_interval_seconds
+            );
+            DestinationProcessor::with_aggregation(
+                sink,
+                filter,
+                transform,
+                aggregation,
+                dest.output.clone(),
+                dest.error_policy,
+            )?
+        } else {
+            // Envelope transforms stay on the immediate-send path only.
+            let mut envelope_transforms: Vec<Arc<dyn EnvelopeTransform>> = Vec::new();
+
+            if let Some(ref key_transform_expr) = dest.key_transform {
+                info!("  Key transform: {}", key_transform_expr);
+                envelope_transforms.push(parse_key_transform(key_transform_expr)?);
+            }
+
+            if let Some(ref headers) = dest.headers {
+                info!("  Static headers: {} header(s)", headers.len());
+                envelope_transforms.extend(parse_static_headers(headers));
+            }
+
+            if let Some(ref header_transforms) = dest.header_transforms {
+                info!(
+                    "  Dynamic header transforms: {} operation(s)",
+                    header_transforms.len()
+                );
+                for header_config in header_transforms {
+                    let transform =
+                        parse_header_transform(&header_config.header, &header_config.operation)?;
+                    envelope_transforms.push(transform);
+                }
+            }
+
+            if let Some(ref timestamp_expr) = dest.timestamp {
+                info!("  Timestamp transform: {}", timestamp_expr);
+                envelope_transforms.push(parse_timestamp_transform(timestamp_expr)?);
+            }
+
+            DestinationProcessor::new(
+                sink,
+                filter,
+                envelope_transforms,
+                transform,
+                dest.output.clone(),
+                dest.error_policy,
+            )
+        };
 
         destinations.push(dest_processor);
     }
@@ -651,6 +685,31 @@ async fn build_multi_destination_processor(
         destinations,
         routing.path.clone(),
     )))
+}
+
+fn validate_aggregation_destination(dest: &streamforge::DestinationConfig) -> Result<()> {
+    if dest.aggregation.is_some() && dest.output.contains("{source_topic}") {
+        return Err(MirrorMakerError::Config(
+            "aggregation destinations do not support output templates containing '{source_topic}'"
+                .to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn aggregation_flush_interval_seconds(config: &MirrorMakerConfig) -> Option<u64> {
+    config
+        .routing
+        .as_ref()?
+        .destinations
+        .iter()
+        .filter_map(|dest| {
+            dest.aggregation
+                .as_ref()
+                .map(|aggregation| aggregation.window.emit_interval_seconds)
+        })
+        .min()
 }
 
 /// Parse Kafka message key into a JSON Value.
@@ -934,6 +993,207 @@ mod tests {
         fn test_default_config_no_cache() {
             let config = create_default_config();
             assert!(config.cache.is_none());
+        }
+    }
+
+    mod aggregation_flush_interval_tests {
+        use super::*;
+
+        #[test]
+        fn test_returns_none_when_no_aggregation_destinations_exist() {
+            let mut config = create_default_config();
+            config.routing = Some(streamforge::RoutingConfig {
+                routing_type: "filter".to_string(),
+                path: None,
+                destinations: vec![streamforge::DestinationConfig {
+                    output: "immediate.topic".to_string(),
+                    match_value: None,
+                    filter: None,
+                    transform: None,
+                    error_policy: Default::default(),
+                    key_transform: None,
+                    headers: None,
+                    header_transforms: None,
+                    timestamp: None,
+                    aggregation: None,
+                    partition: None,
+                    broadcast: false,
+                    description: None,
+                }],
+            });
+
+            assert_eq!(aggregation_flush_interval_seconds(&config), None);
+        }
+
+        #[test]
+        fn test_returns_minimum_emit_interval_across_aggregation_destinations() {
+            let mut config = create_default_config();
+            config.routing = Some(streamforge::RoutingConfig {
+                routing_type: "filter".to_string(),
+                path: None,
+                destinations: vec![
+                    streamforge::DestinationConfig {
+                        output: "immediate.topic".to_string(),
+                        match_value: None,
+                        filter: None,
+                        transform: None,
+                        error_policy: Default::default(),
+                        key_transform: None,
+                        headers: None,
+                        header_transforms: None,
+                        timestamp: None,
+                        aggregation: None,
+                        partition: None,
+                        broadcast: false,
+                        description: None,
+                    },
+                    streamforge::DestinationConfig {
+                        output: "aggregate-slow.topic".to_string(),
+                        match_value: None,
+                        filter: None,
+                        transform: None,
+                        error_policy: Default::default(),
+                        key_transform: None,
+                        headers: None,
+                        header_transforms: None,
+                        timestamp: None,
+                        aggregation: Some(streamforge::AggregationConfig {
+                            group_by: vec![streamforge::AggregationGroupBy {
+                                name: "tenant".to_string(),
+                                path: "/tenant".to_string(),
+                            }],
+                            window: streamforge::AggregationWindowConfig {
+                                window_type: streamforge::AggregationWindowType::Tumbling,
+                                size_seconds: 60,
+                                emit_interval_seconds: 15,
+                            },
+                            metrics: vec![streamforge::AggregationMetricConfig {
+                                name: "count".to_string(),
+                                op: streamforge::AggregationOp::Count,
+                                path: None,
+                                percentiles: None,
+                            }],
+                        }),
+                        partition: None,
+                        broadcast: false,
+                        description: None,
+                    },
+                    streamforge::DestinationConfig {
+                        output: "aggregate-fast.topic".to_string(),
+                        match_value: None,
+                        filter: None,
+                        transform: None,
+                        error_policy: Default::default(),
+                        key_transform: None,
+                        headers: None,
+                        header_transforms: None,
+                        timestamp: None,
+                        aggregation: Some(streamforge::AggregationConfig {
+                            group_by: vec![streamforge::AggregationGroupBy {
+                                name: "tenant".to_string(),
+                                path: "/tenant".to_string(),
+                            }],
+                            window: streamforge::AggregationWindowConfig {
+                                window_type: streamforge::AggregationWindowType::Tumbling,
+                                size_seconds: 60,
+                                emit_interval_seconds: 5,
+                            },
+                            metrics: vec![streamforge::AggregationMetricConfig {
+                                name: "count".to_string(),
+                                op: streamforge::AggregationOp::Count,
+                                path: None,
+                                percentiles: None,
+                            }],
+                        }),
+                        partition: None,
+                        broadcast: false,
+                        description: None,
+                    },
+                ],
+            });
+
+            assert_eq!(aggregation_flush_interval_seconds(&config), Some(5));
+        }
+
+        #[test]
+        fn test_rejects_template_output_for_aggregation_destination() {
+            let destination = streamforge::DestinationConfig {
+                output: "aggregates.{source_topic}".to_string(),
+                match_value: None,
+                filter: None,
+                transform: None,
+                error_policy: Default::default(),
+                key_transform: None,
+                headers: None,
+                header_transforms: None,
+                timestamp: None,
+                aggregation: Some(streamforge::AggregationConfig {
+                    group_by: vec![streamforge::AggregationGroupBy {
+                        name: "tenant".to_string(),
+                        path: "/tenant".to_string(),
+                    }],
+                    window: streamforge::AggregationWindowConfig {
+                        window_type: streamforge::AggregationWindowType::Tumbling,
+                        size_seconds: 60,
+                        emit_interval_seconds: 5,
+                    },
+                    metrics: vec![streamforge::AggregationMetricConfig {
+                        name: "count".to_string(),
+                        op: streamforge::AggregationOp::Count,
+                        path: None,
+                        percentiles: None,
+                    }],
+                }),
+                partition: None,
+                broadcast: false,
+                description: None,
+            };
+
+            let result = validate_aggregation_destination(&destination);
+
+            assert!(result.is_err());
+            assert!(matches!(
+                result.unwrap_err(),
+                MirrorMakerError::Config(message)
+                    if message.contains("aggregation destinations do not support output templates")
+            ));
+        }
+
+        #[test]
+        fn test_allows_fixed_output_for_aggregation_destination() {
+            let destination = streamforge::DestinationConfig {
+                output: "aggregates.fixed".to_string(),
+                match_value: None,
+                filter: None,
+                transform: None,
+                error_policy: Default::default(),
+                key_transform: None,
+                headers: None,
+                header_transforms: None,
+                timestamp: None,
+                aggregation: Some(streamforge::AggregationConfig {
+                    group_by: vec![streamforge::AggregationGroupBy {
+                        name: "tenant".to_string(),
+                        path: "/tenant".to_string(),
+                    }],
+                    window: streamforge::AggregationWindowConfig {
+                        window_type: streamforge::AggregationWindowType::Tumbling,
+                        size_seconds: 60,
+                        emit_interval_seconds: 5,
+                    },
+                    metrics: vec![streamforge::AggregationMetricConfig {
+                        name: "count".to_string(),
+                        op: streamforge::AggregationOp::Count,
+                        path: None,
+                        percentiles: None,
+                    }],
+                }),
+                partition: None,
+                broadcast: false,
+                description: None,
+            };
+
+            assert!(validate_aggregation_destination(&destination).is_ok());
         }
     }
 

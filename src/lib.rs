@@ -1,3 +1,4 @@
+pub mod aggregation;
 pub mod cache;
 pub mod cache_backend;
 pub mod compression;
@@ -18,14 +19,16 @@ pub mod processor;
 pub mod processor_with_retry;
 pub mod retry;
 
+pub use aggregation::{AggregateEmission, AggregationEngine, GroupKey};
 pub use cache::{
     CacheConfig, CacheManager, CacheStats, LookupCache, SyncCacheManager, SyncLookupCache,
 };
 pub use cache_backend::CacheBackend;
 pub use config::{
-    CacheBackendConfig, CacheBackendType, CommitMode, CommitStrategyConfig, DestinationConfig,
-    HeaderTransformConfig, KafkaCacheConfig, LocalCacheConfig, MirrorMakerConfig, RedisCacheConfig,
-    RoutingConfig,
+    AggregationConfig, AggregationGroupBy, AggregationMetricConfig, AggregationOp,
+    AggregationWindowConfig, AggregationWindowType, CacheBackendConfig, CacheBackendType,
+    CommitMode, CommitStrategyConfig, DestinationConfig, HeaderTransformConfig, KafkaCacheConfig,
+    LocalCacheConfig, MirrorMakerConfig, RedisCacheConfig, RoutingConfig,
 };
 pub use dlq::{DeadLetterQueue, DlqConfig, DlqMessage};
 pub use envelope::MessageEnvelope;

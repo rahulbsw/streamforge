@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MirrorMakerConfig {
@@ -196,6 +196,53 @@ pub struct RoutingConfig {
     pub destinations: Vec<DestinationConfig>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AggregationConfig {
+    pub group_by: Vec<AggregationGroupBy>,
+    pub window: AggregationWindowConfig,
+    pub metrics: Vec<AggregationMetricConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AggregationGroupBy {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AggregationWindowConfig {
+    #[serde(rename = "type")]
+    pub window_type: AggregationWindowType,
+    pub size_seconds: u64,
+    pub emit_interval_seconds: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AggregationWindowType {
+    Tumbling,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AggregationMetricConfig {
+    pub name: String,
+    pub op: AggregationOp,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub percentiles: Option<Vec<f64>>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AggregationOp {
+    Count,
+    Sum,
+    Avg,
+    ApproxDistinct,
+    Quantiles,
+}
+
 /// Error handling policy for filter/transform failures
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -310,6 +357,9 @@ pub struct DestinationConfig {
     #[serde(default)]
     pub timestamp: Option<String>,
 
+    #[serde(default)]
+    pub aggregation: Option<AggregationConfig>,
+
     /// Partition field JSON path
     pub partition: Option<String>,
 
@@ -343,6 +393,10 @@ fn default_offset() -> String {
 
 fn default_threads() -> usize {
     4
+}
+
+fn config_error(message: impl Into<String>) -> crate::error::MirrorMakerError {
+    crate::error::MirrorMakerError::Config(message.into())
 }
 
 impl Default for CompressionConfig {
@@ -576,7 +630,7 @@ impl MirrorMakerConfig {
         let content = std::fs::read_to_string(path)?;
 
         // Detect format based on file extension
-        let config = if path.ends_with(".yaml") || path.ends_with(".yml") {
+        let config: Self = if path.ends_with(".yaml") || path.ends_with(".yml") {
             serde_yaml::from_str(&content).map_err(|e| {
                 crate::error::MirrorMakerError::Config(format!("YAML parse error: {}", e))
             })?
@@ -587,7 +641,42 @@ impl MirrorMakerConfig {
             })?
         };
 
+        config.validate()?;
+
         Ok(config)
+    }
+
+    pub fn validate(&self) -> crate::Result<()> {
+        if let Some(routing) = &self.routing {
+            for dest in &routing.destinations {
+                if let Some(aggregation) = &dest.aggregation {
+                    if self.commit_strategy.manual_commit {
+                        return Err(config_error(
+                            "aggregation destinations do not support commit_strategy.manual_commit=true in v1",
+                        ));
+                    }
+
+                    if dest.key_transform.is_some() {
+                        return Err(config_error(
+                            "aggregation destinations cannot use key_transform",
+                        ));
+                    }
+
+                    if dest.headers.is_some()
+                        || dest.header_transforms.is_some()
+                        || dest.timestamp.is_some()
+                    {
+                        return Err(config_error(
+                            "aggregation destinations cannot use header or timestamp transforms in v1",
+                        ));
+                    }
+
+                    aggregation.validate()?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn get_target_broker(&self) -> String {
@@ -658,6 +747,139 @@ impl MirrorMakerConfig {
                     client_config.set("sasl.oauthbearer.token", token);
                 }
             }
+        }
+    }
+}
+
+impl AggregationConfig {
+    fn validate(&self) -> crate::Result<()> {
+        if self.group_by.is_empty() {
+            return Err(config_error("group_by cannot be empty"));
+        }
+
+        if self.metrics.is_empty() {
+            return Err(config_error("metrics cannot be empty"));
+        }
+
+        for group_by in &self.group_by {
+            group_by.validate()?;
+        }
+
+        self.window.validate()?;
+
+        for metric in &self.metrics {
+            metric.validate()?;
+        }
+
+        Ok(())
+    }
+}
+
+impl AggregationGroupBy {
+    fn validate(&self) -> crate::Result<()> {
+        if self.name.trim().is_empty() {
+            return Err(config_error("group_by entries require non-empty name"));
+        }
+
+        if self.path.trim().is_empty() {
+            return Err(config_error("group_by entries require non-empty path"));
+        }
+
+        Ok(())
+    }
+}
+
+impl AggregationWindowConfig {
+    fn validate(&self) -> crate::Result<()> {
+        if self.size_seconds == 0 {
+            return Err(config_error("window size_seconds must be > 0"));
+        }
+
+        if self.emit_interval_seconds == 0 || self.emit_interval_seconds > self.size_seconds {
+            return Err(config_error(
+                "window emit_interval_seconds must be > 0 and <= size_seconds",
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl AggregationMetricConfig {
+    fn validate(&self) -> crate::Result<()> {
+        if self.op.requires_path() {
+            match self.path.as_deref().map(str::trim) {
+                Some(path) if !path.is_empty() => {}
+                _ => {
+                    return Err(config_error(format!(
+                        "{} metrics require path",
+                        self.op.as_str()
+                    )));
+                }
+            }
+        }
+
+        if matches!(self.op, AggregationOp::Quantiles) {
+            validate_quantile_percentiles(&self.name, self.percentiles.as_ref())?;
+        }
+
+        Ok(())
+    }
+}
+
+fn validate_quantile_percentiles(name: &str, percentiles: Option<&Vec<f64>>) -> crate::Result<()> {
+    let percentiles =
+        percentiles.ok_or_else(|| config_error("quantiles metrics require percentiles"))?;
+    if percentiles.is_empty() {
+        return Err(config_error("quantiles metrics require percentiles"));
+    }
+
+    let mut keys = HashSet::new();
+    for percentile in percentiles {
+        if !percentile.is_finite() {
+            return Err(config_error(format!(
+                "quantiles metric '{}' has non-finite percentile",
+                name
+            )));
+        }
+        if !(0.0..=1.0).contains(percentile) {
+            return Err(config_error(format!(
+                "quantiles metric '{}' percentile must be in [0.0, 1.0], got {}",
+                name, percentile
+            )));
+        }
+
+        let key = quantile_percentile_key(*percentile);
+        if !keys.insert(key.clone()) {
+            return Err(config_error(format!(
+                "quantiles metric '{}' contains duplicate percentile key '{}'",
+                name, key
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn quantile_percentile_key(percentile: f64) -> String {
+    format!("p{}", percentile)
+}
+
+impl AggregationOp {
+    fn requires_path(self) -> bool {
+        matches!(
+            self,
+            Self::Sum | Self::Avg | Self::ApproxDistinct | Self::Quantiles
+        )
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Count => "count",
+            Self::Sum => "sum",
+            Self::Avg => "avg",
+            Self::ApproxDistinct => "approx_distinct",
+            Self::Quantiles => "quantiles",
         }
     }
 }

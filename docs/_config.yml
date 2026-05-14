@@ -55,6 +55,11 @@ defaults:
     values:
       has_children: true
   - scope:
+      path: "AGGREGATIONS.md"
+    values:
+      parent: "Usage Guide"
+      nav_order: 2
+  - scope:
       path: "ADVANCED_DSL_GUIDE.md"
     values:
       parent: "Usage Guide"

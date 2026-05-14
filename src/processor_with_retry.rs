@@ -149,6 +149,10 @@ impl MessageProcessor for ProcessorWithRetry {
     async fn process(&self, envelope: MessageEnvelope) -> Result<()> {
         self.process_with_retry(envelope).await
     }
+
+    async fn flush(&self) -> Result<()> {
+        self.processor.flush().await
+    }
 }
 
 #[cfg(test)]
@@ -156,10 +160,11 @@ mod tests {
     use super::*;
     use crate::{DlqConfig, RetryConfig};
     use serde_json::json;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     struct MockProcessor {
         fail_count: Arc<AtomicU32>,
+        flush_called: Arc<AtomicBool>,
         error_to_return: Option<MirrorMakerError>,
     }
 
@@ -177,12 +182,18 @@ mod tests {
 
             Ok(())
         }
+
+        async fn flush(&self) -> Result<()> {
+            self.flush_called.store(true, Ordering::SeqCst);
+            Ok(())
+        }
     }
 
     #[tokio::test]
     async fn test_process_succeeds_immediately() {
         let mock = Arc::new(MockProcessor {
             fail_count: Arc::new(AtomicU32::new(0)),
+            flush_called: Arc::new(AtomicBool::new(false)),
             error_to_return: None,
         });
 
@@ -210,6 +221,7 @@ mod tests {
     async fn test_process_succeeds_after_retry() {
         let mock = Arc::new(MockProcessor {
             fail_count: Arc::new(AtomicU32::new(0)),
+            flush_called: Arc::new(AtomicBool::new(false)),
             error_to_return: Some(MirrorMakerError::KafkaProducer {
                 message: "Queue full".into(),
                 destination: None,
@@ -242,6 +254,7 @@ mod tests {
     async fn test_fatal_error_fails_fast() {
         let mock = Arc::new(MockProcessor {
             fail_count: Arc::new(AtomicU32::new(0)),
+            flush_called: Arc::new(AtomicBool::new(false)),
             error_to_return: Some(MirrorMakerError::Config("Bad config".into())),
         });
 
@@ -272,6 +285,7 @@ mod tests {
     async fn test_message_error_goes_to_dlq() {
         let mock = Arc::new(MockProcessor {
             fail_count: Arc::new(AtomicU32::new(0)),
+            flush_called: Arc::new(AtomicBool::new(false)),
             error_to_return: Some(MirrorMakerError::FilterEvaluation {
                 message: "Filter failed".into(),
                 filter: "/status,==,active".into(),
@@ -311,5 +325,32 @@ mod tests {
             result.unwrap_err(),
             MirrorMakerError::FilterEvaluation { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn test_flush_forwards_to_wrapped_processor() {
+        let mock = Arc::new(MockProcessor {
+            fail_count: Arc::new(AtomicU32::new(0)),
+            flush_called: Arc::new(AtomicBool::new(false)),
+            error_to_return: None,
+        });
+
+        let retry_config = RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 10,
+            ..Default::default()
+        };
+
+        let processor = ProcessorWithRetry::new(
+            mock.clone(),
+            RetryPolicy::new(retry_config),
+            None,
+            "test-pipeline".to_string(),
+        );
+
+        let result = processor.flush().await;
+
+        assert!(result.is_ok());
+        assert!(mock.flush_called.load(Ordering::SeqCst));
     }
 }
