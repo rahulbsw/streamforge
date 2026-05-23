@@ -13,16 +13,22 @@
 
 StreamForge helps data teams move only the records and fields downstream systems actually need. Instead of mirroring whole topics, StreamForge lets you filter, reshape, redact, and route messages before they land in analytics, lake, or lower-trust environments.
 
-**[5-Minute Demo](#5-minute-demo)** | **[When to Use StreamForge](#when-to-use-streamforge)** | **[Compatibility](#compatibility)** | **[Documentation Index](docs/DOCUMENTATION_INDEX.md)**
-
----
-
 ## Why Teams Use StreamForge
 
 - Replicate only analytics-safe fields instead of whole topics
 - Split one source topic into multiple downstream topics
 - Hash or drop PII before data crosses trust boundaries
 - Keep the deployment surface small with a single binary, operator, and Helm chart
+
+## Watch StreamForge Deploy on Minikube
+
+[![StreamForge UI demo on Minikube](docs/assets/demo/ui-minikube-demo-readme.gif)](docs/UI_MINIKUBE_DEMO.md)
+
+This UI-driven demo shows the path most teams actually want to see first: install with Helm, create a pipeline in the browser, review the generated YAML, deploy the CRD, then verify transformed output on Kafka.
+
+**[UI Demo](docs/UI_MINIKUBE_DEMO.md)** | **[5-Minute CLI Demo](#5-minute-demo)** | **[Examples](examples/README.md)** | **[Compatibility](#compatibility)** | **[Documentation Index](docs/DOCUMENTATION_INDEX.md)**
+
+---
 
 ## When to Use StreamForge
 
@@ -55,6 +61,8 @@ For concrete usage patterns and configs, see [docs/USAGE.md](docs/USAGE.md) and 
    ```
    Leave StreamForge running in this terminal.
 4. Open a second terminal and follow [docs/QUICKSTART.md](docs/QUICKSTART.md) to create the demo topics, produce a sample order, and inspect `analytics-orders` and `pii-safe-orders`.
+
+If you want the Kubernetes + UI path instead of the local CLI path, use [docs/UI_MINIKUBE_DEMO.md](docs/UI_MINIKUBE_DEMO.md).
 
 ## Production Trust Signals
 
