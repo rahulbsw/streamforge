@@ -491,6 +491,8 @@ helm upgrade streamforge-operator ./helm/streamforge-operator \
 
 ⚠️ **Change these in production!**
 
+See [UI Demo on Minikube](UI_MINIKUBE_DEMO.md) for a full recorded walkthrough of the Helm install, UI pipeline creation, YAML preview, and transformed output verification.
+
 **UI Configuration:**
 
 ```yaml

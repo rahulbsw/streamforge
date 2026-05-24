@@ -12,6 +12,7 @@ StreamForge helps data teams filter, transform, redact, and route records betwee
 ## Get Started
 
 - [Quickstart](QUICKSTART.md) - Run the five-minute selective replication demo
+- [UI Demo on Minikube](UI_MINIKUBE_DEMO.md) - Deploy with Helm, create a pipeline in the UI, and verify transformed output
 - [Examples](EXAMPLES.md) - Browse validated demo and production configs
 
 ## Build Pipelines
