@@ -1,4 +1,4 @@
-# GitHub Automation and Community Config
+# GitHub Maintainer Config
 
 This directory holds repository automation and contribution metadata for StreamForge.
 
