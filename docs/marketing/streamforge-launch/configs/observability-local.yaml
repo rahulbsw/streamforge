@@ -1,0 +1,54 @@
+# Local recording config for Demo 7: observability and scaling.
+# Uses one local Redpanda broker, multiple partitions, and field-based routing
+# so metrics, filtering, lag, and partition-aware scaling are easy to show.
+
+appid: "observability-demo"
+bootstrap: "localhost:9092"
+input: "observability-orders"
+offset: "earliest"
+threads: 4
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 2000
+
+retry:
+  max_attempts: 3
+  initial_delay_ms: 100
+  max_delay_ms: 30000
+  multiplier: 2.0
+  jitter: 0.1
+
+dlq:
+  enabled: true
+  topic: "observability-dlq"
+  include_original_headers: true
+  include_stack_trace: false
+  max_dlq_retries: 3
+
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "premium-events"
+      filter: "/customer/tier,==,premium"
+      transform: "CONSTRUCT:order_id=/order_id:customer_id=/customer/id:tier=/customer/tier:amount=/amount:region=/region:created_at=/created_at"
+      key_transform: "/customer/id"
+      headers:
+        x-pipeline: "observability-demo"
+        x-segment: "premium"
+
+    - output: "standard-events"
+      filter: "NOT:/customer/tier,==,premium"
+      transform: "CONSTRUCT:order_id=/order_id:customer_id=/customer/id:tier=/customer/tier:amount=/amount:region=/region:created_at=/created_at"
+      key_transform: "/customer/id"
+      headers:
+        x-pipeline: "observability-demo"
+        x-segment: "standard"
+
+observability:
+  metrics_enabled: true
+  metrics_port: 9090
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 5

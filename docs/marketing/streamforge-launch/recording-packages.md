@@ -907,20 +907,99 @@ eksctl delete cluster --name streamforge-demo --region us-west-2
 
 **Screen Plan:**
 
-1. Show config with observability enabled.
+1. Show `docs/marketing/streamforge-launch/configs/observability-local.yaml`.
 2. Start StreamForge.
-3. Curl health and metrics endpoints.
-4. Generate traffic.
+3. Curl health and initial metrics endpoints.
+4. Generate keyed traffic across three source partitions.
 5. Show consumed, produced, filtered, error, latency, and lag metrics.
-6. Discuss partition-aware scaling.
-7. Show retry and DLQ notes or a controlled failure if the environment is prepared.
+6. Discuss partition-aware scaling and key distribution.
+7. Show retry and DLQ configuration; keep the recording to a clean run unless a controlled failure is prepared.
 
 **Terminal Commands:**
 
+Pre-build before recording:
+
 ```bash
-CONFIG_FILE=examples/config.with-observability.yaml cargo run --release --bin streamforge
+cargo run --quiet --bin streamforge-validate -- docs/marketing/streamforge-launch/configs/observability-local.yaml
+cargo build --release --bin streamforge
+```
+
+Main recording commands:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml up -d
+docker compose -f examples/redpanda/docker-compose.yml ps
+```
+
+In a second terminal, reset and create three-partition topics:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic delete observability-orders premium-events standard-events observability-dlq || true
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic create observability-orders -p 3
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic create premium-events -p 3
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic create standard-events -p 3
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic create observability-dlq -p 3
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic describe observability-orders
+```
+
+Back in the first terminal:
+
+```bash
+CONFIG_FILE=docs/marketing/streamforge-launch/configs/observability-local.yaml ./target/release/streamforge
+```
+
+Capture the zero-traffic baseline:
+
+```bash
 curl http://localhost:9090/health
-curl http://localhost:9090/metrics
+curl http://localhost:9090/metrics | rg "streamforge_messages_(consumed|produced|filtered)|streamforge_filter_evaluations_total"
+```
+
+Produce keyed traffic:
+
+```bash
+printf '%s\n' \
+  'cust-premium-1 {"order_id":"obs-1001","customer":{"id":"cust-premium-1","tier":"premium"},"amount":125,"region":"us","created_at":"2026-05-25T21:30:01Z"}' \
+  'cust-standard-1 {"order_id":"obs-1002","customer":{"id":"cust-standard-1","tier":"standard"},"amount":64,"region":"us","created_at":"2026-05-25T21:30:02Z"}' \
+  'cust-premium-2 {"order_id":"obs-1003","customer":{"id":"cust-premium-2","tier":"premium"},"amount":250,"region":"eu","created_at":"2026-05-25T21:30:03Z"}' \
+  'cust-standard-2 {"order_id":"obs-1004","customer":{"id":"cust-standard-2","tier":"standard"},"amount":80,"region":"apac","created_at":"2026-05-25T21:30:04Z"}' \
+  'cust-premium-3 {"order_id":"obs-1005","customer":{"id":"cust-premium-3","tier":"premium"},"amount":310,"region":"us","created_at":"2026-05-25T21:30:05Z"}' \
+  'cust-standard-3 {"order_id":"obs-1006","customer":{"id":"cust-standard-3","tier":"standard"},"amount":42,"region":"eu","created_at":"2026-05-25T21:30:06Z"}' \
+  | docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+      rpk topic produce observability-orders -f '%k %v{json}\n'
+```
+
+Consume outputs:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume premium-events -n 3 --offset start
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume standard-events -n 3 --offset start
+```
+
+Capture final metrics after one lag interval:
+
+```bash
+curl http://localhost:9090/metrics | rg "streamforge_messages_(consumed|produced|filtered)|streamforge_filter_evaluations_total|streamforge_consumer_(lag|offset|high_watermark)|streamforge_processing_duration_seconds_(count|sum)|streamforge_messages_in_flight"
+```
+
+Cleanup:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml down
 ```
 
 Prometheus queries to prepare:
@@ -936,9 +1015,11 @@ histogram_quantile(0.99, rate(streamforge_processing_duration_seconds_bucket[5m]
 
 - Health endpoint responds.
 - Metrics endpoint exposes StreamForge counters/gauges/histograms.
-- Traffic changes consumed and produced metrics.
-- Consumer lag is visible.
-- Scaling discussion is tied to Kafka partitions and consumer groups.
+- Traffic changes consumed, produced, filtered, and filter-evaluation metrics.
+- Consumer lag is visible per source partition.
+- Source and destination topics have three partitions.
+- Scaling discussion is tied to Kafka partitions, key distribution, and consumer groups.
+- DLQ and retry are configured; the clean run shows zero error-filtered messages.
 
 **Human Audio Script:**
 
@@ -960,3 +1041,24 @@ histogram_quantile(0.99, rate(streamforge_processing_duration_seconds_bucket[5m]
 - Pinned comment: `Start with docs/OBSERVABILITY_QUICKSTART.md for metrics and lag monitoring. Scale replicas with Kafka partition count in mind.`
 
 **Publish Copy:** Use Demo 7 from `social-posts.md`.
+
+**Dry-Run Result: 2026-05-25**
+
+- `docs/marketing/streamforge-launch/configs/observability-local.yaml` validation passed with two destinations and no warnings.
+- Redpanda started from `examples/redpanda/docker-compose.yml`.
+- Created `observability-orders`, `premium-events`, `standard-events`, and `observability-dlq` with three partitions each.
+- StreamForge started cleanly from `./target/release/streamforge`.
+- Initial health endpoint returned `OK`.
+- Initial metrics showed consumed, produced, filtered, and filter-evaluation counters at `0`.
+- Produced six keyed records to `observability-orders`; records landed across source partitions `0`, `1`, and `2`.
+- `premium-events` received three records for `cust-premium-1`, `cust-premium-2`, and `cust-premium-3`.
+- `standard-events` received three records for `cust-standard-1`, `cust-standard-2`, and `cust-standard-3`.
+- Final metrics showed `streamforge_messages_consumed_total 6`.
+- Final metrics showed produced counts of `3` for `premium-events` and `3` for `standard-events`.
+- Final metrics showed filter pass/fail counts of `3/3` for each destination.
+- Final metrics showed `streamforge_messages_filtered_total{reason="filter_failed"} 3` for each destination and `reason="error"` at `0`.
+- Final lag gauges showed partition `0` lag `0`, partition `1` lag `0`, and partition `2` lag `0`.
+- Final metrics showed `streamforge_messages_in_flight 0`.
+- Final metrics exposed processing duration histogram counts and sums for both destinations.
+- `observability-dlq` was created and ready; no controlled failure was injected during this clean recording run.
+- If `streamforge-validate` prints `xcrun` cache warnings on macOS, treat those as local toolchain noise when validation still exits `0`.
