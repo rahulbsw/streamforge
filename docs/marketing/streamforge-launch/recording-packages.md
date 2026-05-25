@@ -527,27 +527,85 @@ docker compose -f examples/redpanda/docker-compose.yml down
 
 1. Show a Debezium-style CDC envelope.
 2. Show `examples/production/cdc-to-datalake.yaml`.
-3. Explain create/update/delete extraction.
-4. Validate config.
-5. Run StreamForge.
-6. Produce sample CDC records.
-7. Consume shaped outputs.
+3. Show `docs/marketing/streamforge-launch/configs/cdc-to-datalake-local.yaml` for the local recording.
+4. Explain create/update/delete/schema-change routing.
+5. Validate both configs.
+6. Run StreamForge.
+7. Produce sample CDC records.
+8. Consume shaped outputs.
 
 **Terminal Commands:**
 
+Pre-build before recording:
+
 ```bash
 cargo run --quiet --bin streamforge-validate -- examples/production/cdc-to-datalake.yaml
-CONFIG_FILE=examples/production/cdc-to-datalake.yaml cargo run --release --bin streamforge
+cargo run --quiet --bin streamforge-validate -- docs/marketing/streamforge-launch/configs/cdc-to-datalake-local.yaml
+cargo build --release --bin streamforge
 ```
 
-Use local Redpanda commands for topic creation and event production if recording locally.
+Main recording commands:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml up -d
+docker compose -f examples/redpanda/docker-compose.yml ps
+```
+
+In a second terminal, reset and create topics before starting StreamForge:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic delete dbserver.inventory.orders datalake-orders \
+    datalake-orders-deleted datalake-schema-changes cdc-datalake-dlq || true
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic create dbserver.inventory.orders datalake-orders \
+    datalake-orders-deleted datalake-schema-changes cdc-datalake-dlq
+```
+
+Back in the first terminal:
+
+```bash
+CONFIG_FILE=docs/marketing/streamforge-launch/configs/cdc-to-datalake-local.yaml ./target/release/streamforge
+```
+
+Continue in the second terminal:
+
+```bash
+printf '%s\n' \
+  '{"payload":{"op":"c","ts_ms":1779742500000,"after":{"id":"ord-2001","customer_id":"cust-101","status":"created","amount":199.5,"updated_at":"2026-05-25T21:05:00Z"},"before":null,"source":{"db":"inventory","table":"orders"}}}' \
+  '{"payload":{"op":"u","ts_ms":1779742560000,"after":{"id":"ord-2001","customer_id":"cust-101","status":"paid","amount":199.5,"updated_at":"2026-05-25T21:06:00Z"},"before":{"id":"ord-2001","customer_id":"cust-101","status":"created","amount":199.5,"updated_at":"2026-05-25T21:05:00Z"},"source":{"db":"inventory","table":"orders"}}}' \
+  '{"payload":{"op":"d","ts_ms":1779742620000,"after":null,"before":{"id":"ord-2002","customer_id":"cust-202","status":"cancelled","amount":49.95,"updated_at":"2026-05-25T21:07:00Z"},"source":{"db":"inventory","table":"orders"}}}' \
+  '{"payload":{"op":"s","ts_ms":1779742680000,"ddl":"ALTER TABLE orders ADD COLUMN coupon_code VARCHAR(32)","source":{"db":"inventory","table":"orders"}}}' \
+  | docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+      rpk topic produce dbserver.inventory.orders
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume datalake-orders -n 2 --offset start
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume datalake-orders-deleted -n 1 --offset start
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume datalake-schema-changes -n 1 --offset start
+
+curl http://localhost:8080/health
+curl http://localhost:8080/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
+```
+
+Cleanup:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml down
+```
 
 **Expected Proof Points:**
 
-- Config validates.
-- CDC envelope is transformed into a cleaner downstream shape.
-- Create/update records use the after-state payload.
-- Delete records use the before-state payload when demonstrated.
+- Production and local CDC configs validate.
+- Create and update records route to `datalake-orders` and emit only the `payload.after` row.
+- Delete records route to `datalake-orders-deleted` and emit `id` plus `deleted_at`.
+- Schema-change records route to `datalake-schema-changes`.
+- Metrics show four consumed source messages, two produced lake order rows, one produced delete row, one produced schema-change row, and zero lag.
 - Viewer understands the lake sink remains separate from StreamForge.
 
 **Human Audio Script:**
@@ -568,6 +626,43 @@ Use local Redpanda commands for topic creation and event production if recording
 - Pinned comment: `The reference config is examples/production/cdc-to-datalake.yaml. This demo focuses on Kafka-side shaping, not lake sink configuration.`
 
 **Publish Copy:** Use Demo 4 from `social-posts.md`.
+
+**Dry-Run Result: 2026-05-25**
+
+- `examples/production/cdc-to-datalake.yaml` validation passed.
+- `docs/marketing/streamforge-launch/configs/cdc-to-datalake-local.yaml` validation passed with three destinations and no warnings.
+- The dry run caught and fixed a config issue in the production example: `EXTRACT:/payload/after,order` validated but did not transform at runtime because the supported extraction syntax is `/payload/after`.
+- Redpanda started from `examples/redpanda/docker-compose.yml`.
+- The five CDC demo topics were reset and recreated before producing sample events.
+- StreamForge started cleanly from `./target/release/streamforge`.
+- Produced four sample CDC events at `dbserver.inventory.orders` offsets `0` through `3`.
+- `datalake-orders` received the create row with key `ord-2001`:
+
+```json
+{"amount":199.5,"customer_id":"cust-101","id":"ord-2001","status":"created","updated_at":"2026-05-25T21:05:00Z"}
+```
+
+- `datalake-orders` received the update row with key `ord-2001`:
+
+```json
+{"amount":199.5,"customer_id":"cust-101","id":"ord-2001","status":"paid","updated_at":"2026-05-25T21:06:00Z"}
+```
+
+- `datalake-orders-deleted` received the delete row with key `ord-2002`:
+
+```json
+{"deleted_at":1779742620000,"id":"ord-2002"}
+```
+
+- `datalake-schema-changes` received the schema-change payload:
+
+```json
+{"ddl":"ALTER TABLE orders ADD COLUMN coupon_code VARCHAR(32)","op":"s","source":{"db":"inventory","table":"orders"},"ts_ms":1779742680000}
+```
+
+- Health endpoint returned `OK`.
+- Metrics showed `streamforge_messages_consumed_total 4`, produced counts of `2` for `datalake-orders`, `1` for `datalake-orders-deleted`, `1` for `datalake-schema-changes`, and `streamforge_consumer_lag` at `0`.
+- If `streamforge-validate` prints `xcrun` cache warnings on macOS, treat those as local toolchain noise when validation still exits `0`.
 
 ## Package 5: AI-Ready Event Stream
 
