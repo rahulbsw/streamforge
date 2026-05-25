@@ -372,35 +372,98 @@ kubectl delete namespace redpanda
 
 1. Show a raw event with customer identifiers.
 2. Show `examples/production/pii-redaction.yaml`.
-3. Validate the config.
-4. Run StreamForge.
-5. Produce the raw event.
-6. Consume the safer downstream topic.
-7. Point out absent raw PII.
+3. Show `docs/marketing/streamforge-launch/configs/pii-redaction-local.yaml` for the local recording.
+4. Validate both configs.
+5. Run StreamForge.
+6. Produce the raw event.
+7. Consume analytics, marketing, third-party, and compliance outputs.
+8. Point out where raw email, name, and IP are absent, and where full internal compliance data is intentionally retained.
 
 **Terminal Commands:**
 
+Pre-build before recording:
+
 ```bash
 cargo run --quiet --bin streamforge-validate -- examples/production/pii-redaction.yaml
-CONFIG_FILE=examples/production/pii-redaction.yaml cargo run --release --bin streamforge
+cargo run --quiet --bin streamforge-validate -- docs/marketing/streamforge-launch/configs/pii-redaction-local.yaml
+cargo build --release --bin streamforge
 ```
 
-Use broker-specific topic creation and produce/consume commands for the selected environment. For local recording, adapt the Redpanda commands from Package 1.
+Main recording commands:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml up -d
+docker compose -f examples/redpanda/docker-compose.yml ps
+```
+
+In a second terminal, reset and create topics before starting StreamForge:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic delete user-events-raw user-events-analytics user-events-marketing \
+    events-third-party user-events-compliance pii-redaction-dlq || true
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic create user-events-raw user-events-analytics user-events-marketing \
+    events-third-party user-events-compliance pii-redaction-dlq
+```
+
+Back in the first terminal:
+
+```bash
+CONFIG_FILE=docs/marketing/streamforge-launch/configs/pii-redaction-local.yaml ./target/release/streamforge
+```
+
+Continue in the second terminal:
+
+```bash
+printf '%s\n' \
+  '{"event_type":"account_created","timestamp":"2026-05-25T21:00:00Z","region":"us","device_type":"ios","email":"alice@example.com","user":{"id":"user-42","email":"alice@example.com","name":"Alice Example"},"consent":{"marketing":true,"third_party":true},"properties":{"non_pii":{"plan":"pro","source":"mobile"},"pii":{"ip":"203.0.113.10"}},"data":{"user_id":"user-42","email":"alice@example.com","name":"Alice Example","event_type":"account_created","region":"us"}}' \
+  | docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+      rpk topic produce user-events-raw
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume user-events-analytics -n 1 --offset start
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume user-events-marketing -n 1 --offset start
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume events-third-party -n 1 --offset start
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume user-events-compliance -n 1 --offset start
+
+curl http://localhost:8080/health
+curl http://localhost:8080/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
+```
+
+Cleanup:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml down
+```
 
 **Expected Proof Points:**
 
-- PII redaction config validates.
+- Production PII redaction config validates unchanged.
+- Local recording config validates and points at `localhost:9092`.
 - Raw event contains sensitive fields.
-- Destination output contains only approved fields.
-- Raw email or direct customer identifier is removed or hashed according to the config.
+- Analytics output contains only approved analytics fields and uses a SHA-256 user ID key.
+- Marketing output contains only event metadata and uses an MD5 email hash key.
+- Third-party output contains only event type and `properties.non_pii`.
+- Compliance output intentionally contains full internal compliance data.
+- Raw email, raw name, and IP address are absent from the analytics, marketing, and third-party values.
 
 **Human Audio Script:**
 
 "Operational topics often contain more than analytics systems should receive."
 
-"This config is explicit about what leaves the source boundary. It filters the event, projects approved fields, and avoids sending raw identifiers where they are not needed."
+"This config is explicit about what leaves the source boundary. It filters the event, projects approved fields, and keeps raw email, name, and IP out of the lower-trust outputs."
 
 "Projection is safer than relying on every downstream consumer to ignore fields."
+
+"There is also a compliance destination. That one keeps the fuller internal payload, which is useful for audit or regulated workflows, but it is separate from analytics and third-party outputs."
 
 "StreamForge does not replace governance, access control, or audit logs. It gives data teams a concrete enforcement point in the Kafka path."
 
@@ -412,6 +475,47 @@ Use broker-specific topic creation and produce/consume commands for the selected
 - Pinned comment: `The production example is examples/production/pii-redaction.yaml. Review your own governance requirements before using any data minimization pattern in production.`
 
 **Publish Copy:** Use Demo 3 from `social-posts.md`.
+
+**Dry-Run Result: 2026-05-25**
+
+- `examples/production/pii-redaction.yaml` validation passed unchanged.
+- `docs/marketing/streamforge-launch/configs/pii-redaction-local.yaml` validation passed with four destinations and no warnings.
+- Redpanda started from `examples/redpanda/docker-compose.yml`.
+- The six demo topics were reset and recreated before producing the sample event.
+- StreamForge started cleanly from `./target/release/streamforge`.
+- Produced sample event at `user-events-raw` offset `0`.
+- `user-events-analytics` output key was SHA-256 hash `6d894aa3ee802549d7f340e7c1cf0d1c1cb14cd84f768d92ffaa6785337c4997`.
+- `user-events-analytics` output value:
+
+```json
+{"device":"ios","event_type":"account_created","region":"us","timestamp":"2026-05-25T21:00:00Z","user_id":"user-42"}
+```
+
+- `user-events-marketing` output key was MD5 hash `c160f8cc69a4f0bf2b0362752353d060`.
+- `user-events-marketing` output value:
+
+```json
+{"anonymous_id":"user-42","event":"account_created","timestamp":"2026-05-25T21:00:00Z"}
+```
+
+- `events-third-party` output key was SHA-256 hash `6d894aa3ee802549d7f340e7c1cf0d1c1cb14cd84f768d92ffaa6785337c4997`.
+- `events-third-party` output value:
+
+```json
+{"event":"account_created","properties":{"plan":"pro","source":"mobile"}}
+```
+
+- `user-events-compliance` output key was `user-42`.
+- `user-events-compliance` output value:
+
+```json
+{"email":"alice@example.com","event_type":"account_created","name":"Alice Example","region":"us","user_id":"user-42"}
+```
+
+- Health endpoint returned `OK`.
+- Metrics showed `streamforge_messages_consumed_total 1`, one produced message for each destination, and `streamforge_consumer_lag` at `0`.
+- External values verified absent raw `alice@example.com`, `Alice Example`, and `203.0.113.10` in analytics, marketing, and third-party topics.
+- If `streamforge-validate` prints `xcrun` cache warnings on macOS, treat those as local toolchain noise when validation still exits `0`.
 
 ## Package 4: CDC to Data Lake Pipeline
 

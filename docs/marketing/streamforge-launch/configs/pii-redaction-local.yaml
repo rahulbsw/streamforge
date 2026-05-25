@@ -1,0 +1,77 @@
+# Local recording config for Demo 3: PII-safe data engineering pipeline.
+# This mirrors the production PII-redaction example but points at localhost
+# and starts from earliest offsets so a clean local recording is deterministic.
+
+appid: "pii-redaction-demo"
+bootstrap: "localhost:9092"
+input: "user-events-raw"
+offset: "earliest"
+threads: 2
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 2000
+
+retry:
+  max_attempts: 3
+  initial_delay_ms: 100
+  max_delay_ms: 30000
+  multiplier: 2.0
+  jitter: 0.1
+
+dlq:
+  enabled: true
+  topic: "pii-redaction-dlq"
+  include_original_headers: true
+  include_stack_trace: false
+  max_dlq_retries: 3
+
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "user-events-analytics"
+      filter: "REGEX:/user/id,.+"
+      transform: "CONSTRUCT:user_id=/user/id:event_type=/event_type:timestamp=/timestamp:region=/region:device=/device_type"
+      key_transform: "HASH:SHA256,/user/id"
+      headers:
+        x-pipeline: "pii-redaction-demo"
+        x-destination: "analytics"
+        x-redacted: "true"
+
+    # Current runtime parser cannot safely hash email into a value field while also
+    # constructing a new payload that drops the raw source email. Preserve an opaque
+    # app-level pseudonymous identifier in the value, and use the hashed email as the key.
+    - output: "user-events-marketing"
+      filter: "/consent/marketing,==,true"
+      transform: "CONSTRUCT:anonymous_id=/user/id:event=/event_type:timestamp=/timestamp"
+      key_transform: "HASH:MD5,/email"
+      headers:
+        x-pipeline: "pii-redaction-demo"
+        x-destination: "marketing"
+        x-consent: "marketing"
+
+    - output: "events-third-party"
+      filter: "/consent/third_party,==,true"
+      transform: "CONSTRUCT:event=/event_type:properties=/properties/non_pii"
+      key_transform: "HASH:SHA256,/user/id"
+      headers:
+        x-pipeline: "pii-redaction-demo"
+        x-destination: "third-party"
+        x-pii: "redacted"
+
+    - output: "user-events-compliance"
+      filter: "OR:/event_type,==,account_created:/event_type,==,account_deleted:/event_type,==,consent_updated"
+      transform: "/data"
+      key_transform: "/user/id"
+      headers:
+        x-pipeline: "pii-redaction-demo"
+        x-destination: "compliance"
+        x-pii: "full"
+
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30
