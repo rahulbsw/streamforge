@@ -1,0 +1,56 @@
+# Local recording config for Demo 5: AI-ready event stream.
+# This creates AI-facing Kafka topics from rich operational order events while
+# keeping raw customer PII out of downstream values.
+
+appid: "ai-ready-events-demo"
+bootstrap: "localhost:9092"
+input: "raw-ai-orders"
+offset: "earliest"
+threads: 2
+
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 2000
+
+retry:
+  max_attempts: 3
+  initial_delay_ms: 100
+  max_delay_ms: 30000
+  multiplier: 2.0
+  jitter: 0.1
+
+dlq:
+  enabled: true
+  topic: "ai-ready-dlq"
+  include_original_headers: true
+  include_stack_trace: false
+  max_dlq_retries: 3
+
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "ai-features-orders"
+      filter: "AND:/event_type,==,order_completed:/ai_approved,==,true"
+      transform: "CONSTRUCT:order_id=/order/id:event_type=/event_type:amount=/order/amount:currency=/order/currency:region=/region:created_at=/event_time:customer_tier=/customer/tier:product_count=/order/product_count"
+      key_transform: "HASH:SHA256,/customer/id"
+      headers:
+        x-pipeline: "ai-ready-events-demo"
+        x-use-case: "feature-pipeline"
+        x-pii: "redacted"
+
+    - output: "model-monitoring-events"
+      filter: "AND:/event_type,==,order_completed:/model_monitoring,==,true"
+      transform: "CONSTRUCT:event_type=/event_type:region=/region:amount=/order/amount:created_at=/event_time:decision_context=/decision_context"
+      key_transform: "HASH:SHA256,/customer/id"
+      headers:
+        x-pipeline: "ai-ready-events-demo"
+        x-use-case: "model-monitoring"
+        x-pii: "redacted"
+
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30

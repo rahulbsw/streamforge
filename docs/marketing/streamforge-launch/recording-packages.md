@@ -674,27 +674,77 @@ docker compose -f examples/redpanda/docker-compose.yml down
 
 1. Show raw business event.
 2. Explain why raw operational topics are too broad for AI systems.
-3. Show config that filters and projects the AI-facing fields.
-4. Produce raw event.
-5. Consume `ai-features-orders` or equivalent destination topic.
-6. Explain downstream consumers: features, model monitoring, RAG/event context, experimentation.
+3. Show `docs/marketing/streamforge-launch/configs/ai-ready-events-local.yaml`.
+4. Validate the config.
+5. Run StreamForge.
+6. Produce one rich operational order event.
+7. Consume `ai-features-orders` and `model-monitoring-events`.
+8. Explain downstream consumers: features, model monitoring, RAG/event context, experimentation.
 
 **Terminal Commands:**
 
-Use the selective replication config as the base:
+Pre-build before recording:
 
 ```bash
-cargo run --quiet --bin streamforge-validate -- examples/redpanda/selective-replication.yaml
-CONFIG_FILE=examples/redpanda/selective-replication.yaml cargo run --release --bin streamforge
+cargo run --quiet --bin streamforge-validate -- docs/marketing/streamforge-launch/configs/ai-ready-events-local.yaml
+cargo build --release --bin streamforge
 ```
 
-For a dedicated recording, copy the config and name the destination topic `ai-features-orders` before recording.
+Main recording commands:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml up -d
+docker compose -f examples/redpanda/docker-compose.yml ps
+```
+
+In a second terminal, reset and create topics before starting StreamForge:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic delete raw-ai-orders ai-features-orders model-monitoring-events ai-ready-dlq || true
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic create raw-ai-orders ai-features-orders model-monitoring-events ai-ready-dlq
+```
+
+Back in the first terminal:
+
+```bash
+CONFIG_FILE=docs/marketing/streamforge-launch/configs/ai-ready-events-local.yaml ./target/release/streamforge
+```
+
+Continue in the second terminal:
+
+```bash
+printf '%s\n' \
+  '{"event_type":"order_completed","event_time":"2026-05-25T21:15:00Z","region":"us","ai_approved":true,"model_monitoring":true,"customer":{"id":"cust-ai-42","email":"alice@example.com","name":"Alice Example","tier":"gold","ip":"203.0.113.42"},"order":{"id":"ord-ai-9001","amount":249.99,"currency":"USD","product_count":3,"status":"completed"},"decision_context":{"risk_bucket":"low","channel":"mobile","experiment":"checkout-v3"},"internal_notes":"VIP customer requested callback","payment":{"card_last4":"4242"}}' \
+  | docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+      rpk topic produce raw-ai-orders
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume ai-features-orders -n 1 --offset start
+
+docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
+  rpk topic consume model-monitoring-events -n 1 --offset start
+
+curl http://localhost:8080/health
+curl http://localhost:8080/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
+```
+
+Cleanup:
+
+```bash
+docker compose -f examples/redpanda/docker-compose.yml down
+```
 
 **Expected Proof Points:**
 
 - Raw event contains more fields than the AI-facing contract.
-- AI-facing topic contains approved business fields.
-- Raw email is absent or hashed.
+- `ai-features-orders` contains approved business fields for feature pipelines.
+- `model-monitoring-events` contains approved monitoring context.
+- Both destination values exclude raw email, raw name, IP address, internal notes, and payment fields.
+- Both destination keys use the SHA-256 hash of the customer ID.
+- Metrics show one consumed source message, one produced message for each AI-facing destination, and zero lag.
 - Narration avoids implying that StreamForge runs model inference.
 
 **Human Audio Script:**
@@ -703,7 +753,9 @@ For a dedicated recording, copy the config and name the destination topic `ai-fe
 
 "AI and ML systems need fresh business events, but they should not automatically consume raw operational Kafka topics."
 
-"StreamForge creates an AI-facing contract close to Kafka: approved event types, stable fields, and raw PII removed or hashed."
+"StreamForge creates AI-facing contracts close to Kafka: approved event types, stable fields, and raw PII removed from values."
+
+"In this recording, one output is shaped for feature pipelines and one output is shaped for model monitoring."
 
 "That topic can feed feature pipelines, model monitoring, event context, experimentation, or analytics."
 
@@ -717,6 +769,32 @@ For a dedicated recording, copy the config and name the destination topic `ai-fe
 - Pinned comment: `This demo is about data contracts for AI infrastructure. It does not run model inference; it prepares safer real-time streams for downstream AI systems.`
 
 **Publish Copy:** Use Demo 5 from `social-posts.md`.
+
+**Dry-Run Result: 2026-05-25**
+
+- `docs/marketing/streamforge-launch/configs/ai-ready-events-local.yaml` validation passed with two destinations and no warnings.
+- Redpanda started from `examples/redpanda/docker-compose.yml`.
+- The four AI demo topics were reset and recreated before producing the sample event.
+- StreamForge started cleanly from `./target/release/streamforge`.
+- Produced one rich operational event at `raw-ai-orders` offset `0`.
+- `ai-features-orders` output key was SHA-256 hash `d58bbe4912473f6bd3841146c8c4170ca12f1801c05e854d1f0230e93f3b2ed9`.
+- `ai-features-orders` output value:
+
+```json
+{"amount":249.99,"created_at":"2026-05-25T21:15:00Z","currency":"USD","customer_tier":"gold","event_type":"order_completed","order_id":"ord-ai-9001","product_count":3,"region":"us"}
+```
+
+- `model-monitoring-events` output key was SHA-256 hash `d58bbe4912473f6bd3841146c8c4170ca12f1801c05e854d1f0230e93f3b2ed9`.
+- `model-monitoring-events` output value:
+
+```json
+{"amount":249.99,"created_at":"2026-05-25T21:15:00Z","decision_context":{"channel":"mobile","experiment":"checkout-v3","risk_bucket":"low"},"event_type":"order_completed","region":"us"}
+```
+
+- Health endpoint returned `OK`.
+- Metrics showed `streamforge_messages_consumed_total 1`, one produced message for `ai-features-orders`, one produced message for `model-monitoring-events`, and `streamforge_consumer_lag` at `0`.
+- AI-facing values verified absent raw `alice@example.com`, `Alice Example`, `203.0.113.42`, `VIP customer requested callback`, and `4242`.
+- If `streamforge-validate` prints `xcrun` cache warnings on macOS, treat those as local toolchain noise when validation still exits `0`.
 
 ## Package 6: AWS Production Deployment
 
