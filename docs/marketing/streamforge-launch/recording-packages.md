@@ -182,24 +182,131 @@ docker compose -f examples/redpanda/docker-compose.yml down
 
 ```bash
 kubectl get nodes
-helm install streamforge ./helm/streamforge-operator --namespace streamforge --create-namespace
-kubectl get pods -n streamforge
-kubectl get svc -n streamforge
+helm lint ./helm/streamforge-operator
+helm template streamforge-operator ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --set ui.enabled=true | rg 'apiGroups: \["streamforge.io"\]'
+```
+
+On Apple Silicon Minikube, build and load a local UI image because the published `ghcr.io/rahulbsw/streamforge-ui:latest` image may not include a `linux/arm64` manifest:
+
+```bash
+docker build -f ui/Dockerfile -t streamforge-ui:local ui
+docker save streamforge-ui:local -o /private/tmp/streamforge-ui-local.tar
+minikube image load /private/tmp/streamforge-ui-local.tar
+```
+
+Install with UI enabled. Use the local UI image override on Apple Silicon:
+
+```bash
+helm upgrade --install streamforge-operator ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --create-namespace \
+  --set ui.enabled=true \
+  --set ui.image.repository=streamforge-ui \
+  --set ui.image.tag=local \
+  --set ui.image.pullPolicy=IfNotPresent
+```
+
+On an amd64 recording machine where the published UI image pulls successfully, omit the three `ui.image.*` overrides:
+
+```bash
+helm upgrade --install streamforge-operator ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --create-namespace \
+  --set ui.enabled=true
+```
+
+Verify operator, UI, service, CRD, and RBAC:
+
+```bash
+kubectl get pods -n streamforge-system
+kubectl get svc -n streamforge-system
+kubectl get crd | rg streamforge
+kubectl auth can-i list streamforgepipelines.streamforge.io \
+  --as=system:serviceaccount:streamforge-system:streamforge-ui \
+  -n streamforge-system
 ```
 
 If using local port-forward:
 
 ```bash
-kubectl port-forward svc/streamforge-ui 3000:3000 -n streamforge
+kubectl port-forward -n streamforge-system svc/streamforge-operator-ui 3001:3001
 ```
 
-Verification commands depend on the demo cluster broker. For Minikube, follow `docs/UI_MINIKUBE_DEMO.md` and `docs/KUBERNETES.md`.
+For a self-contained local Kubernetes recording, deploy a small in-cluster Redpanda broker:
+
+```bash
+kubectl create namespace redpanda
+
+kubectl create deployment redpanda -n redpanda \
+  --image=docker.redpanda.com/redpandadata/redpanda:v25.1.2 \
+  -- /entrypoint.sh redpanda start \
+    --overprovisioned \
+    --smp 1 \
+    --memory 1G \
+    --reserve-memory 0M \
+    --check=false \
+    --node-id 0 \
+    --kafka-addr PLAINTEXT://0.0.0.0:9092 \
+    --advertise-kafka-addr PLAINTEXT://redpanda.redpanda.svc.cluster.local:9092
+
+kubectl expose deployment redpanda -n redpanda \
+  --port=9092 \
+  --target-port=9092 \
+  --name=redpanda
+
+kubectl rollout status deployment/redpanda -n redpanda --timeout=180s
+kubectl exec -n redpanda deployment/redpanda -- rpk cluster info
+kubectl exec -n redpanda deployment/redpanda -- \
+  rpk topic create raw-orders-ui-demo analytics-orders-ui-demo
+```
+
+UI values for the pipeline form:
+
+- Pipeline name: `ui-orders-demo`
+- Namespace: `streamforge-system`
+- Application ID: `ui-orders-demo`
+- Source bootstrap: `redpanda.redpanda.svc.cluster.local:9092`
+- Source topic: `raw-orders-ui-demo`
+- Consumer group: `streamforge-ui-demo`
+- Offset: `earliest`
+- Destination bootstrap: `redpanda.redpanda.svc.cluster.local:9092`
+- Destination topic: `analytics-orders-ui-demo`
+- Filter: `/region,==,us`
+- Transform: `CONSTRUCT:order_id=/order_id:amount=/amount:region=/region`
+- Replicas: `1`
+- Threads: `2`
+
+After the UI create step, verify Kubernetes resources:
+
+```bash
+kubectl get sfp ui-orders-demo -n streamforge-system -o yaml
+kubectl get pods -n streamforge-system -l streamforge.io/pipeline=ui-orders-demo
+kubectl get configmap ui-orders-demo-config -n streamforge-system -o jsonpath='{.data.config\.yaml}'
+```
+
+Produce and consume one event:
+
+```bash
+printf '%s\n' \
+  '{"order_id":"ord-ui-demo-1001","customer":{"id":"cust-42","email":"alice@example.com"},"amount":125,"region":"us","created_at":"2026-05-25T20:35:00Z"}' \
+  | kubectl exec -i -n redpanda deployment/redpanda -- \
+      rpk topic produce raw-orders-ui-demo
+
+kubectl exec -n redpanda deployment/redpanda -- \
+  rpk topic consume analytics-orders-ui-demo -n 1 --offset start
+```
+
+With the current chart default pipeline image `ghcr.io/rahulbsw/streamforge:0.3.0`, the UI-created pipeline verifies deployment and Kafka output, but the consumed value may be the raw mirrored event even when a transform is present in the generated ConfigMap. Do not claim transformed output in the recording unless the pipeline image is updated and verified with transformed output.
 
 Cleanup:
 
 ```bash
-helm uninstall streamforge -n streamforge
-kubectl delete namespace streamforge
+kubectl delete sfp ui-orders-demo -n streamforge-system
+helm uninstall streamforge-operator -n streamforge-system
+kubectl delete namespace streamforge-system
+kubectl delete namespace redpanda
 ```
 
 **Expected Proof Points:**
@@ -209,7 +316,8 @@ kubectl delete namespace streamforge
 - Pipeline can be created in form mode.
 - Generated YAML is visible before deploy.
 - Pipeline becomes Kubernetes state.
-- Kafka output verifies the transform.
+- Kafka output verifies that the deployed pipeline is consuming and producing.
+- With the current chart default pipeline image, do not claim transform verification unless the output has been re-tested with an updated image.
 
 **Human Audio Script:**
 
@@ -219,7 +327,7 @@ kubectl delete namespace streamforge
 
 "The important part is the YAML preview. The UI is not a black box; the pipeline becomes declarative state."
 
-"After deploying the CRD, I verify behavior from Kafka. A successful UI save is not enough. The proof is input event in, transformed output out."
+"After deploying the CRD, I verify behavior from Kafka. A successful UI save is not enough. The proof is input event in, pipeline output out."
 
 "This is the platform story: guided creation for users, Kubernetes control for operators."
 
@@ -231,6 +339,28 @@ kubectl delete namespace streamforge
 - Pinned comment: `The UI demo path is documented in docs/UI_MINIKUBE_DEMO.md. The Helm chart lives under helm/streamforge-operator.`
 
 **Publish Copy:** Use Demo 2 from `social-posts.md`.
+
+**Dry-Run Result: 2026-05-25**
+
+- Minikube started and kubectl context switched to `minikube`.
+- `helm lint ./helm/streamforge-operator` passed.
+- Helm rendering initially exposed a UI RBAC bug: the UI ClusterRole granted `streaming.streamforge.dev`, while the CRD and UI API use `streamforge.io`.
+- Patched `helm/streamforge-operator/templates/ui-rbac.yaml` to grant `streamforge.io`.
+- `kubectl auth can-i list streamforgepipelines.streamforge.io --as=system:serviceaccount:streamforge-system:streamforge-ui -n streamforge-system` changed from `no` to `yes`.
+- On Apple Silicon Minikube, `ghcr.io/rahulbsw/streamforge-ui:latest` failed with `no matching manifest for linux/arm64/v8`.
+- Built `streamforge-ui:local`, exported it to `/private/tmp/streamforge-ui-local.tar`, loaded it into Minikube, and installed the chart with the local UI image override.
+- Operator and UI pods reached `Running`.
+- UI login worked with `admin` / `admin`.
+- UI pipeline listing worked after the RBAC fix.
+- The repo's `examples/kubernetes/kafka/kafka-standalone.yaml` did not work cleanly in this dry run; the Kafka container failed with an `advertised.listeners` error.
+- An in-cluster Redpanda broker worked when deployed through `/entrypoint.sh redpanda start ...`.
+- Created `raw-orders-ui-demo` and `analytics-orders-ui-demo`.
+- Created `ui-orders-demo` through the UI form and previewed the generated YAML.
+- `StreamforgePipeline` resource was created in `streamforge-system`.
+- Pipeline pod reached `Running` with `ghcr.io/rahulbsw/streamforge:0.3.0`.
+- Produced one event to `raw-orders-ui-demo`.
+- Consumed one event from `analytics-orders-ui-demo`.
+- The consumed event verified runtime deployment and Kafka output, but it was a raw mirrored event with the chart default `0.3.0` image. Record the current Demo 2 as UI -> YAML -> CRD -> running pipeline -> Kafka output, not as transform verification, unless a newer pipeline image is built/published and re-tested.
 
 ## Package 3: PII-Safe Data Engineering Pipeline
 

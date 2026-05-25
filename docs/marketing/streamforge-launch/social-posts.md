@@ -51,7 +51,7 @@ Repo: https://github.com/rahulbsw/streamforge
 
 ### X Launch Post
 
-New StreamForge demo: build a Kafka pipeline through the UI, preview YAML, deploy it as a Kubernetes CRD, then verify the transformed output.
+New StreamForge demo: build a Kafka pipeline through the UI, preview YAML, deploy it as a Kubernetes CRD, then verify Kafka output from the running pipeline.
 
 UI for humans. YAML and operator flow for platform teams.
 
@@ -65,7 +65,7 @@ https://github.com/rahulbsw/streamforge
 
 3. The UI is not a black box. The pipeline still becomes Kubernetes-native state, which makes it easier to review, automate, and operate.
 
-4. The final check is not "the UI saved." The final check is produce input, consume transformed output, and confirm the event contract is correct.
+4. The final check is not "the UI saved." The final check is produce input, consume pipeline output, and confirm the deployed pipeline is actually moving data.
 
 5. Repo and Kubernetes docs: https://github.com/rahulbsw/streamforge
 
@@ -81,7 +81,7 @@ That is why the StreamForge Kubernetes demo goes through the full path:
 - preview generated YAML
 - deploy the Kubernetes CRD
 - produce an input event
-- verify transformed Kafka output
+- verify Kafka output from the running pipeline
 
 The UI is there to make pipeline creation easier. The YAML and operator path are there so platform teams can still review, automate, and operate the system using Kubernetes-native primitives.
 

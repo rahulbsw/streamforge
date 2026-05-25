@@ -113,7 +113,7 @@ printf '%s\n' \
 5. Preview generated YAML.
 6. Deploy the CRD.
 7. Produce an input event.
-8. Consume transformed output.
+8. Consume pipeline output.
 9. Show the pipeline exists as Kubernetes state.
 
 **Script Beats:**
@@ -151,7 +151,8 @@ Use the exact UI flow from `docs/UI_MINIKUBE_DEMO.md` for the browser recording.
 
 - Viewer understands the UI is not replacing Kubernetes control.
 - Viewer sees a pipeline move from form input to YAML to deployed CRD.
-- Viewer sees transformed Kafka output, not only a successful UI action.
+- Viewer sees Kafka output from the deployed pipeline, not only a successful UI action.
+- With the current chart default pipeline image, do not claim transform verification unless the output has been re-tested with an updated image.
 
 ## Demo 3: PII-Safe Data Engineering Pipeline
 
