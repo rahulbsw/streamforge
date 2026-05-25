@@ -82,6 +82,14 @@ helm version
 docker version
 ```
 
+If `eksctl` is missing on macOS and Homebrew is available:
+
+```bash
+brew tap weaveworks/tap
+brew install weaveworks/tap/eksctl
+eksctl version
+```
+
 Verify account and region:
 
 ```bash
@@ -89,7 +97,8 @@ export AWS_REGION=us-west-2
 export EKS_CLUSTER=streamforge-demo
 export NAMESPACE=streamforge
 
-aws sts get-caller-identity
+aws configure list-profiles
+aws sts get-caller-identity --query Account --output text | sed 's/[0-9]/*/g'
 aws configure get region
 ```
 
@@ -98,6 +107,39 @@ If `aws configure get region` does not match `AWS_REGION`, set it:
 ```bash
 aws configure set region "$AWS_REGION"
 ```
+
+If you use a named profile, export it before recording:
+
+```bash
+export AWS_PROFILE=<demo-profile>
+aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text | sed 's/[0-9]/*/g'
+aws configure get region --profile "$AWS_PROFILE"
+```
+
+If AWS returns `NoCredentials` or `ExpiredToken`, stop before provisioning. Refresh credentials first:
+
+```bash
+# For AWS IAM Identity Center / SSO profiles
+aws sso login --profile "$AWS_PROFILE"
+
+# For temporary STS credentials, refresh the access key, secret key, and session token
+# in the selected profile before running any create/delete commands.
+aws sts get-caller-identity --profile "$AWS_PROFILE"
+```
+
+Preflight gate before creating resources:
+
+```bash
+test -n "$AWS_REGION"
+test -n "$EKS_CLUSTER"
+test -n "$NAMESPACE"
+eksctl version
+aws sts get-caller-identity --profile "$AWS_PROFILE"
+helm lint ./helm/streamforge-operator
+helm show crds ./helm/streamforge-operator | rg 'usernameSecret|passwordSecret|caSecret'
+```
+
+Do not run `eksctl create cluster` until every command in the preflight gate succeeds.
 
 ## Recording Flow
 
@@ -396,6 +438,8 @@ aws resourcegroupstaggingapi get-resources \
 - Budget alert exists.
 - Region and AWS account are confirmed.
 - Cleanup commands are prepared before resource creation.
+- `eksctl version` succeeds.
+- `aws sts get-caller-identity` succeeds for the profile used in the recording.
 - EKS cluster is reachable.
 - Kafka broker is reachable from EKS.
 - StreamForge Helm install succeeds.

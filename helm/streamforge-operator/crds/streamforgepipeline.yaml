@@ -69,6 +69,38 @@ spec:
                               type: string
                             keyPassword:
                               type: string
+                            caSecret:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
+                            certificateSecret:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
+                            keySecret:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
+                            keyPasswordSecret:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
                         sasl:
                           type: object
                           properties:
@@ -81,6 +113,30 @@ spec:
                               type: string
                             kerberosServiceName:
                               type: string
+                            usernameSecret:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
+                            passwordSecret:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
+                            keytabSecret:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
 
                 # Destinations configuration
                 destinations:
@@ -126,6 +182,40 @@ spec:
                                 type: string
                               keyLocation:
                                 type: string
+                              keyPassword:
+                                type: string
+                              caSecret:
+                                type: object
+                                required: [name, key]
+                                properties:
+                                  name:
+                                    type: string
+                                  key:
+                                    type: string
+                              certificateSecret:
+                                type: object
+                                required: [name, key]
+                                properties:
+                                  name:
+                                    type: string
+                                  key:
+                                    type: string
+                              keySecret:
+                                type: object
+                                required: [name, key]
+                                properties:
+                                  name:
+                                    type: string
+                                  key:
+                                    type: string
+                              keyPasswordSecret:
+                                type: object
+                                required: [name, key]
+                                properties:
+                                  name:
+                                    type: string
+                                  key:
+                                    type: string
                           sasl:
                             type: object
                             properties:
@@ -135,6 +225,32 @@ spec:
                                 type: string
                               password:
                                 type: string
+                              kerberosServiceName:
+                                type: string
+                              usernameSecret:
+                                type: object
+                                required: [name, key]
+                                properties:
+                                  name:
+                                    type: string
+                                  key:
+                                    type: string
+                              passwordSecret:
+                                type: object
+                                required: [name, key]
+                                properties:
+                                  name:
+                                    type: string
+                                  key:
+                                    type: string
+                              keytabSecret:
+                                type: object
+                                required: [name, key]
+                                properties:
+                                  name:
+                                    type: string
+                                  key:
+                                    type: string
 
                 # Resource configuration
                 resources:

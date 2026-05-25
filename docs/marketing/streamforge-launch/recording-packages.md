@@ -805,21 +805,40 @@ docker compose -f examples/redpanda/docker-compose.yml down
 **Screen Plan:**
 
 1. Show architecture and cost controls.
-2. Show AWS identity and region without exposing sensitive details.
-3. Show EKS cluster.
-4. Show MSK bootstrap or fallback broker.
-5. Install StreamForge with Helm.
-6. Apply pipeline config.
-7. Produce and consume verification events.
-8. Show metrics/logs.
-9. Run cleanup commands.
+2. Show the preflight gate before provisioning.
+3. Show AWS identity and region without exposing sensitive details.
+4. Show EKS cluster.
+5. Show MSK bootstrap or fallback broker.
+6. Install StreamForge with Helm.
+7. Apply pipeline config.
+8. Produce and consume verification events.
+9. Show metrics/logs.
+10. Run cleanup commands.
 
 **Terminal Commands:**
 
-Use `docs/marketing/streamforge-launch/aws-demo-runbook.md` as the source of truth. Minimum visible checks:
+Use `docs/marketing/streamforge-launch/aws-demo-runbook.md` as the source of truth. Preflight commands to run before creating paid resources:
 
 ```bash
-aws sts get-caller-identity
+export AWS_REGION=us-west-2
+export EKS_CLUSTER=streamforge-demo
+export NAMESPACE=streamforge
+export AWS_PROFILE=<demo-profile>
+
+aws --version
+kubectl version --client
+eksctl version
+helm version
+docker version
+aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text | sed 's/[0-9]/*/g'
+aws configure get region --profile "$AWS_PROFILE"
+helm lint ./helm/streamforge-operator
+helm show crds ./helm/streamforge-operator | rg 'usernameSecret|passwordSecret|caSecret'
+```
+
+Do not create resources until the preflight passes. Minimum visible deployment checks after provisioning:
+
+```bash
 kubectl get nodes
 helm install streamforge ./helm/streamforge-operator --namespace streamforge --create-namespace
 kubectl get pods -n streamforge
@@ -837,6 +856,7 @@ eksctl delete cluster --name streamforge-demo --region us-west-2
 **Expected Proof Points:**
 
 - AWS region and account context are controlled.
+- Preflight passes before provisioning.
 - EKS is running StreamForge.
 - Kafka broker is reachable from the cluster.
 - Produce/consume verification succeeds.
@@ -862,6 +882,22 @@ eksctl delete cluster --name streamforge-demo --region us-west-2
 - Pinned comment: `AWS resources can incur cost. Follow docs/marketing/streamforge-launch/aws-demo-runbook.md and clean up resources after recording.`
 
 **Publish Copy:** Use Demo 6 from `social-posts.md`.
+
+**Dry-Run Preflight Result: 2026-05-25**
+
+- No AWS resources were provisioned in this dry run.
+- AWS CLI was installed.
+- Docker, kubectl, and Helm were installed.
+- Homebrew was installed.
+- `eksctl` was not installed, so the EKS creation path is blocked until it is installed.
+- Default AWS credentials were not available: `aws sts get-caller-identity` returned `NoCredentials`.
+- One named AWS profile was present, but its token was expired: `ExpiredToken`.
+- The named profile did not have a region configured.
+- kubectl had no current context, so no EKS cluster was reachable from this machine.
+- `helm lint ./helm/streamforge-operator` passed.
+- `helm template streamforge ./helm/streamforge-operator --namespace streamforge --create-namespace --set ui.enabled=true` rendered successfully.
+- The Helm chart CRD schema was updated so the documented secure Kafka fields `caSecret`, `usernameSecret`, and `passwordSecret` are accepted by the Kubernetes API schema instead of relying only on the operator model.
+- Next live recording prerequisites: install `eksctl`, refresh AWS credentials for the recording profile, set the profile region, confirm budget/cost controls, then run the EKS/MSK provisioning flow and cleanup in one recording session.
 
 ## Package 7: Observability and Scaling
 
