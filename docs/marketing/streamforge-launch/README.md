@@ -13,6 +13,7 @@ The campaign promotes StreamForge as selective replication and data shaping for 
 ## Asset Map
 
 - `youtube-demos.md` - video titles, outlines, scripts, chapters, thumbnail concepts, and success criteria.
+- `recording-packages.md` - full-screen recording guidance, exact command sequences, human narration scripts, proof points, and YouTube metadata.
 - `social-posts.md` - X launch posts, X threads, LinkedIn posts, and hashtag sets for each video.
 - `aws-demo-runbook.md` - AWS production-style demo setup, recording flow, cleanup, and cost controls.
 
