@@ -31,9 +31,9 @@ routing:
   routing_type: "filter"
   destinations:
     - output: "user-events-analytics"
-      filter: "REGEX:/user/id,.+"
-      transform: "CONSTRUCT:user_id=/user/id:event_type=/event_type:timestamp=/timestamp:region=/region:device=/device_type"
-      key_transform: "HASH:SHA256,/user/id"
+      filter: "regex(field('/user/id'), '.+')"
+      transform: "construct(user_id=$user.id, event_type=$event_type, timestamp=$timestamp, region=$region, device=$device_type)"
+      key_transform: "hash('SHA256', $user.id)"
       headers:
         x-pipeline: "pii-redaction-demo"
         x-destination: "analytics"
@@ -43,27 +43,27 @@ routing:
     # constructing a new payload that drops the raw source email. Preserve an opaque
     # app-level pseudonymous identifier in the value, and use the hashed email as the key.
     - output: "user-events-marketing"
-      filter: "/consent/marketing,==,true"
-      transform: "CONSTRUCT:anonymous_id=/user/id:event=/event_type:timestamp=/timestamp"
-      key_transform: "HASH:MD5,/email"
+      filter: "$consent.marketing == true"
+      transform: "construct(anonymous_id=$user.id, event=$event_type, timestamp=$timestamp)"
+      key_transform: "hash('MD5', $email)"
       headers:
         x-pipeline: "pii-redaction-demo"
         x-destination: "marketing"
         x-consent: "marketing"
 
     - output: "events-third-party"
-      filter: "/consent/third_party,==,true"
-      transform: "CONSTRUCT:event=/event_type:properties=/properties/non_pii"
-      key_transform: "HASH:SHA256,/user/id"
+      filter: "$consent.third_party == true"
+      transform: "construct(event=$event_type, properties=$properties.non_pii)"
+      key_transform: "hash('SHA256', $user.id)"
       headers:
         x-pipeline: "pii-redaction-demo"
         x-destination: "third-party"
         x-pii: "redacted"
 
     - output: "user-events-compliance"
-      filter: "OR:/event_type,==,account_created:/event_type,==,account_deleted:/event_type,==,consent_updated"
-      transform: "/data"
-      key_transform: "/user/id"
+      filter: "or($event_type == 'account_created', $event_type == 'account_deleted', $event_type == 'consent_updated')"
+      transform: "field('/data')"
+      key_transform: "$user.id"
       headers:
         x-pipeline: "pii-redaction-demo"
         x-destination: "compliance"

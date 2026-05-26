@@ -31,17 +31,17 @@ routing:
   routing_type: "filter"
   destinations:
     - output: "premium-events"
-      filter: "/customer/tier,==,premium"
-      transform: "CONSTRUCT:order_id=/order_id:customer_id=/customer/id:tier=/customer/tier:amount=/amount:region=/region:created_at=/created_at"
-      key_transform: "/customer/id"
+      filter: "$customer.tier == 'premium'"
+      transform: "construct(order_id=$order_id, customer_id=$customer.id, tier=$customer.tier, amount=$amount, region=$region, created_at=$created_at)"
+      key_transform: "$customer.id"
       headers:
         x-pipeline: "observability-demo"
         x-segment: "premium"
 
     - output: "standard-events"
-      filter: "NOT:/customer/tier,==,premium"
-      transform: "CONSTRUCT:order_id=/order_id:customer_id=/customer/id:tier=/customer/tier:amount=/amount:region=/region:created_at=/created_at"
-      key_transform: "/customer/id"
+      filter: "not($customer.tier == 'premium')"
+      transform: "construct(order_id=$order_id, customer_id=$customer.id, tier=$customer.tier, amount=$amount, region=$region, created_at=$created_at)"
+      key_transform: "$customer.id"
       headers:
         x-pipeline: "observability-demo"
         x-segment: "standard"

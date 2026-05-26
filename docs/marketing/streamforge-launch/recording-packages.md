@@ -163,6 +163,13 @@ docker compose -f examples/redpanda/docker-compose.yml down
 - Metrics showed `streamforge_messages_consumed_total 1`, one produced message for each destination, and `streamforge_consumer_lag` at `0`.
 - Cleaned up with `docker compose -f examples/redpanda/docker-compose.yml down`.
 
+**V2 DSL Re-Check: 2026-05-26**
+
+- Re-ran the local quickstart with v2 filter and transform syntax in `examples/redpanda/selective-replication.yaml`.
+- StreamForge logs showed `and($region == 'us', $amount >= 100)`, `regex(field('/customer/email'), ...)`, `construct(...)`, `$order_id`, and `hash('SHA256', $customer.email)` parsed at runtime.
+- `analytics-orders` and `pii-safe-orders` produced the same shaped outputs as the earlier dry run.
+- Health returned `OK`; metrics showed one consumed source message, one produced message per destination, and lag `0`.
+
 ## Package 2: Kubernetes UI and Operator Demo
 
 **Objective:** Show StreamForge as a Kubernetes-native pipeline workflow with a UI front door and YAML/CRD control plane.
@@ -188,7 +195,15 @@ helm template streamforge-operator ./helm/streamforge-operator \
   --set ui.enabled=true | rg 'apiGroups: \["streamforge.io"\]'
 ```
 
-On Apple Silicon Minikube, build and load a local UI image because the published `ghcr.io/rahulbsw/streamforge-ui:latest` image may not include a `linux/arm64` manifest:
+Build and load the current StreamForge pipeline image before recording. This is required for the v2 filter and transform syntax used in the demo form:
+
+```bash
+docker build -t streamforge:local .
+docker save streamforge:local -o /private/tmp/streamforge-local.tar
+minikube image load /private/tmp/streamforge-local.tar
+```
+
+On Apple Silicon Minikube, also build and load a local UI image because the published `ghcr.io/rahulbsw/streamforge-ui:latest` image may not include a `linux/arm64` manifest:
 
 ```bash
 docker build -f ui/Dockerfile -t streamforge-ui:local ui
@@ -196,24 +211,30 @@ docker save streamforge-ui:local -o /private/tmp/streamforge-ui-local.tar
 minikube image load /private/tmp/streamforge-ui-local.tar
 ```
 
-Install with UI enabled. Use the local UI image override on Apple Silicon:
+Install with UI enabled and the current local pipeline image. Use the local UI image override on Apple Silicon:
 
 ```bash
 helm upgrade --install streamforge-operator ./helm/streamforge-operator \
   --namespace streamforge-system \
   --create-namespace \
+  --set defaults.image.repository=streamforge \
+  --set defaults.image.tag=local \
+  --set defaults.image.pullPolicy=IfNotPresent \
   --set ui.enabled=true \
   --set ui.image.repository=streamforge-ui \
   --set ui.image.tag=local \
   --set ui.image.pullPolicy=IfNotPresent
 ```
 
-On an amd64 recording machine where the published UI image pulls successfully, omit the three `ui.image.*` overrides:
+On an amd64 recording machine where the published UI image pulls successfully, omit the three `ui.image.*` overrides but keep the local pipeline image override:
 
 ```bash
 helm upgrade --install streamforge-operator ./helm/streamforge-operator \
   --namespace streamforge-system \
   --create-namespace \
+  --set defaults.image.repository=streamforge \
+  --set defaults.image.tag=local \
+  --set defaults.image.pullPolicy=IfNotPresent \
   --set ui.enabled=true
 ```
 
@@ -273,8 +294,8 @@ UI values for the pipeline form:
 - Offset: `earliest`
 - Destination bootstrap: `redpanda.redpanda.svc.cluster.local:9092`
 - Destination topic: `analytics-orders-ui-demo`
-- Filter: `/region,==,us`
-- Transform: `CONSTRUCT:order_id=/order_id:amount=/amount:region=/region`
+- Filter: `$region == 'us'`
+- Transform: `construct(order_id=$order_id, amount=$amount, region=$region)`
 - Replicas: `1`
 - Threads: `2`
 
@@ -298,7 +319,7 @@ kubectl exec -n redpanda deployment/redpanda -- \
   rpk topic consume analytics-orders-ui-demo -n 1 --offset start
 ```
 
-With the current chart default pipeline image `ghcr.io/rahulbsw/streamforge:0.3.0`, the UI-created pipeline verifies deployment and Kafka output, but the consumed value may be the raw mirrored event even when a transform is present in the generated ConfigMap. Do not claim transformed output in the recording unless the pipeline image is updated and verified with transformed output.
+The pipeline pod should use `streamforge:local` in this recording so the current v2 DSL support is present. If the pod falls back to `ghcr.io/rahulbsw/streamforge:0.3.0`, stop and fix the image override before recording transform verification.
 
 Cleanup:
 
@@ -316,8 +337,8 @@ kubectl delete namespace redpanda
 - Pipeline can be created in form mode.
 - Generated YAML is visible before deploy.
 - Pipeline becomes Kubernetes state.
-- Kafka output verifies that the deployed pipeline is consuming and producing.
-- With the current chart default pipeline image, do not claim transform verification unless the output has been re-tested with an updated image.
+- Kafka output verifies that the deployed pipeline is consuming, filtering, transforming, and producing.
+- Pipeline pod image is `streamforge:local`, not the chart default `ghcr.io/rahulbsw/streamforge:0.3.0`.
 
 **Human Audio Script:**
 
@@ -360,7 +381,8 @@ kubectl delete namespace redpanda
 - Pipeline pod reached `Running` with `ghcr.io/rahulbsw/streamforge:0.3.0`.
 - Produced one event to `raw-orders-ui-demo`.
 - Consumed one event from `analytics-orders-ui-demo`.
-- The consumed event verified runtime deployment and Kafka output, but it was a raw mirrored event with the chart default `0.3.0` image. Record the current Demo 2 as UI -> YAML -> CRD -> running pipeline -> Kafka output, not as transform verification, unless a newer pipeline image is built/published and re-tested.
+- The consumed event verified runtime deployment and Kafka output, but it was a raw mirrored event with the chart default `0.3.0` image.
+- For the v2-syntax recording, build and load `streamforge:local`, install the chart with the `defaults.image.*` overrides above, and verify transformed output before claiming transform behavior.
 
 ## Package 3: PII-Safe Data Engineering Pipeline
 
@@ -517,6 +539,13 @@ docker compose -f examples/redpanda/docker-compose.yml down
 - External values verified absent raw `alice@example.com`, `Alice Example`, and `203.0.113.10` in analytics, marketing, and third-party topics.
 - If `streamforge-validate` prints `xcrun` cache warnings on macOS, treat those as local toolchain noise when validation still exits `0`.
 
+**V2 DSL Re-Check: 2026-05-26**
+
+- Re-ran the local PII-safe recording config with v2 filter, transform, and key transform syntax.
+- StreamForge logs showed `regex(field('/user/id'), '.+')`, `$consent.marketing == true`, `construct(...)`, and `hash(...)` parsed at runtime.
+- Analytics, marketing, third-party, and compliance outputs matched the earlier dry-run payloads and keys.
+- Health returned `OK`; metrics showed one consumed source message, one produced message per destination, and lag `0`.
+
 ## Package 4: CDC to Data Lake Pipeline
 
 **Objective:** Show StreamForge as a lightweight shaping layer between CDC topics and lake or warehouse consumers.
@@ -664,6 +693,13 @@ docker compose -f examples/redpanda/docker-compose.yml down
 - Metrics showed `streamforge_messages_consumed_total 4`, produced counts of `2` for `datalake-orders`, `1` for `datalake-orders-deleted`, `1` for `datalake-schema-changes`, and `streamforge_consumer_lag` at `0`.
 - If `streamforge-validate` prints `xcrun` cache warnings on macOS, treat those as local toolchain noise when validation still exits `0`.
 
+**V2 DSL Re-Check: 2026-05-26**
+
+- Re-ran the local CDC recording config with v2 filter, transform, and key transform syntax.
+- StreamForge logs showed `or($payload.op == 'c', $payload.op == 'u')`, `$payload.op == 'd'`, `field('/payload/after')`, and `construct(...)` parsed at runtime.
+- Create, update, delete, and schema-change outputs matched the earlier dry-run payloads and keys.
+- Metrics showed four consumed source messages, produced counts of `2/1/1`, and lag `0`.
+
 ## Package 5: AI-Ready Event Stream
 
 **Objective:** Show a practical AI infrastructure use case: create a safe real-time topic for AI or ML systems without exposing raw operational payloads.
@@ -795,6 +831,13 @@ docker compose -f examples/redpanda/docker-compose.yml down
 - Metrics showed `streamforge_messages_consumed_total 1`, one produced message for `ai-features-orders`, one produced message for `model-monitoring-events`, and `streamforge_consumer_lag` at `0`.
 - AI-facing values verified absent raw `alice@example.com`, `Alice Example`, `203.0.113.42`, `VIP customer requested callback`, and `4242`.
 - If `streamforge-validate` prints `xcrun` cache warnings on macOS, treat those as local toolchain noise when validation still exits `0`.
+
+**V2 DSL Re-Check: 2026-05-26**
+
+- Re-ran the local AI-ready recording config with v2 filter, transform, and key transform syntax.
+- StreamForge logs showed `and($event_type == 'order_completed', ...)`, `construct(...)`, and `hash('SHA256', $customer.id)` parsed at runtime.
+- `ai-features-orders` and `model-monitoring-events` matched the earlier dry-run payloads and keys.
+- Metrics showed one consumed source message, one produced message per destination, and lag `0`.
 
 ## Package 6: AWS Production Deployment
 
@@ -1062,3 +1105,11 @@ histogram_quantile(0.99, rate(streamforge_processing_duration_seconds_bucket[5m]
 - Final metrics exposed processing duration histogram counts and sums for both destinations.
 - `observability-dlq` was created and ready; no controlled failure was injected during this clean recording run.
 - If `streamforge-validate` prints `xcrun` cache warnings on macOS, treat those as local toolchain noise when validation still exits `0`.
+
+**V2 DSL Re-Check: 2026-05-26**
+
+- Re-ran the local observability recording config with v2 filter, transform, and key transform syntax.
+- StreamForge logs showed `$customer.tier == 'premium'`, `not($customer.tier == 'premium')`, `construct(...)`, and `$customer.id` parsed at runtime.
+- Produced six keyed records; source records landed across partitions `0`, `1`, and `2`.
+- `premium-events` received three records and `standard-events` received three records with the expected shaped values and keys.
+- Metrics showed `streamforge_messages_consumed_total 6`, produced counts of `3` per destination, filter pass/fail counts of `3/3`, `streamforge_messages_in_flight 0`, and lag `0` on all three source partitions.

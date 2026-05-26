@@ -8,17 +8,17 @@ routing:
   routing_type: "filter"
   destinations:
     - output: "analytics-orders"
-      filter: "AND:/region,==,us:/amount,>=,100"
-      transform: "CONSTRUCT:order_id=/order_id:customer_id=/customer/id:amount=/amount:region=/region:created_at=/created_at"
-      key_transform: "/order_id"
+      filter: "and($region == 'us', $amount >= 100)"
+      transform: "construct(order_id=$order_id, customer_id=$customer.id, amount=$amount, region=$region, created_at=$created_at)"
+      key_transform: "$order_id"
       headers:
         x-pipeline: "orders-analytics-demo"
         x-destination: "analytics"
 
     - output: "pii-safe-orders"
-      filter: "REGEX:/customer/email,^[^@]+@[^@]+\\.[^@]+$"
-      transform: "CONSTRUCT:order_id=/order_id:amount=/amount:region=/region:created_at=/created_at"
-      key_transform: "HASH:SHA256,/customer/email"
+      filter: "regex(field('/customer/email'), '^[^@]+@[^@]+\\.[^@]+$')"
+      transform: "construct(order_id=$order_id, amount=$amount, region=$region, created_at=$created_at)"
+      key_transform: "hash('SHA256', $customer.email)"
       headers:
         x-pipeline: "orders-analytics-demo"
         x-destination: "pii-safe"
