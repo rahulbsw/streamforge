@@ -20,21 +20,26 @@ performance:
   compression: "zstd"           # Compress for WAN transfer
 
 # Commit less frequently for throughput
-commit_strategy: "manual"
-commit_interval_ms: 10000       # Every 10 seconds
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 10000       # Every 10 seconds
 
 # Aggressive retry for cross-region reliability
 retry:
   max_attempts: 5
   initial_delay_ms: 500
   max_delay_ms: 60000
-  jitter: true
+  multiplier: 2.0
+  jitter: 0.1
 
 # DLQ for failed messages
 dlq:
   enabled: true
   topic: "cross-region-dlq"
-  include_error_headers: true
+  include_original_headers: true
+  include_stack_trace: false
+  max_dlq_retries: 3
 
 # Source cluster TLS/SASL (us-east-1)
 kafka:
@@ -57,7 +62,7 @@ routing:
       bootstrap: "kafka-us-west.internal:9092"
 
       # Optional: Filter for regional data only
-      filter: "OR:/region,==,us-east:/region,==,global"
+      filter: "or($region == 'us-east', $region == 'global')"
 
       # Preserve original keys and timestamps for DR
       partitioning: "default"
@@ -74,7 +79,7 @@ routing:
       # For now, use environment variables with KAFKA_WEST_ prefix
 
 # Metrics
-metrics:
-  enabled: true
-  port: 8080
-  path: "/metrics"
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"

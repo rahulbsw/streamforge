@@ -5,65 +5,10 @@ nav_order: 4
 
 # YAML Configuration Guide
 
-StreamForge now supports both JSON and YAML configuration formats. YAML is recommended for complex configurations with multiple filters and transformations due to its superior readability.
+YAML is the recommended configuration format for StreamForge. It keeps routing, filters, transforms, headers, and observability settings readable in code review.
 
-## Table of Contents
+## Minimal Pipeline
 
-- [Why YAML?](#why-yaml)
-- [Format Detection](#format-detection)
-- [Basic Examples](#basic-examples)
-- [Readability Comparison](#readability-comparison)
-- [YAML Features](#yaml-features)
-- [Migration from JSON](#migration-from-json)
-- [Best Practices](#best-practices)
-
-## Why YAML?
-
-### Advantages of YAML
-
-✅ **More Readable**: No brackets, cleaner syntax
-✅ **Comments**: Add descriptions inline
-✅ **Multi-line Strings**: Complex filters more readable
-✅ **Less Noise**: No quotes on keys, fewer commas
-✅ **Better for Complex Configs**: Easier to maintain
-
-### When to Use YAML
-
-- Multiple destinations (3+)
-- Complex filters with boolean logic
-- Long transformation expressions
-- Team collaboration (easier code reviews)
-- Configuration as documentation
-
-### When to Use JSON
-
-- Simple single-destination configs
-- Programmatic generation
-- API responses
-- Strict typing requirements
-
-## Format Detection
-
-The configuration parser automatically detects the format based on file extension:
-
-```bash
-# YAML format
-CONFIG_FILE=config.yaml ./streamforge
-
-# JSON format (backward compatible)
-CONFIG_FILE=config.json ./streamforge
-```
-
-**Supported extensions:**
-- `.yaml` → YAML format
-- `.yml` → YAML format
-- `.json` → JSON format
-
-## Basic Examples
-
-### Simple Configuration
-
-**YAML** (config.yaml):
 ```yaml
 appid: streamforge
 bootstrap: kafka:9092
@@ -71,728 +16,175 @@ input: source-topic
 output: destination-topic
 offset: latest
 threads: 4
-
-compression:
-  compression_type: raw
-  compression_algo: gzip
 ```
 
-**JSON** (config.json):
-```json
-{
-  "appid": "streamforge",
-  "bootstrap": "kafka:9092",
-  "input": "source-topic",
-  "output": "destination-topic",
-  "offset": "latest",
-  "threads": 4,
-  "compression": {
-    "compression_type": "raw",
-    "compression_algo": "gzip"
-  }
-}
-```
+## Format Detection
 
-### With Consumer Properties
-
-**YAML**:
-```yaml
-consumer_properties:
-  fetch.min.bytes: "1048576"
-  fetch.wait.max.ms: "500"
-  max.poll.records: "500"
-```
-
-**JSON**:
-```json
-{
-  "consumer_properties": {
-    "fetch.min.bytes": "1048576",
-    "fetch.wait.max.ms": "500",
-    "max.poll.records": "500"
-  }
-}
-```
-
-## Readability Comparison
-
-### Example: Multi-Destination Routing
-
-**YAML** (Much More Readable!):
-```yaml
-routing:
-  routing_type: content
-  destinations:
-    # Validated users only
-    - output: validated-users
-      description: Users with valid email format
-      filter: "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$"
-      transform: "CONSTRUCT:email=/user/email:name=/user/name:id=/user/id"
-      partition: /user/id
-
-    # High-value orders
-    - output: premium-orders
-      description: Orders over $500 that are confirmed
-      filter: "AND:/order/total,>,500:/order/status,==,confirmed"
-      transform: |
-        CONSTRUCT:orderId=/order/id:total=/order/total:customer=/customer/email
-      partition: /order/id
-
-    # Bulk discount calculation
-    - output: discounted-prices
-      description: Apply 10% discount for bulk orders
-      filter: "AND:/order/items,>=,10:/order/total,>,100"
-      transform: "ARITHMETIC:MUL,/order/total,0.9"
-      partition: /order/id
-```
-
-**JSON** (Harder to Read):
-```json
-{
-  "routing": {
-    "routing_type": "content",
-    "destinations": [
-      {
-        "output": "validated-users",
-        "description": "Users with valid email format",
-        "filter": "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$",
-        "transform": "CONSTRUCT:email=/user/email:name=/user/name:id=/user/id",
-        "partition": "/user/id"
-      },
-      {
-        "output": "premium-orders",
-        "description": "Orders over $500 that are confirmed",
-        "filter": "AND:/order/total,>,500:/order/status,==,confirmed",
-        "transform": "CONSTRUCT:orderId=/order/id:total=/order/total:customer=/customer/email",
-        "partition": "/order/id"
-      },
-      {
-        "output": "discounted-prices",
-        "description": "Apply 10% discount for bulk orders",
-        "filter": "AND:/order/items,>=,10:/order/total,>,100",
-        "transform": "ARITHMETIC:MUL,/order/total,0.9",
-        "partition": "/order/id"
-      }
-    ]
-  }
-}
-```
-
-### Example: Complex Boolean Logic
-
-**YAML**:
-```yaml
-- output: premium-or-bulk
-  description: Premium users OR bulk orders
-  filter: |
-    OR:AND:/user/tier,==,premium:/user/status,==,active:AND:/order/items,>=,10:/order/total,>,500
-  transform: |
-    CONSTRUCT:userId=/user/id:tier=/user/tier:orderTotal=/order/total:itemCount=/order/items
-```
-
-**JSON**:
-```json
-{
-  "output": "premium-or-bulk",
-  "description": "Premium users OR bulk orders",
-  "filter": "OR:AND:/user/tier,==,premium:/user/status,==,active:AND:/order/items,>=,10:/order/total,>,500",
-  "transform": "CONSTRUCT:userId=/user/id:tier=/user/tier:orderTotal=/order/total:itemCount=/order/items"
-}
-```
-
-Notice how YAML:
-- ✅ No quotes around field names
-- ✅ Comments inline with `#`
-- ✅ Multi-line strings with `|`
-- ✅ Clear visual separation
-- ✅ Less punctuation noise
-
-## YAML Features
-
-### 1. Comments
-
-```yaml
-routing:
-  destinations:
-    # Email validation pipeline
-    - output: validated-users
-      # Uses regex to validate email format
-      filter: "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$"
-      # Extract only essential fields
-      transform: "CONSTRUCT:email=/user/email:name=/user/name"
-```
-
-### 2. Multi-line Strings
-
-**With `|` (preserve newlines):**
-```yaml
-filter: |
-  AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true
-```
-
-**With `>` (fold newlines):**
-```yaml
-description: >
-  This destination processes all premium users
-  who have active subscriptions and have made
-  purchases in the last 30 days.
-```
-
-### 3. Descriptive Structure
-
-```yaml
-destinations:
-  # ============================================
-  # USER PROCESSING
-  # ============================================
-
-  - output: active-users
-    description: Active users only
-    filter: "/user/active,==,true"
-
-  - output: premium-users
-    description: Premium tier users
-    filter: "/user/tier,==,premium"
-
-  # ============================================
-  # ORDER PROCESSING
-  # ============================================
-
-  - output: high-value-orders
-    description: Orders over $1000
-    filter: "/order/total,>,1000"
-```
-
-### 4. Anchors and Aliases (Advanced)
-
-Reuse common configurations:
-
-```yaml
-# Define reusable configs
-x-common-consumer-settings: &common-consumer
-  fetch.min.bytes: "1048576"
-  fetch.wait.max.ms: "500"
-
-x-common-producer-settings: &common-producer
-  batch.size: "65536"
-  linger.ms: "10"
-
-# Use them
-consumer_properties:
-  <<: *common-consumer
-  max.poll.records: "500"
-
-producer_properties:
-  <<: *common-producer
-  compression.type: "gzip"
-```
-
-### 5. Optional Values
-
-```yaml
-# Optional fields can be omitted
-- output: simple-destination
-  filter: "/field,==,value"
-  # No transform, no partition - that's OK!
-```
-
-## Migration from JSON
-
-### Step 1: Convert Format
-
-**Automatic conversion tools:**
+StreamForge detects the config format from the file extension.
 
 ```bash
-# Using yq (install: brew install yq)
-cat config.json | yq -P > config.yaml
-
-# Using python
-python3 -c "import json, yaml, sys; yaml.dump(json.load(sys.stdin), sys.stdout, default_flow_style=False)" < config.json > config.yaml
+CONFIG_FILE=config.yaml ./target/release/streamforge
+CONFIG_FILE=config.yml ./target/release/streamforge
+CONFIG_FILE=config.json ./target/release/streamforge
 ```
 
-### Step 2: Add Comments
+Use YAML for hand-written pipeline configs. JSON is still accepted for generated configs.
+
+## Routing Shape
 
 ```yaml
-# Add descriptive comments
-- output: validated-users
-  description: Users with valid email format  # This shows in logs
-  filter: "REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$"
-```
-
-### Step 3: Use Multi-line for Complex Filters
-
-**Before:**
-```yaml
-filter: "AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true"
-```
-
-**After:**
-```yaml
-filter: |
-  AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true
-```
-
-Even better with comments:
-```yaml
-# Match CRUD operations from API or web sources, excluding tests
-filter: |
-  AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true
-```
-
-### Step 4: Organize with Sections
-
-```yaml
-routing:
-  destinations:
-    # ============================================
-    # VALIDATION PIPELINE
-    # ============================================
-    - output: validated-users
-      # ... config ...
-
-    # ============================================
-    # ANALYTICS PIPELINE
-    # ============================================
-    - output: analytics-events
-      # ... config ...
-```
-
-## Error Handling Configuration
-
-**New in v1.0.0**: Per-destination error policies provide fine-grained control over how the pipeline handles bad records.
-
-### Error Policy Options
-
-Each destination can specify an `error_policy` field that controls what happens when filter or transform evaluation fails:
-
-```yaml
-routing:
-  destinations:
-    - output: critical-topic
-      error_policy: "fail"         # Halt pipeline on any error (strictest)
-    
-    - output: standard-topic
-      error_policy: "dlq"          # Send to dead letter queue (recommended)
-    
-    - output: analytics-topic
-      error_policy: "skip_and_log" # Skip bad records, log errors (permissive)
-    
-    - output: enrichment-topic
-      error_policy: "continue"     # Continue despite errors (most permissive)
-```
-
-### Policy Descriptions
-
-| Policy | Behavior | Use Case | Risk Level |
-|--------|----------|----------|------------|
-| **fail** | Halt pipeline immediately | Financial transactions, audit logs, compliance data | 🔴 High (pipeline fragility) |
-| **dlq** | Send failed messages to DLQ, continue processing | Most production use cases | 🟡 Medium (requires DLQ monitoring) |
-| **skip_and_log** | Skip bad messages, log warnings, continue | Analytics, metrics, non-critical data | 🟢 Low (data loss possible) |
-| **continue** | Log error but don't DLQ, continue processing | Enrichment, optional fields | 🟢 Low (silent failures) |
-
-### Decision Matrix
-
-Choose your error policy based on data criticality:
-
-**Critical Data (never lose)**:
-```yaml
-- output: financial-transactions
-  error_policy: "fail"
-  # If any message fails → pipeline stops
-  # Pro: Never lose or corrupt data
-  # Con: Pipeline fragile to bad records
-```
-
-**Important Data (preserve for debugging)**:
-```yaml
-- output: user-events
-  error_policy: "dlq"
-  # If any message fails → send to DLQ, continue
-  # Pro: Pipeline continues, bad records preserved
-  # Con: Requires monitoring DLQ topic
-```
-
-**Analytics Data (high throughput)**:
-```yaml
-- output: pageview-metrics
-  error_policy: "skip_and_log"
-  # If any message fails → log error, skip, continue
-  # Pro: Maximum throughput, never blocks
-  # Con: Bad records lost (only logged)
-```
-
-**Best-Effort Enrichment**:
-```yaml
-- output: enriched-events
-  error_policy: "continue"
-  # If enrichment fails → log error, continue
-  # Pro: Main data flow unaffected
-  # Con: Enrichment may silently fail
-```
-
-### Complete Example
-
-```yaml
-appid: "error-handling-demo"
-bootstrap: "localhost:9092"
-input: "raw-events"
-
 routing:
   routing_type: "filter"
   destinations:
-    # Strategy 1: STRICT - Halt on error
-    - output: "financial-transactions"
-      filter: "$type == 'transaction'"
-      error_policy: "fail"
-    
-    # Strategy 2: DLQ - Recommended default
-    - output: "user-events"
-      filter: "$status == 'active'"
-      error_policy: "dlq"
-    
-    # Strategy 3: SKIP - High throughput
-    - output: "analytics-events"
-      filter: "$event_type == 'pageview'"
-      error_policy: "skip_and_log"
+    - output: "analytics-orders"
+      description: "US orders over the analytics threshold"
+      filter: "and($region == 'us', $amount >= 100)"
+      transform: "construct(order_id=$order_id, customer_id=$customer.id, amount=$amount)"
+      key_transform: "$order_id"
+      headers:
+        x-pipeline: "orders-analytics"
+```
 
-# Dead letter queue configuration (required for error_policy: "dlq")
+## V2 DSL in YAML
+
+StreamForge docs use V2 DSL only.
+
+Use compact expressions for short routes:
+
+```yaml
+filter: "$customer.tier == 'premium'"
+transform: "construct(user_id=$user.id, tier=$customer.tier)"
+key_transform: "$user.id"
+```
+
+Use folded strings for longer expressions:
+
+```yaml
+filter: >
+  and(
+    $event_type == 'order_completed',
+    $customer.tier == 'premium',
+    $order.amount >= 100
+  )
+transform: >
+  construct(
+    order_id=$order.id,
+    customer_id=$customer.id,
+    amount=$order.amount,
+    region=$region,
+    created_at=$event_time
+  )
+```
+
+## Multi-Destination Example
+
+```yaml
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "validated-users"
+      description: "Users with valid email format"
+      filter: "regex(field('/user/email'), '^[^@]+@[^@]+\\.[^@]+$')"
+      transform: "construct(id=$user.id, email=$user.email, name=$user.name)"
+      key_transform: "$user.id"
+
+    - output: "premium-orders"
+      description: "Confirmed high-value orders"
+      filter: "and($order.total > 500, $order.status == 'confirmed')"
+      transform: "construct(order_id=$order.id, total=$order.total, customer=$customer.email)"
+      key_transform: "$order.id"
+
+    - output: "partner-safe-events"
+      description: "Approved fields only for partner systems"
+      filter: "and($consent.third_party == true, exists('/properties/non_pii'))"
+      transform: "construct(event=$event_type, properties=$properties.non_pii)"
+      key_transform: "hash('SHA256', $user.id)"
+```
+
+## PII Redaction Pattern
+
+```yaml
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "user-events-analytics"
+      filter: "exists('/user/id')"
+      transform: "construct(user_id=$user.id, event_type=$event_type, timestamp=$timestamp, region=$region)"
+      key_transform: "hash('SHA256', $user.id)"
+
+    - output: "events-third-party"
+      filter: "$consent.third_party == true"
+      transform: "construct(event=$event_type, properties=$properties.non_pii)"
+      key_transform: "hash('SHA256', $user.id)"
+```
+
+## CDC Pattern
+
+```yaml
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "datalake-orders"
+      filter: "or($payload.op == 'c', $payload.op == 'u')"
+      transform: "field('/payload/after')"
+      key_transform: "$payload.after.id"
+
+    - output: "datalake-orders-deleted"
+      filter: "$payload.op == 'd'"
+      transform: "construct(id=$payload.before.id, deleted_at=$payload.ts_ms)"
+      key_transform: "$payload.before.id"
+
+    - output: "datalake-schema-changes"
+      filter: "$payload.op == 's'"
+      transform: "field('/payload')"
+```
+
+## Performance
+
+```yaml
+threads: 8
+performance:
+  fetch_min_bytes: 1048576
+  fetch_max_wait_ms: 100
+  max_partition_fetch_bytes: 5242880
+  batch_size: 2000
+  linger_ms: 20
+  compression: "zstd"
+```
+
+## Retry and DLQ
+
+```yaml
+retry:
+  max_attempts: 3
+  initial_delay_ms: 100
+  max_delay_ms: 30000
+  multiplier: 2.0
+  jitter: 0.1
+
 dlq:
   enabled: true
   topic: "streamforge-dlq"
-  max_retries: 3
+  include_original_headers: true
+  include_stack_trace: false
+  max_dlq_retries: 3
 ```
 
-### Observability
-
-Track error handling with Prometheus metrics:
-
-```promql
-# Count of messages filtered due to errors
-streamforge_messages_filtered{reason="error"}
-
-# Error rate by destination
-rate(streamforge_processing_errors_total[5m])
-```
-
-**Alerting recommendations**:
-- Alert on DLQ message rate > threshold
-- Alert on skipped message rate > threshold  
-- Alert on pipeline halts (error_policy: fail)
-
-### Try() Function for Inline Error Handling
-
-**New in v1.0.0**: The `try()` function provides field-level fallback values for transform errors.
-
-While `error_policy` controls pipeline-level error handling, `try()` provides inline error handling at the transform level:
+## Observability
 
 ```yaml
-routing:
-  destinations:
-    - output: "enriched-users"
-      transform: "TRY:STRING:UPPER,/name,'UNKNOWN'"
-      # If /name doesn't exist or transform fails → use 'UNKNOWN'
-    
-    - output: "orders"
-      transform: "TRY:/order/amount,0"
-      # If /order/amount doesn't exist → use 0
-    
-    - output: "emails"
-      transform: "TRY:/user/email,'invalid@example.com'"
-      # If /user/email doesn't exist → use fallback
-```
-
-**Try() Syntax:**
-```
-TRY:transform_expression,fallback_value
-```
-
-**Fallback Value Types:**
-- String: `'text'` or `"text"`
-- Number: `42` or `3.14`
-- Boolean: `true` or `false`
-- Null: `null`
-
-**Combining try() and error_policy:**
-
-```yaml
-- output: "safe-processing"
-  transform: "TRY:STRING:UPPER,/status,'UNKNOWN'"
-  error_policy: "skip_and_log"
-  # try() handles transform errors (missing fields)
-  # error_policy handles filter errors and other issues
-```
-
-**Use Cases:**
-
-1. **Optional Fields**: Provide defaults for missing optional data
-   ```yaml
-   transform: "TRY:/optional_field,'default'"
-   ```
-
-2. **Data Quality**: Handle poor data quality gracefully
-   ```yaml
-   transform: "TRY:/user/email,'invalid@example.com'"
-   ```
-
-3. **Type Conversions**: Safe type conversions with fallbacks
-   ```yaml
-   transform: "TRY:STRING:LENGTH,/text,0"
-   ```
-
-**Decision Guide: try() vs error_policy**
-
-| Scenario | Use try() | Use error_policy |
-|----------|-----------|------------------|
-| Optional field with default | ✅ Yes | Maybe |
-| Required field | No | ✅ Yes |
-| Per-field control | ✅ Yes | No |
-| Pipeline-level control | No | ✅ Yes |
-| Filter errors | No | ✅ Yes |
-| Transform errors | ✅ Yes | ✅ Yes |
-
-**Best Practice**: Use both together:
-- `try()` for optional fields and data quality issues
-- `error_policy` for pipeline resilience and routing control
-
-### See Also
-
-- [ERROR_HANDLING.md](ERROR_HANDLING.md) - Complete error handling guide
-- [DELIVERY_GUARANTEES.md](DELIVERY_GUARANTEES.md) - At-least-once semantics
-- [examples/configs/error-handling-strategies.yaml](../examples/configs/error-handling-strategies.yaml) - Policy examples
-- [examples/configs/try-function-examples.yaml](../examples/configs/try-function-examples.yaml) - Try() examples
-
-## Best Practices
-
-### 1. Use Comments Liberally
-
-```yaml
-- output: premium-orders
-  # Business rule: Orders over $500 require manual review
-  filter: "AND:/order/total,>,500:/order/status,==,confirmed"
-  # Extract fields needed for review dashboard
-  transform: "CONSTRUCT:orderId=/order/id:total=/order/total:customer=/customer/email"
-```
-
-### 2. Group Related Destinations
-
-```yaml
-destinations:
-  # User validation and routing
-  - output: validated-users
-    # ... config ...
-  - output: corporate-users
-    # ... config ...
-
-  # Order processing
-  - output: premium-orders
-    # ... config ...
-  - output: bulk-orders
-    # ... config ...
-```
-
-### 3. Use Descriptive Names
-
-```yaml
-# Good
-- output: high-value-confirmed-orders
-  description: Orders over $500 that are confirmed
-
-# Less clear
-- output: orders1
-  description: special orders
-```
-
-### 4. Document Complex Filters
-
-```yaml
-- output: complex-routing
-  # This filter routes:
-  # 1. CRUD operations (create/update/delete)
-  # 2. From API or web sources
-  # 3. Excluding test events
-  filter: |
-    AND:REGEX:/event/type,^(create|update|delete)$:OR:/event/source,==,api:/event/source,==,web:NOT:/event/test,==,true
-```
-
-### 5. Consistent Indentation
-
-Use 2 spaces (YAML standard):
-
-```yaml
-routing:
-  destinations:
-    - output: topic1
-      filter: "..."
-      transform: "..."
-```
-
-### 6. Multi-line for Long Expressions
-
-**Hard to read:**
-```yaml
-transform: "CONSTRUCT:userId=/user/id:userName=/user/name:userEmail=/user/email:userTier=/user/tier:orderTotal=/order/total:orderStatus=/order/status"
-```
-
-**Better:**
-```yaml
-transform: |
-  CONSTRUCT:userId=/user/id:userName=/user/name:userEmail=/user/email:userTier=/user/tier:orderTotal=/order/total:orderStatus=/order/status
-```
-
-**Even better with structure:**
-```yaml
-# Extract user and order summary
-transform: |
-  CONSTRUCT:userId=/user/id:userName=/user/name:userEmail=/user/email:userTier=/user/tier:orderTotal=/order/total:orderStatus=/order/status
-```
-
-## Example Configurations
-
-### Example 1: Development Config
-
-```yaml
-# Development environment configuration
-appid: streamforge-dev
-bootstrap: localhost:9092
-input: dev-events
-offset: earliest  # Start from beginning for dev
-
-# Low resource usage for local dev
-threads: 2
-
-routing:
-  destinations:
-    # Just copy everything for testing
-    - output: dev-mirror
-      description: Simple mirror for development
-```
-
-### Example 2: Production Config
-
-```yaml
-# Production environment configuration
-appid: streamforge-prod
-bootstrap: prod-kafka-1:9092,prod-kafka-2:9092,prod-kafka-3:9092
-target_broker: prod-kafka-target-1:9092,prod-kafka-target-2:9092
-input: production-events
-offset: latest
-
-# Production-grade settings
-threads: 8
-
-compression:
-  compression_type: raw
-  compression_algo: snappy  # Fast compression for production
-
-routing:
-  routing_type: content
-  destinations:
-    # Production destinations with business logic
-    - output: validated-users
-      description: Production user validation pipeline
-      filter: |
-        AND:REGEX:/user/email,^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$:NOT:REGEX:/user/email,@(test|temp)\\.
-      transform: "CONSTRUCT:id=/user/id:email=/user/email"
-      partition: /user/id
-
-    # Audit trail for compliance
-    - output: audit-trail
-      description: Complete audit trail for compliance
-      transform: /
-
-# Production Kafka settings
-consumer_properties:
-  fetch.min.bytes: "1048576"
-  fetch.wait.max.ms: "500"
-  max.poll.records: "1000"
-  session.timeout.ms: "30000"
-
-producer_properties:
-  batch.size: "131072"
-  linger.ms: "10"
-  compression.type: "snappy"
-  acks: "1"
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
+  lag_monitoring_enabled: true
+  lag_monitoring_interval_secs: 30
 ```
 
 ## Validation
 
-### YAML Syntax Validation
-
 ```bash
-# Check syntax with yamllint (install: pip install yamllint)
-yamllint config.yaml
-
-# Check with yq
-yq eval config.yaml
-
-# Test loading
-./streamforge --help  # If no error, config is valid
+cargo run --quiet --bin streamforge-validate -- config.yaml
 ```
 
-### Common YAML Errors
-
-**Wrong indentation:**
-```yaml
-# Wrong
-routing:
-destinations:  # Should be indented
-  - output: topic1
-```
-
-**Missing quotes for special characters:**
-```yaml
-# Wrong - colons need quotes
-filter: /path:value
-
-# Right
-filter: "/path:value"
-```
-
-**Mixing tabs and spaces:**
-```yaml
-# Use spaces only, never tabs
-```
-
-## Comparison Summary
-
-| Feature | JSON | YAML |
-|---------|------|------|
-| Readability | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Comments | ❌ | ✅ |
-| Multi-line strings | ❌ | ✅ |
-| Less punctuation | ❌ | ✅ |
-| Visual structure | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Complex configs | ⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Code reviews | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Programmatic | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
-| Strict typing | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
-
-## Recommendation
-
-**Use YAML for:**
-- ✅ Production configurations
-- ✅ Multi-destination routing (3+ destinations)
-- ✅ Complex filters and transforms
-- ✅ Team collaboration
-- ✅ Configuration documentation
-
-**Use JSON for:**
-- ✅ Simple single-destination configs
-- ✅ Programmatically generated configs
-- ✅ CI/CD templates
-- ✅ Strict schema validation
-
-## See Also
-
-- [config.example.yaml](../examples/configs/config.example.yaml) - Simple YAML example
-- [config.multidest.yaml](../examples/configs/config.multidest.yaml) - Multi-destination YAML
-- [config.advanced.yaml](../examples/configs/config.advanced.yaml) - Advanced YAML with all features
-- [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Filter and transform syntax
-- [USAGE.md](USAGE.md) - Complete use cases
-
----
-
-**Try it now!** Copy one of the YAML examples and run:
-```bash
-CONFIG_FILE=config.yaml ./streamforge
-```
+Validation checks the YAML shape, routing destinations, filters, transforms, key transforms, and supported operational settings before you deploy.

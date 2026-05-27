@@ -7,6 +7,8 @@ nav_order: 6
 
 Use these example packs when you want a validated starting point for StreamForge.
 
+All promoted examples use V2 DSL for filters, transforms, and key transforms.
+
 ## Local Demo
 
 - [Redpanda Demo](https://github.com/rahulbsw/streamforge/tree/main/examples/redpanda) - Fastest local walkthrough for selective replication to analytics and PII-safe topics

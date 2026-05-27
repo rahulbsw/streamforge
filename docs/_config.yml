@@ -41,10 +41,9 @@ exclude:
   - "QUICK_REFERENCE.md"
   - "TEST_COVERAGE.md"
   - "TYPED_ENVELOPE_DESIGN.md"
-  - "V1_GUARANTEES.md"
 
 # just-the-docs configuration
-color_scheme: dark   # options: default (light), dark
+color_scheme: streamforge
 
 # Navigation
 nav_sort: case_insensitive

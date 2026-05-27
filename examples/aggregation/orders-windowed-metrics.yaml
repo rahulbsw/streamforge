@@ -8,8 +8,8 @@ routing:
   routing_type: "filter"
   destinations:
     - output: "orders-metrics-1m"
-      filter: "AND:/event_type,==,order_completed:/region,==,us"
-      transform: "CONSTRUCT:region=/region:customer_id=/customer_id:amount=/amount"
+      filter: "and($event_type == 'order_completed', $region == 'us')"
+      transform: "construct(region=$region, customer_id=$customer_id, amount=$amount)"
       aggregation:
         group_by:
           - name: region

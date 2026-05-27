@@ -8,8 +8,8 @@ routing:
   routing_type: "filter"
   destinations:
     - output: "orders-amount-quantiles-1m"
-      filter: "/event_type,==,order_completed"
-      transform: "CONSTRUCT:region=/region:amount=/amount"
+      filter: "$event_type == 'order_completed'"
+      transform: "construct(region=$region, amount=$amount)"
       aggregation:
         group_by:
           - name: region

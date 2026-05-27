@@ -20,22 +20,26 @@ performance:
   compression: "zstd"           # Fast compression
 
 # Commit every 5 seconds for throughput
-commit_strategy: "manual"
-commit_interval_ms: 5000
+commit_strategy:
+  manual_commit: true
+  commit_mode: async
+  commit_interval_ms: 5000
 
 # Retry policy with exponential backoff
 retry:
   max_attempts: 3
   initial_delay_ms: 100
   max_delay_ms: 30000
-  jitter: true
+  multiplier: 2.0
+  jitter: 0.1
 
 # DLQ for failed messages
 dlq:
   enabled: true
   topic: "user-filtering-dlq"
-  include_error_headers: true
-  max_retries: 3
+  include_original_headers: true
+  include_stack_trace: false
+  max_dlq_retries: 3
 
 # Routing configuration
 routing:
@@ -43,9 +47,9 @@ routing:
   destinations:
     # Active users with complete profiles
     - output: "active-users"
-      filter: "AND:/status,==,active:/profile/complete,==,true"
-      transform: "/data"
-      key_transform: "/user/id"
+      filter: "and($status == 'active', $profile.complete == true)"
+      transform: "field('/data')"
+      key_transform: "$user.id"
       partitioning: "hash"
       headers:
         x-pipeline: "user-filtering"
@@ -53,46 +57,39 @@ routing:
 
     # Premium tier users
     - output: "premium-users"
-      filter: "/tier,==,premium"
-      transform: "CONSTRUCT:id=/user/id:email=/email:tier=/tier:created=/created_at"
-      key_transform: "/user/id"
+      filter: "$tier == 'premium'"
+      transform: "construct(id=$user.id, email=$email, tier=$tier, created=$created_at)"
+      key_transform: "$user.id"
       headers:
         x-pipeline: "user-filtering"
         x-tier: "premium"
 
-    # New user registrations (last 24 hours)
+    # New user registrations
     - output: "new-users"
-      filter: "TIMESTAMP_AGE:<,86400"
-      transform: "/data"
-      key_transform: "/user/id"
+      filter: "$event_type == 'user_registered'"
+      transform: "field('/data')"
+      key_transform: "$user.id"
       headers:
         x-pipeline: "user-filtering"
         x-destination: "new-users"
 
     # Users by region (for regional processing)
     - output: "users-us"
-      filter: "/region,==,us"
-      transform: "/data"
-      key_transform: "/user/id"
+      filter: "$region == 'us'"
+      transform: "field('/data')"
+      key_transform: "$user.id"
       partitioning: "field"
       partition_field: "/state"
 
     - output: "users-eu"
-      filter: "/region,==,eu"
-      transform: "/data"
-      key_transform: "/user/id"
+      filter: "$region == 'eu'"
+      transform: "field('/data')"
+      key_transform: "$user.id"
       partitioning: "field"
       partition_field: "/country"
 
 # Metrics for monitoring
-metrics:
-  enabled: true
-  port: 8080
-  path: "/metrics"
-
-# Local cache for enrichment (if needed)
-cache:
-  enabled: true
-  type: "local"
-  ttl_seconds: 300
-  max_entries: 10000
+observability:
+  metrics_enabled: true
+  metrics_port: 8080
+  metrics_path: "/metrics"
