@@ -27,8 +27,8 @@ routing:
   routing_type: "filter"
   destinations:
     - output: "orders-metrics-1m"
-      filter: "/event_type,==,order_completed"
-      transform: "CONSTRUCT:region=/region:customer_id=/customer_id:amount=/amount"
+      filter: "$event_type == 'order_completed'"
+      transform: "construct(region=$region, customer_id=$customer_id, amount=$amount)"
       aggregation:
         group_by:
           - name: region
@@ -58,7 +58,7 @@ routing:
 ## Execution Model
 
 - Aggregations run after the destination `filter` and value `transform`.
-- v1 aggregation uses processing time for window assignment and window closure checks.
+- Aggregations use processing time for window assignment and window closure checks.
 - State is in-memory only for this first release.
 - Aggregated records are emitted to the destination `output` topic.
 - The emitted record key is the canonical JSON encoding of the ordered `group_by` name/value pair list, for example `[{"name":"region","value":"us"}]`.

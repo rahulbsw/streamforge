@@ -9,7 +9,7 @@
 use std::fs;
 use std::path::PathBuf;
 use streamforge::config::MirrorMakerConfig;
-use streamforge::filter_parser::{parse_filter, parse_transform_with_cache};
+use streamforge::filter_parser::{parse_filter, parse_key_transform, parse_transform_with_cache};
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -142,19 +142,8 @@ fn main() {
                 if opt.verbose {
                     println!("  │  Key transform: {}", key_expr);
                 }
-                // Key transforms use a simpler syntax, validate as transform
-                if key_expr.starts_with('/')
-                    || key_expr.starts_with("HASH:")
-                    || key_expr.starts_with("CONSTRUCT:")
-                {
-                    if let Err(e) = parse_transform_with_cache(key_expr, None) {
-                        errors.push(format!("{} - Key transform: {}", dest_name, e));
-                    }
-                } else if !key_expr.starts_with("CONSTANT:") && !key_expr.contains('{') {
-                    warnings.push(format!(
-                        "{} - Key transform '{}' may be invalid. Expected: '/path', 'CONSTANT:...', 'HASH:...', or template",
-                        dest_name, key_expr
-                    ));
+                if let Err(e) = parse_key_transform(key_expr) {
+                    errors.push(format!("{} - Key transform: {}", dest_name, e));
                 }
             }
 

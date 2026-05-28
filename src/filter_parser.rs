@@ -1,4 +1,6 @@
 use crate::cache::SyncCacheManager;
+use crate::dsl::{parse_filter_expr, ComparisonOp as DslComparisonOp, FilterExpr, Literal, Node};
+use crate::envelope::MessageEnvelope;
 use crate::error::{MirrorMakerError, Result};
 use crate::filter::{
     AndFilter, ArithmeticOp, ArithmeticTransform, ArrayFilter, ArrayFilterMode, ArrayMapTransform,
@@ -14,6 +16,7 @@ use crate::filter::{
 };
 use crate::hash::HashAlgorithm;
 use regex::Regex;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -43,6 +46,14 @@ pub fn parse_filter(expr: &str) -> Result<Arc<dyn Filter>> {
 
 /// Internal helper that returns Box instead of Arc
 fn parse_filter_as_box(expr: &str) -> Result<Box<dyn Filter>> {
+    let trimmed = expr.trim();
+    if is_v2_filter_syntax(trimmed) {
+        let parsed = parse_filter_expr(trimmed).map_err(|e| {
+            MirrorMakerError::Config(format!("Invalid function-style filter: {}", e))
+        })?;
+        return Ok(Box::new(FunctionStyleFilter::new(parsed)));
+    }
+
     let parts: Vec<&str> = expr.split(':').collect();
 
     if parts.is_empty() {
@@ -72,6 +83,300 @@ fn parse_filter_as_box(expr: &str) -> Result<Box<dyn Filter>> {
         "TIMESTAMP_AFTER" => parse_timestamp_after_filter(&parts[1..]),
         "TIMESTAMP_BEFORE" => parse_timestamp_before_filter(&parts[1..]),
         _ => parse_simple_filter(expr),
+    }
+}
+
+fn is_v2_filter_syntax(expr: &str) -> bool {
+    expr.starts_with('$')
+        || expr.starts_with("and(")
+        || expr.starts_with("or(")
+        || expr.starts_with("not(")
+        || expr.starts_with("field(")
+        || expr.starts_with("exists(")
+        || expr.starts_with("not_exists(")
+        || expr.starts_with("is_null(")
+        || expr.starts_with("is_not_null(")
+        || expr.starts_with("is_empty(")
+        || expr.starts_with("is_not_empty(")
+        || expr.starts_with("is_blank(")
+        || expr.starts_with("regex(")
+}
+
+struct FunctionStyleFilter {
+    expr: Node<FilterExpr>,
+}
+
+impl FunctionStyleFilter {
+    fn new(expr: Node<FilterExpr>) -> Self {
+        Self { expr }
+    }
+}
+
+impl Filter for FunctionStyleFilter {
+    fn evaluate(&self, value: &Value) -> Result<bool> {
+        let envelope = MessageEnvelope::new(value.clone());
+        self.evaluate_envelope(&envelope)
+    }
+
+    fn evaluate_envelope(&self, envelope: &MessageEnvelope) -> Result<bool> {
+        evaluate_function_style_filter(&self.expr, envelope)
+    }
+}
+
+fn evaluate_function_style_filter(
+    node: &Node<FilterExpr>,
+    envelope: &MessageEnvelope,
+) -> Result<bool> {
+    match &node.value {
+        FilterExpr::JsonPath { path, op, value } => {
+            let Some(actual) = extract_value(&envelope.value, path) else {
+                return Ok(false);
+            };
+            Ok(compare_values(actual, op, value))
+        }
+        FilterExpr::And(exprs) => {
+            for expr in exprs {
+                if !evaluate_function_style_filter(expr, envelope)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        FilterExpr::Or(exprs) => {
+            for expr in exprs {
+                if evaluate_function_style_filter(expr, envelope)? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        FilterExpr::Not(expr) => Ok(!evaluate_function_style_filter(expr, envelope)?),
+        FilterExpr::Regex { path, pattern } => {
+            let Some(actual) = extract_value(&envelope.value, path).and_then(Value::as_str) else {
+                return Ok(false);
+            };
+            let regex = Regex::new(pattern).map_err(|e| {
+                MirrorMakerError::Config(format!("Invalid regex pattern '{}': {}", pattern, e))
+            })?;
+            Ok(regex.is_match(actual))
+        }
+        FilterExpr::ArrayAny {
+            array_path,
+            element_filter,
+        } => {
+            let Some(values) = extract_value(&envelope.value, array_path).and_then(Value::as_array)
+            else {
+                return Ok(false);
+            };
+            for value in values {
+                let element = MessageEnvelope::new(value.clone());
+                if evaluate_function_style_filter(element_filter, &element)? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        FilterExpr::ArrayAll {
+            array_path,
+            element_filter,
+        } => {
+            let Some(values) = extract_value(&envelope.value, array_path).and_then(Value::as_array)
+            else {
+                return Ok(false);
+            };
+            for value in values {
+                let element = MessageEnvelope::new(value.clone());
+                if !evaluate_function_style_filter(element_filter, &element)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        FilterExpr::ArrayContains { array_path, value } => {
+            let Some(values) = extract_value(&envelope.value, array_path).and_then(Value::as_array)
+            else {
+                return Ok(false);
+            };
+            let expected = literal_to_value(value);
+            Ok(values.iter().any(|actual| actual == &expected))
+        }
+        FilterExpr::ArrayLength {
+            array_path,
+            op,
+            length,
+        } => {
+            let Some(actual) = extract_value(&envelope.value, array_path).and_then(Value::as_array)
+            else {
+                return Ok(false);
+            };
+            Ok(compare_numbers(actual.len() as f64, op, *length as f64))
+        }
+        FilterExpr::KeyPrefix(prefix) => Ok(key_as_string(envelope)
+            .as_deref()
+            .is_some_and(|key| key.starts_with(prefix))),
+        FilterExpr::KeyMatches(pattern) => {
+            let Some(key) = key_as_string(envelope) else {
+                return Ok(false);
+            };
+            let regex = Regex::new(pattern).map_err(|e| {
+                MirrorMakerError::Config(format!("Invalid key regex '{}': {}", pattern, e))
+            })?;
+            Ok(regex.is_match(&key))
+        }
+        FilterExpr::KeySuffix(suffix) => Ok(key_as_string(envelope)
+            .as_deref()
+            .is_some_and(|key| key.ends_with(suffix))),
+        FilterExpr::KeyContains(substring) => Ok(key_as_string(envelope)
+            .as_deref()
+            .is_some_and(|key| key.contains(substring))),
+        FilterExpr::Header { name, op, value } => {
+            let Some(actual) = envelope.header_str(name) else {
+                return Ok(false);
+            };
+            Ok(compare_strings(&actual, op, value))
+        }
+        FilterExpr::TimestampAge { op, seconds } => {
+            let Some(age) = envelope.age_seconds() else {
+                return Ok(false);
+            };
+            Ok(compare_numbers(age as f64, op, *seconds as f64))
+        }
+        FilterExpr::Exists(path) => Ok(extract_value(&envelope.value, path).is_some()),
+        FilterExpr::NotExists(path) => Ok(extract_value(&envelope.value, path).is_none()),
+        FilterExpr::IsNull(path) => Ok(matches!(
+            extract_value(&envelope.value, path),
+            Some(Value::Null)
+        )),
+        FilterExpr::IsNotNull(path) => Ok(matches!(
+            extract_value(&envelope.value, path),
+            Some(value) if !value.is_null()
+        )),
+        FilterExpr::IsEmpty(path) => {
+            Ok(extract_value(&envelope.value, path).is_some_and(is_empty_value))
+        }
+        FilterExpr::IsNotEmpty(path) => {
+            Ok(extract_value(&envelope.value, path).is_some_and(|value| !is_empty_value(value)))
+        }
+        FilterExpr::IsBlank(path) => {
+            Ok(extract_value(&envelope.value, path).is_none_or(is_blank_value))
+        }
+        FilterExpr::StartsWith { path, prefix } => Ok(extract_value(&envelope.value, path)
+            .and_then(Value::as_str)
+            .is_some_and(|actual| actual.starts_with(prefix))),
+        FilterExpr::EndsWith { path, suffix } => Ok(extract_value(&envelope.value, path)
+            .and_then(Value::as_str)
+            .is_some_and(|actual| actual.ends_with(suffix))),
+        FilterExpr::Contains { path, substring } => Ok(extract_value(&envelope.value, path)
+            .and_then(Value::as_str)
+            .is_some_and(|actual| actual.contains(substring))),
+        FilterExpr::StringLength { path, op, length } => {
+            let Some(actual) = extract_value(&envelope.value, path).and_then(Value::as_str) else {
+                return Ok(false);
+            };
+            Ok(compare_numbers(
+                actual.chars().count() as f64,
+                op,
+                *length as f64,
+            ))
+        }
+    }
+}
+
+fn extract_value<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    if matches!(path, "" | "/" | "/.") {
+        return Some(value);
+    }
+
+    let mut current = value;
+    for part in path.trim_matches('/').split('/') {
+        if part.is_empty() {
+            continue;
+        }
+        current = current.get(part)?;
+    }
+    Some(current)
+}
+
+fn compare_values(actual: &Value, op: &DslComparisonOp, expected: &Literal) -> bool {
+    match expected {
+        Literal::Number(expected) => actual
+            .as_f64()
+            .is_some_and(|actual| compare_numbers(actual, op, *expected)),
+        Literal::String(expected) => actual
+            .as_str()
+            .is_some_and(|actual| compare_strings(actual, op, expected)),
+        Literal::Boolean(expected) => match op {
+            DslComparisonOp::Eq => actual.as_bool() == Some(*expected),
+            DslComparisonOp::Ne => actual.as_bool() != Some(*expected),
+            _ => false,
+        },
+        Literal::Null => match op {
+            DslComparisonOp::Eq => actual.is_null(),
+            DslComparisonOp::Ne => !actual.is_null(),
+            _ => false,
+        },
+    }
+}
+
+fn compare_strings(actual: &str, op: &DslComparisonOp, expected: &str) -> bool {
+    match op {
+        DslComparisonOp::Eq => actual == expected,
+        DslComparisonOp::Ne => actual != expected,
+        DslComparisonOp::Gt => actual > expected,
+        DslComparisonOp::Ge => actual >= expected,
+        DslComparisonOp::Lt => actual < expected,
+        DslComparisonOp::Le => actual <= expected,
+    }
+}
+
+fn compare_numbers(actual: f64, op: &DslComparisonOp, expected: f64) -> bool {
+    match op {
+        DslComparisonOp::Eq => (actual - expected).abs() < f64::EPSILON,
+        DslComparisonOp::Ne => (actual - expected).abs() >= f64::EPSILON,
+        DslComparisonOp::Gt => actual > expected,
+        DslComparisonOp::Ge => actual >= expected,
+        DslComparisonOp::Lt => actual < expected,
+        DslComparisonOp::Le => actual <= expected,
+    }
+}
+
+fn literal_to_value(literal: &Literal) -> Value {
+    match literal {
+        Literal::String(value) => Value::String(value.clone()),
+        Literal::Number(value) => serde_json::Number::from_f64(*value)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        Literal::Boolean(value) => Value::Bool(*value),
+        Literal::Null => Value::Null,
+    }
+}
+
+fn key_as_string(envelope: &MessageEnvelope) -> Option<String> {
+    match envelope.key.as_ref()? {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Null => Some("null".to_string()),
+        Value::Array(_) | Value::Object(_) => serde_json::to_string(envelope.key.as_ref()?).ok(),
+    }
+}
+
+fn is_empty_value(value: &Value) -> bool {
+    match value {
+        Value::String(value) => value.is_empty(),
+        Value::Array(value) => value.is_empty(),
+        Value::Object(value) => value.is_empty(),
+        _ => false,
+    }
+}
+
+fn is_blank_value(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(value) => value.trim().is_empty(),
+        Value::Array(value) => value.is_empty(),
+        Value::Object(value) => value.is_empty(),
+        _ => false,
     }
 }
 
@@ -315,25 +620,311 @@ pub fn parse_transform_with_cache(
     expr: &str,
     cache_manager: Option<Arc<SyncCacheManager>>,
 ) -> Result<Arc<dyn Transform>> {
-    if let Some(rest) = expr.strip_prefix("TRY:") {
+    let trimmed = expr.trim();
+
+    if let Some(transform) = parse_function_style_transform(trimmed)? {
+        return Ok(transform);
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("TRY:") {
         parse_try_transform(rest, cache_manager)
-    } else if let Some(rest) = expr.strip_prefix("CONSTRUCT:") {
+    } else if let Some(rest) = trimmed.strip_prefix("CONSTRUCT:") {
         parse_construct_transform(rest)
-    } else if let Some(rest) = expr.strip_prefix("ARRAY_MAP:") {
+    } else if let Some(rest) = trimmed.strip_prefix("ARRAY_MAP:") {
         parse_array_map_transform(rest)
-    } else if let Some(rest) = expr.strip_prefix("ARITHMETIC:") {
+    } else if let Some(rest) = trimmed.strip_prefix("ARITHMETIC:") {
         parse_arithmetic_transform(rest)
-    } else if let Some(rest) = expr.strip_prefix("HASH:") {
+    } else if let Some(rest) = trimmed.strip_prefix("HASH:") {
         parse_hash_transform(rest)
-    } else if let Some(rest) = expr.strip_prefix("CACHE_LOOKUP:") {
+    } else if let Some(rest) = trimmed.strip_prefix("CACHE_LOOKUP:") {
         parse_cache_lookup_transform(rest, cache_manager)
-    } else if let Some(rest) = expr.strip_prefix("CACHE_PUT:") {
+    } else if let Some(rest) = trimmed.strip_prefix("CACHE_PUT:") {
         parse_cache_put_transform(rest, cache_manager)
-    } else if let Some(rest) = expr.strip_prefix("STRING:") {
+    } else if let Some(rest) = trimmed.strip_prefix("STRING:") {
         parse_string_transform(rest)
     } else {
-        Ok(Arc::new(JsonPathTransform::new(expr)?))
+        Ok(Arc::new(JsonPathTransform::new(trimmed)?))
     }
+}
+
+fn parse_function_style_transform(expr: &str) -> Result<Option<Arc<dyn Transform>>> {
+    if let Some(path) = parse_field_path_expr(expr)? {
+        return Ok(Some(Arc::new(JsonPathTransform::new(&path)?)));
+    }
+
+    if let Some(args) = parse_call_args(expr, "construct")? {
+        let fields = parse_construct_args(&args)?;
+        return Ok(Some(Arc::new(ObjectConstructTransform::new(fields)?)));
+    }
+
+    if let Some(args) = parse_call_args(expr, "hash")? {
+        let (algorithm, path, output_field) = parse_hash_args(&args)?;
+        let transform = match output_field {
+            Some(output_field) => HashTransform::new_with_output(&path, algorithm, &output_field)?,
+            None => HashTransform::new(&path, algorithm)?,
+        };
+        return Ok(Some(Arc::new(transform)));
+    }
+
+    Ok(None)
+}
+
+fn parse_field_path_expr(expr: &str) -> Result<Option<String>> {
+    let expr = expr.trim();
+
+    if expr.starts_with('/') {
+        return Ok(Some(expr.to_string()));
+    }
+
+    if let Some(args) = parse_call_args(expr, "field")? {
+        if args.len() != 1 {
+            return Err(MirrorMakerError::Config(format!(
+                "field() expects one path argument, got {}",
+                args.len()
+            )));
+        }
+        return Ok(Some(parse_quoted_path(&args[0])?));
+    }
+
+    if expr.starts_with("$(") {
+        let args = parse_wrapped_args(&expr[1..], "$")?;
+        if args.len() != 1 {
+            return Err(MirrorMakerError::Config(format!(
+                "$() expects one path argument, got {}",
+                args.len()
+            )));
+        }
+        return Ok(Some(parse_quoted_path(&args[0])?));
+    }
+
+    if let Some(rest) = expr.strip_prefix('$') {
+        if rest.is_empty() {
+            return Err(MirrorMakerError::Config(
+                "Invalid $ field path: missing field name".to_string(),
+            ));
+        }
+        if !rest
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.')
+        {
+            return Ok(None);
+        }
+        return Ok(Some(format!("/{}", rest.replace('.', "/"))));
+    }
+
+    Ok(None)
+}
+
+fn parse_call_args(expr: &str, name: &str) -> Result<Option<Vec<String>>> {
+    let Some(rest) = expr.strip_prefix(name) else {
+        return Ok(None);
+    };
+    if !rest.trim_start().starts_with('(') {
+        return Ok(None);
+    }
+    Ok(Some(parse_wrapped_args(rest, name)?))
+}
+
+fn parse_wrapped_args(expr: &str, name: &str) -> Result<Vec<String>> {
+    let expr = expr.trim();
+    if !expr.starts_with('(') || !expr.ends_with(')') {
+        return Err(MirrorMakerError::Config(format!(
+            "{} call must use parentheses",
+            name
+        )));
+    }
+    split_top_level(&expr[1..expr.len() - 1], ',')
+}
+
+fn parse_construct_args(args: &[String]) -> Result<HashMap<String, String>> {
+    let mut fields = HashMap::new();
+
+    for arg in args {
+        let Some((field, expr)) = split_mapping(arg)? else {
+            return Err(MirrorMakerError::Config(format!(
+                "Invalid construct() field '{}'. Expected field=$path or field: field('/path')",
+                arg
+            )));
+        };
+        let field = strip_optional_quotes(field.trim()).to_string();
+        let Some(path) = parse_field_path_expr(expr.trim())? else {
+            return Err(MirrorMakerError::Config(format!(
+                "construct() field '{}' must reference a field path",
+                field
+            )));
+        };
+        fields.insert(field, path);
+    }
+
+    Ok(fields)
+}
+
+fn parse_hash_args(args: &[String]) -> Result<(HashAlgorithm, String, Option<String>)> {
+    if !(2..=3).contains(&args.len()) {
+        return Err(MirrorMakerError::Config(format!(
+            "hash() expects algorithm and path, plus optional output field; got {} argument(s)",
+            args.len()
+        )));
+    }
+
+    let algorithm = HashAlgorithm::parse(strip_optional_quotes(args[0].trim()))?;
+    let Some(path) = parse_field_path_expr(args[1].trim())? else {
+        return Err(MirrorMakerError::Config(format!(
+            "hash() path argument '{}' is not a field path",
+            args[1]
+        )));
+    };
+    let output_field = args
+        .get(2)
+        .map(|value| strip_optional_quotes(value.trim()).to_string());
+
+    Ok((algorithm, path, output_field))
+}
+
+fn parse_quoted_path(expr: &str) -> Result<String> {
+    let path = strip_optional_quotes(expr.trim());
+    if !path.starts_with('/') {
+        return Err(MirrorMakerError::Config(format!(
+            "Expected JSON path starting with '/', got '{}'",
+            path
+        )));
+    }
+    Ok(path.to_string())
+}
+
+fn strip_optional_quotes(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\'')
+            || (bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"'))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    }
+}
+
+fn split_mapping(input: &str) -> Result<Option<(&str, &str)>> {
+    if let Some(index) = find_top_level_separator(input, '=')? {
+        return Ok(Some((&input[..index], &input[index + 1..])));
+    }
+    if let Some(index) = find_top_level_separator(input, ':')? {
+        return Ok(Some((&input[..index], &input[index + 1..])));
+    }
+    Ok(None)
+}
+
+fn split_top_level(input: &str, delimiter: char) -> Result<Vec<String>> {
+    let mut values = Vec::new();
+    let mut start = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+    let mut brace_depth = 0;
+
+    for (index, ch) in input.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            '{' => brace_depth += 1,
+            '}' => brace_depth -= 1,
+            _ if ch == delimiter && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                let value = input[start..index].trim();
+                if !value.is_empty() {
+                    values.push(value.to_string());
+                }
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+
+        if paren_depth < 0 || bracket_depth < 0 || brace_depth < 0 {
+            return Err(MirrorMakerError::Config(format!(
+                "Unbalanced delimiters in expression '{}'",
+                input
+            )));
+        }
+    }
+
+    if quote.is_some() || paren_depth != 0 || bracket_depth != 0 || brace_depth != 0 {
+        return Err(MirrorMakerError::Config(format!(
+            "Unbalanced expression '{}'",
+            input
+        )));
+    }
+
+    let value = input[start..].trim();
+    if !value.is_empty() {
+        values.push(value.to_string());
+    }
+
+    Ok(values)
+}
+
+fn find_top_level_separator(input: &str, delimiter: char) -> Result<Option<usize>> {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+    let mut brace_depth = 0;
+
+    for (index, ch) in input.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            '{' => brace_depth += 1,
+            '}' => brace_depth -= 1,
+            _ if ch == delimiter && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                return Ok(Some(index));
+            }
+            _ => {}
+        }
+
+        if paren_depth < 0 || bracket_depth < 0 || brace_depth < 0 {
+            return Err(MirrorMakerError::Config(format!(
+                "Unbalanced delimiters in expression '{}'",
+                input
+            )));
+        }
+    }
+
+    if quote.is_some() || paren_depth != 0 || bracket_depth != 0 || brace_depth != 0 {
+        return Err(MirrorMakerError::Config(format!(
+            "Unbalanced expression '{}'",
+            input
+        )));
+    }
+
+    Ok(None)
 }
 
 // ============================================================================
@@ -923,20 +1514,49 @@ fn parse_timestamp_before_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
 /// - "HASH:algorithm,/path" - Hash a value field
 /// - Other strings - Constant key value
 pub fn parse_key_transform(expr: &str) -> Result<Arc<dyn EnvelopeTransform>> {
-    if let Some(rest) = expr.strip_prefix("CONSTRUCT:") {
+    let trimmed = expr.trim();
+
+    if let Some(transform) = parse_function_style_key_transform(trimmed)? {
+        return Ok(transform);
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("CONSTRUCT:") {
         parse_key_construct_transform(rest)
-    } else if let Some(rest) = expr.strip_prefix("HASH:") {
+    } else if let Some(rest) = trimmed.strip_prefix("HASH:") {
         parse_key_hash_transform(rest)
-    } else if expr.starts_with('/') {
+    } else if trimmed.starts_with('/') {
         // JSON path extraction
-        Ok(Arc::new(KeyFromTransform::new(expr)?))
-    } else if expr.contains("{/") {
+        Ok(Arc::new(KeyFromTransform::new(trimmed)?))
+    } else if trimmed.contains("{/") {
         // Template-based key construction
-        Ok(Arc::new(KeyTemplateTransform::new(expr)?))
+        Ok(Arc::new(KeyTemplateTransform::new(trimmed)?))
     } else {
         // Constant key
-        Ok(Arc::new(KeyConstantTransform::new(expr)))
+        Ok(Arc::new(KeyConstantTransform::new(trimmed)))
     }
+}
+
+fn parse_function_style_key_transform(expr: &str) -> Result<Option<Arc<dyn EnvelopeTransform>>> {
+    if let Some(path) = parse_field_path_expr(expr)? {
+        return Ok(Some(Arc::new(KeyFromTransform::new(&path)?)));
+    }
+
+    if let Some(args) = parse_call_args(expr, "hash")? {
+        let (algorithm, path, output_field) = parse_hash_args(&args)?;
+        if output_field.is_some() {
+            return Err(MirrorMakerError::Config(
+                "key hash() does not support an output field".to_string(),
+            ));
+        }
+        return Ok(Some(Arc::new(KeyHashTransform::new(&path, algorithm)?)));
+    }
+
+    if let Some(args) = parse_call_args(expr, "construct")? {
+        let fields = parse_construct_args(&args)?;
+        return Ok(Some(Arc::new(KeyConstructTransform::new(fields)?)));
+    }
+
+    Ok(None)
 }
 
 fn parse_key_construct_transform(expr: &str) -> Result<Arc<dyn EnvelopeTransform>> {
@@ -1098,6 +1718,35 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_function_style_filter_with_dollar_paths() {
+        let filter = parse_filter("and($region == 'us', $amount >= 100)").unwrap();
+
+        assert!(filter
+            .evaluate(&json!({"region": "us", "amount": 125}))
+            .unwrap());
+        assert!(!filter
+            .evaluate(&json!({"region": "eu", "amount": 125}))
+            .unwrap());
+        assert!(!filter
+            .evaluate(&json!({"region": "us", "amount": 99}))
+            .unwrap());
+    }
+
+    #[test]
+    fn test_parse_function_style_filter_with_regex_and_not() {
+        let filter =
+            parse_filter("not(regex(field('/customer/email'), '^[^@]+@example\\\\.com$'))")
+                .unwrap();
+
+        assert!(filter
+            .evaluate(&json!({"customer": {"email": "alice@other.com"}}))
+            .unwrap());
+        assert!(!filter
+            .evaluate(&json!({"customer": {"email": "alice@example.com"}}))
+            .unwrap());
+    }
+
+    #[test]
     fn test_parse_simple_transform() {
         let transform = parse_transform("/message").unwrap();
 
@@ -1111,9 +1760,50 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_function_style_field_transform() {
+        let transform = parse_transform("field('/message')").unwrap();
+
+        let input = json!({
+            "message": {"confId": 123, "siteId": 456},
+            "metadata": {"ts": 789}
+        });
+
+        let result = transform.transform(input).unwrap();
+        assert_eq!(result, json!({"confId": 123, "siteId": 456}));
+    }
+
+    #[test]
+    fn test_parse_dollar_field_transform() {
+        let transform = parse_transform("$message.confId").unwrap();
+
+        let input = json!({
+            "message": {"confId": 123, "siteId": 456}
+        });
+
+        let result = transform.transform(input).unwrap();
+        assert_eq!(result, json!(123));
+    }
+
+    #[test]
     fn test_parse_construct_transform() {
         let transform =
             parse_transform("CONSTRUCT:id=/message/confId:site=/message/siteId").unwrap();
+
+        let input = json!({
+            "message": {"confId": 123, "siteId": 456, "other": "ignored"}
+        });
+
+        let result = transform.transform(input).unwrap();
+        assert_eq!(result.get("id").unwrap(), &json!(123));
+        assert_eq!(result.get("site").unwrap(), &json!(456));
+        assert!(result.get("other").is_none());
+    }
+
+    #[test]
+    fn test_parse_function_style_construct_transform() {
+        let transform =
+            parse_transform("construct(id=$message.confId, site=field('/message/siteId'))")
+                .unwrap();
 
         let input = json!({
             "message": {"confId": 123, "siteId": 456, "other": "ignored"}
@@ -1800,6 +2490,35 @@ mod tests {
 
         let result2 = parse_transform_with_cache("CACHE_PUT:/id,store", None);
         assert!(result2.is_err());
+    }
+
+    #[test]
+    fn test_parse_function_style_key_path_transform() {
+        use crate::envelope::MessageEnvelope;
+
+        let transform = parse_key_transform("$customer.id").unwrap();
+        let envelope = MessageEnvelope::new(json!({"customer": {"id": "cust-42"}}));
+
+        let transformed = transform.transform_envelope(envelope).unwrap();
+        assert_eq!(transformed.key, Some(json!("cust-42")));
+    }
+
+    #[test]
+    fn test_parse_function_style_key_hash_transform() {
+        use crate::envelope::MessageEnvelope;
+
+        let transform = parse_key_transform("hash('SHA256', $customer.email)").unwrap();
+        let envelope = MessageEnvelope::new(json!({
+            "customer": {"email": "alice@example.com"}
+        }));
+
+        let transformed = transform.transform_envelope(envelope).unwrap();
+        assert_eq!(
+            transformed.key,
+            Some(json!(
+                "ff8d9819fc0e12bf0d24892e45987e249a28dce836a85cad60e28eaaa8c6d976"
+            ))
+        );
     }
 
     // ========================================================================

@@ -22,7 +22,7 @@ metadata:
     app.kubernetes.io/component: ui
 rules:
   # Access to StreamforgePipeline CRDs
-  - apiGroups: ["streaming.streamforge.dev"]
+  - apiGroups: ["streamforge.io"]
     resources: ["streamforgepipelines"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
