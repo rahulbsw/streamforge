@@ -89,6 +89,8 @@ resource "aws_autoscaling_group" "benchmark" {
   desired_capacity    = var.provision_runtime ? 1 : 0
   vpc_zone_identifier = [aws_subnet.private.id]
 
+  depends_on = [aws_vpc_endpoint.interface]
+
   health_check_type         = "EC2"
   health_check_grace_period = 300
   default_cooldown          = 30

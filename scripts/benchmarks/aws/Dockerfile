@@ -43,6 +43,11 @@ FROM docker.io/confluentinc/cp-kafka@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2
 USER root
 
 RUN yum update -y \
+        ca-certificates \
+        krb5-libs \
+        krb5-workstation \
+        libkadm5 \
+        libxml2 \
     && yum install -y \
         curl \
         cyrus-sasl-lib \
