@@ -59,7 +59,7 @@ resource "aws_ecs_task_definition" "benchmark" {
         command     = ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1 || exit 1"]
         interval    = 10
         timeout     = 5
-        retries     = 12
+        retries     = 10
         startPeriod = 30
       }
       logConfiguration = {
