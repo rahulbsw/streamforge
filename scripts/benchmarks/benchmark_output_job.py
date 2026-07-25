@@ -11,6 +11,7 @@ from typing import Any
 
 from benchmark_job_common import (
     atomic_json,
+    execution_command,
     monotonic_ns,
     read_json,
     wait_for_barrier,
@@ -55,10 +56,7 @@ def run(args: argparse.Namespace) -> None:
             raise RuntimeError("output validator started before measurement ended")
 
         error_log = Path(args.log).open("wb")
-        command = [
-            args.runtime,
-            "exec",
-            args.container,
+        consumer_command = [
             "kafka-consumer-perf-test",
             "--broker-list",
             args.bootstrap,
@@ -71,6 +69,12 @@ def run(args: argparse.Namespace) -> None:
             "--timeout",
             str(round(args.control_timeout * 1000)),
         ]
+        command = execution_command(
+            args.runtime,
+            args.container,
+            consumer_command,
+            args.direct,
+        )
         process = subprocess.run(
             command,
             stdin=subprocess.DEVNULL,
@@ -121,6 +125,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser()
     result.add_argument("--runtime", required=True)
     result.add_argument("--container", required=True)
+    result.add_argument("--direct", action="store_true")
     result.add_argument("--bootstrap", required=True)
     result.add_argument("--topic", required=True)
     result.add_argument("--group", required=True)

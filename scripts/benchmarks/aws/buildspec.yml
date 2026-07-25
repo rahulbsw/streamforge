@@ -1,0 +1,21 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - test -n "$AWS_ACCOUNT_ID"
+      - test -n "$AWS_DEFAULT_REGION"
+      - test -n "$ECR_REPOSITORY_URI"
+      - test -n "$IMAGE_TAG"
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+  build:
+    commands:
+      - docker build --file scripts/benchmarks/aws/Dockerfile --tag "${ECR_REPOSITORY_URI}:${IMAGE_TAG}" .
+  post_build:
+    commands:
+      - docker push "${ECR_REPOSITORY_URI}:${IMAGE_TAG}"
+      - printf '{"imageUri":"%s"}\n' "${ECR_REPOSITORY_URI}:${IMAGE_TAG}" > image-detail.json
+
+artifacts:
+  files:
+    - image-detail.json

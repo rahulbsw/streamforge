@@ -12,6 +12,7 @@ from typing import Any
 
 from benchmark_job_common import (
     atomic_json,
+    execution_command,
     monotonic_ns,
     terminate_process,
     wait_for_barrier,
@@ -28,36 +29,37 @@ def load_payload_lines(path: str) -> list[bytes]:
 
 
 def write_lines(
-    stream: Any,
+    streams: list[Any],
     payload_lines: list[bytes],
     count: int,
     flush_every: int,
 ) -> int:
     written = 0
     for index in range(count):
+        stream = streams[index % len(streams)]
         stream.write(payload_lines[index % len(payload_lines)])
         written += 1
         if written % flush_every == 0:
-            stream.flush()
-    stream.flush()
+            for output in streams:
+                output.flush()
+    for output in streams:
+        output.flush()
     return written
 
 
 def run(args: argparse.Namespace) -> None:
     result_path = Path(args.result)
-    process: subprocess.Popen[bytes] | None = None
+    processes: list[subprocess.Popen[bytes]] = []
     try:
         if args.target_rate < 0:
             raise ValueError("target rate must be non-negative")
         if args.flush_every <= 0:
             raise ValueError("flush interval must be positive")
+        if args.workers <= 0:
+            raise ValueError("workers must be positive")
         payload_lines = load_payload_lines(args.payload)
         with Path(args.log).open("wb") as log:
-            command = [
-                args.runtime,
-                "exec",
-                "-i",
-                args.container,
+            producer_command = [
                 "kafka-console-producer",
                 "--bootstrap-server",
                 args.bootstrap,
@@ -70,29 +72,47 @@ def run(args: argparse.Namespace) -> None:
                 "--producer-property",
                 f"linger.ms={args.linger_ms}",
             ]
-            process = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                bufsize=1024 * 1024,
+            command = execution_command(
+                args.runtime,
+                args.container,
+                producer_command,
+                args.direct,
+                interactive=True,
             )
-            time.sleep(args.settle_seconds)
-            if process.poll() is not None:
-                raise RuntimeError(
-                    f"producer exited during startup with status {process.returncode}"
+            for _ in range(args.workers):
+                processes.append(
+                    subprocess.Popen(
+                        command,
+                        stdin=subprocess.PIPE,
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                        bufsize=1024 * 1024,
+                    )
                 )
-            if process.stdin is None:
+            time.sleep(args.settle_seconds)
+            if any(process.poll() is not None for process in processes):
+                raise RuntimeError(
+                    "a producer exited during startup"
+                )
+            streams = [
+                process.stdin for process in processes if process.stdin is not None
+            ]
+            if len(streams) != len(processes):
                 raise RuntimeError("producer stdin is unavailable")
 
             atomic_json(
                 args.ready,
-                {"status": "ready", "pid": process.pid, "ready_at_ns": monotonic_ns()},
+                {
+                    "status": "ready",
+                    "pids": [process.pid for process in processes],
+                    "workers": args.workers,
+                    "ready_at_ns": monotonic_ns(),
+                },
             )
             wait_for_path(args.warmup_signal, args.control_timeout)
             warmup_started_ns = monotonic_ns()
             warmup_sent = write_lines(
-                process.stdin,
+                streams,
                 payload_lines,
                 args.warmup_messages,
                 args.flush_every,
@@ -119,10 +139,12 @@ def run(args: argparse.Namespace) -> None:
             payload_index = 0
             while monotonic_ns() < deadline_ns:
                 for _ in range(args.flush_every):
-                    process.stdin.write(payload_lines[payload_index])
+                    stream = streams[sent % len(streams)]
+                    stream.write(payload_lines[payload_index])
                     sent += 1
                     payload_index = (payload_index + 1) % len(payload_lines)
-                process.stdin.flush()
+                for output in streams:
+                    output.flush()
                 if args.target_rate > 0:
                     target_ns = start_ns + round(
                         sent / args.target_rate * 1_000_000_000
@@ -130,17 +152,26 @@ def run(args: argparse.Namespace) -> None:
                     remaining_ns = target_ns - monotonic_ns()
                     if remaining_ns > 0:
                         time.sleep(remaining_ns / 1_000_000_000)
-            process.stdin.flush()
+            for output in streams:
+                output.flush()
             measurement_stop_ns = monotonic_ns()
-            process.stdin.close()
-            try:
-                return_code = process.wait(timeout=args.flush_timeout)
-            except subprocess.TimeoutExpired as error:
-                terminate_process(process)
-                raise TimeoutError("producer did not flush before timeout") from error
+            for output in streams:
+                output.close()
+            return_codes = []
+            for process in processes:
+                try:
+                    return_codes.append(process.wait(timeout=args.flush_timeout))
+                except subprocess.TimeoutExpired as error:
+                    for active_process in processes:
+                        terminate_process(active_process)
+                    raise TimeoutError(
+                        "producer did not flush before timeout"
+                    ) from error
             completed_ns = monotonic_ns()
-            if return_code != 0:
-                raise RuntimeError(f"producer exited with status {return_code}")
+            if any(return_code != 0 for return_code in return_codes):
+                raise RuntimeError(
+                    f"a producer exited with status in {return_codes}"
+                )
 
         duration_seconds = (measurement_stop_ns - start_ns) / 1_000_000_000
         atomic_json(
@@ -160,10 +191,11 @@ def run(args: argparse.Namespace) -> None:
                 / 1_000_000_000,
                 "records_per_second": sent / duration_seconds,
                 "target_rate_messages_per_second": args.target_rate,
+                "workers": args.workers,
             },
         )
     except Exception as error:
-        if process is not None:
+        for process in processes:
             terminate_process(process)
         atomic_json(
             result_path,
@@ -176,6 +208,8 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser()
     result.add_argument("--runtime", required=True)
     result.add_argument("--container", required=True)
+    result.add_argument("--direct", action="store_true")
+    result.add_argument("--workers", type=int, default=1)
     result.add_argument("--bootstrap", required=True)
     result.add_argument("--topic", required=True)
     result.add_argument("--payload", required=True)

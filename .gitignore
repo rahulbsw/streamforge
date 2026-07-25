@@ -28,3 +28,11 @@ benchmarks/test_data_*.jsonl
 # Python caches
 __pycache__/
 *.py[cod]
+
+# Terraform local state and runtime inputs
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+*.auto.tfvars

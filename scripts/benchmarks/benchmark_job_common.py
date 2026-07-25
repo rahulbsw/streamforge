@@ -11,7 +11,7 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 
 METRIC_LINE = re.compile(
@@ -63,6 +63,22 @@ def terminate_process(process: subprocess.Popen[bytes]) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=10)
+
+
+def execution_command(
+    runtime: str,
+    container: str,
+    command: Sequence[str],
+    direct: bool,
+    interactive: bool = False,
+) -> list[str]:
+    """Build a local command or a container-runtime exec command."""
+    if direct:
+        return list(command)
+    prefix = [runtime, "exec"]
+    if interactive:
+        prefix.append("-i")
+    return [*prefix, container, *command]
 
 
 def parse_metrics(text: str) -> list[tuple[str, dict[str, str], float]]:
