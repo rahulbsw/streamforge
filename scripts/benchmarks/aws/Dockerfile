@@ -55,7 +55,6 @@ RUN yum update -y \
         libcurl \
         openssl-libs \
         procps-ng \
-        python3 \
         unzip \
     && yum clean all \
     && curl --proto '=https' --tlsv1.2 -sSf \
