@@ -42,7 +42,8 @@ FROM docker.io/confluentinc/cp-kafka@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2
 
 USER root
 
-RUN yum install -y \
+RUN yum update -y \
+    && yum install -y \
         curl \
         cyrus-sasl-lib \
         findutils \
