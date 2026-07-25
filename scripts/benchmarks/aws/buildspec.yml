@@ -13,8 +13,12 @@ phases:
       - docker build --file scripts/benchmarks/aws/Dockerfile --tag "${ECR_REPOSITORY_URI}:${IMAGE_TAG}" .
   post_build:
     commands:
-      - docker push "${ECR_REPOSITORY_URI}:${IMAGE_TAG}"
-      - printf '{"imageUri":"%s"}\n' "${ECR_REPOSITORY_URI}:${IMAGE_TAG}" > image-detail.json
+      - |
+        if [ "$CODEBUILD_BUILD_SUCCEEDING" = "1" ]; then
+          docker push "${ECR_REPOSITORY_URI}:${IMAGE_TAG}"
+          printf '{"imageUri":"%s"}\n' \
+            "${ECR_REPOSITORY_URI}:${IMAGE_TAG}" > image-detail.json
+        fi
 
 artifacts:
   files:

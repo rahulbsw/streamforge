@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM docker.io/library/rockylinux:8.10 AS builder
+FROM docker.io/library/rockylinux@sha256:2d05a9266523bbf24f33ebc3a9832e4d5fd74b973c220f2204ca802286aa275d AS builder
 
 ARG RUST_VERSION=1.89.0
 
