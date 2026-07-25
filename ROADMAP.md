@@ -163,12 +163,17 @@ StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka se
 - [x] Add single-destination produced accounting and focused regression tests
 - [x] Pass the loopback-only local Podman sustained validation with exact
   consumed, produced, delivered, output, and error counts
+- [x] Replace ad hoc AWS host provisioning with a cost-bounded private
+  Terraform and ECS-on-EC2 benchmark environment
+  - Keep the task and host in a private subnet with no public IP, internet
+    gateway, NAT gateway, load balancer, SSH access, or public ingress
+  - Gate billable runtime behind an explicit flag and hard expiry
+  - Validate a publication-eligible three-repetition sustained baseline and
+    destroy all provisioned resources
 - [ ] Run the corrected legacy/partition-ordered and
   acknowledged/queued live Kafka comparison matrix
 - [ ] Produce a clean-worktree, matched Java/Rust comparison before publishing
-  a public throughput claim
-- [ ] Replace ad hoc AWS host provisioning with cost-bounded Terraform and
-  ECS-on-EC2 benchmark jobs after the local comparison matrix passes
+  a comparative throughput claim
 - [ ] Implement rebalance-aware completed-offset coordination before supporting
   partition-ordered manual commits
 - [ ] Profile transform-heavy and aggregation-heavy workloads

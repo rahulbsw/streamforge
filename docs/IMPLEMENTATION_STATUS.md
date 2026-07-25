@@ -95,8 +95,8 @@ Implemented in the current source:
   rebalance-aware completed-offset coordination is implemented.
 
 These modes are implemented and unit-tested. The partition-ordered/queued
-combination has completed a valid sustained local Kafka run; the remaining
-mode comparison matrix and a new AWS run are still pending.
+combination has completed valid sustained local and private AWS Kafka runs; the
+remaining mode comparison matrix is still pending.
 
 Default compatibility values remain:
 
@@ -169,8 +169,32 @@ Verified for the current source on 2026-07-25 UTC:
 - Kafka was published only on `127.0.0.1:9092`; the benchmark network was
   internal; ingress and output runners exposed no ports. Final topic and disk
   reclamation checks passed.
-- No AWS rerun has been attempted after the valid local result. All resources
-  from the previous AWS attempt remain verified deleted.
+- The corrected private AWS harness passed three 120-second
+  partition-ordered/queued repetitions after a one-million-record untimed
+  warm-up per repetition. Each repetition reconciled exactly 16,200,000
+  records across ingress, input offsets, consumed, produced, broker-delivered,
+  output offsets, and the independent output validator, with zero errors.
+- Publication-eligible AWS aggregate at commit
+  `d848f118e62b41c7605250c69c9da087af688d0c`: median
+  `106,692.649362 msg/s`, minimum `106,651.683407`, maximum
+  `106,798.575491`, coefficient of variation `0.0580%`, median `1.124`
+  StreamForge mean cores, and median peak RSS `137.1 MiB`.
+- Environment: AWS `c7i.2xlarge`, Intel Xeon Platinum 8488C, 8 partitions,
+  8 threads, and target ingress of 135,000 messages/second. All repetitions
+  were classified as engine-saturated rather than ingress-limited.
+- The workload ran in a private subnet with no public IP, internet gateway,
+  NAT gateway, load balancer, SSH access, or public security-group rule.
+  PrivateLink endpoint ingress used security-group references only.
+- The ECR image scan completed with zero critical findings. The environment was
+  intentionally isolated and ephemeral; inherited high and medium base-image
+  findings remain a reason not to treat this benchmark image as a production
+  runtime image.
+- `terraform destroy` reported 45 resources destroyed. Direct AWS service
+  inventories then found zero live benchmark EC2 instances, volumes, ENIs,
+  VPCs, endpoints, S3 buckets, ECR repositories, CodeBuild projects, IAM roles,
+  active task definitions, or Auto Scaling groups. ECS retains only an
+  `INACTIVE` deleted-cluster record with zero registered, running, or pending
+  tasks.
 
 Previously verified on 2026-07-24:
 
@@ -214,9 +238,9 @@ from a blanket SIMD rewrite:
    partition-ordered/acknowledged, and partition-ordered/queued.
 2. Run a clean-worktree, matched Java/Rust comparison with identical payloads,
    partitions, acknowledgement semantics, warm-up, duration, and validation.
-3. Provision the later AWS benchmark with cost-bounded Terraform and
-   ECS-on-EC2 jobs only after the local matrix passes; keep all endpoints
-   private or restricted to the user's IP.
+3. Reuse the validated cost-bounded private Terraform/ECS environment for
+   matched reruns; keep the billable runtime disabled except during a bounded
+   measurement window.
 4. Keep raw/lazy envelope work behind the existing 30% parse/serialization
    threshold; the AWS passthrough profile measured about 16.5% parsing and 3.2%
    serialization on overlapping inclusive stacks.
