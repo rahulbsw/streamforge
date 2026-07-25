@@ -1,6 +1,6 @@
 ---
 title: Usage Guide
-nav_order: 3
+nav_order: 5
 ---
 
 # Usage Guide
@@ -36,7 +36,7 @@ Good fit:
 - splitting operational and analytical contracts
 
 See:
-- [examples/production/cdc-to-datalake.yaml](../examples/production/cdc-to-datalake.yaml)
+- [examples/production/cdc-to-datalake.yaml](https://github.com/rahulbsw/streamforge/blob/main/examples/production/cdc-to-datalake.yaml)
 - [QUICKSTART.md](QUICKSTART.md)
 
 ### PII-Safe Replication Across Trust Boundaries
@@ -54,7 +54,7 @@ Good fit:
 - internal topics that should not expose raw customer data
 
 See:
-- [examples/production/pii-redaction.yaml](../examples/production/pii-redaction.yaml)
+- [examples/production/pii-redaction.yaml](https://github.com/rahulbsw/streamforge/blob/main/examples/production/pii-redaction.yaml)
 - [SECURITY_CONFIGURATION.md](SECURITY_CONFIGURATION.md)
 
 ### Topic Fan-Out with Consumer-Specific Shapes
@@ -95,8 +95,8 @@ Boundaries:
 
 See:
 - [AGGREGATIONS.md](AGGREGATIONS.md)
-- [../examples/aggregation/orders-windowed-metrics.yaml](../examples/aggregation/orders-windowed-metrics.yaml)
-- [../examples/aggregation/orders-quantiles.yaml](../examples/aggregation/orders-quantiles.yaml)
+- [orders-windowed-metrics.yaml](https://github.com/rahulbsw/streamforge/blob/main/examples/aggregation/orders-windowed-metrics.yaml)
+- [orders-quantiles.yaml](https://github.com/rahulbsw/streamforge/blob/main/examples/aggregation/orders-quantiles.yaml)
 
 ### Cross-Cluster Replication with Shaping
 
@@ -109,7 +109,7 @@ Good fit:
 
 See:
 - [COMPATIBILITY.md](COMPATIBILITY.md)
-- [examples/redpanda/README.md](../examples/redpanda/README.md)
+- [Redpanda example pack](https://github.com/rahulbsw/streamforge/tree/main/examples/redpanda)
 
 ## Build a Pipeline
 

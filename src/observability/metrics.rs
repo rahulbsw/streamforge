@@ -39,6 +39,7 @@ pub struct Metrics {
     // Message processing counters
     pub messages_consumed: Counter,
     pub messages_produced: CounterVec,
+    pub messages_delivered: CounterVec,
     pub messages_filtered: CounterVec,
     pub processing_errors: CounterVec,
 
@@ -101,6 +102,15 @@ impl Metrics {
                 Opts::new(
                     "streamforge_messages_produced_total",
                     "Messages successfully produced to destinations",
+                ),
+                &["destination"],
+            )
+            .unwrap(),
+
+            messages_delivered: CounterVec::new(
+                Opts::new(
+                    "streamforge_messages_delivered_total",
+                    "Messages acknowledged by destination Kafka",
                 ),
                 &["destination"],
             )
@@ -327,6 +337,7 @@ impl Metrics {
 pub fn register_metrics() -> Result<(), Box<dyn std::error::Error>> {
     REGISTRY.register(Box::new(METRICS.messages_consumed.clone()))?;
     REGISTRY.register(Box::new(METRICS.messages_produced.clone()))?;
+    REGISTRY.register(Box::new(METRICS.messages_delivered.clone()))?;
     REGISTRY.register(Box::new(METRICS.messages_filtered.clone()))?;
     REGISTRY.register(Box::new(METRICS.processing_errors.clone()))?;
     REGISTRY.register(Box::new(METRICS.processing_duration.clone()))?;

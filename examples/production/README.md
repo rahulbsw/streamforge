@@ -6,13 +6,13 @@ This directory contains production-ready StreamForge configurations for common u
 
 Each configuration demonstrates best practices for specific scenarios:
 
-| Config | Use Case | Throughput | Resources | Complexity |
-|--------|----------|------------|-----------|------------|
-| [user-filtering.yaml](user-filtering.yaml) | User event filtering and routing | ~50K msg/s | 2 CPU / 4 Gi | Medium |
-| [cross-region-replication.yaml](cross-region-replication.yaml) | Multi-region Kafka replication | ~100K msg/s | 4 CPU / 8 Gi | Low |
-| [cdc-to-datalake.yaml](cdc-to-datalake.yaml) | Database CDC to data lake | ~20K msg/s | 1 CPU / 2 Gi | Medium |
-| [multi-tenant-filtering.yaml](multi-tenant-filtering.yaml) | Multi-tenant event routing | ~30K msg/s | 2 CPU / 4 Gi | Medium |
-| [pii-redaction.yaml](pii-redaction.yaml) | PII redaction and masking | ~15K msg/s | 1 CPU / 2 Gi | High |
+| Config | Use Case | Primary trade-off | Complexity |
+|--------|----------|-------------------|------------|
+| [user-filtering.yaml](user-filtering.yaml) | User event filtering and routing | More destination-specific work | Medium |
+| [cross-region-replication.yaml](cross-region-replication.yaml) | Multi-region Kafka replication | WAN efficiency and recovery point | Low |
+| [cdc-to-datalake.yaml](cdc-to-datalake.yaml) | Database CDC to data lake | Freshness versus batching | Medium |
+| [multi-tenant-filtering.yaml](multi-tenant-filtering.yaml) | Multi-tenant event routing | Isolation versus pipeline count | Medium |
+| [pii-redaction.yaml](pii-redaction.yaml) | PII minimization and pseudonymization | Stronger transforms cost more CPU | High |
 
 ---
 
@@ -46,7 +46,7 @@ Each configuration demonstrates best practices for specific scenarios:
 **Scenario:** Replicate events from one Kafka cluster to another for DR or multi-region.
 
 **Key features:**
-- High throughput configuration (100K+ msg/s)
+- Batching-oriented configuration for WAN efficiency
 - Compression for WAN transfer
 - TLS/SASL for secure cross-region
 - Offset management with `earliest` for DR
@@ -220,16 +220,16 @@ EOF
 
 ### Test Locally
 
-**Docker:**
+**Podman:**
 ```bash
-docker run --rm \
+podman run --rm \
   -v $(pwd)/examples/production/user-filtering.yaml:/app/config.yaml:ro \
   --network host \
   streamforge:1.0.0 \
   --config /app/config.yaml
 ```
 
-**Docker Compose:**
+**Podman Compose:**
 ```yaml
 version: '3.8'
 services:
@@ -247,7 +247,11 @@ services:
 
 ## Performance Tuning
 
-### High Throughput (> 100K msg/s)
+The following profiles illustrate configuration trade-offs; they are not
+capacity or latency promises. Measure them with representative messages,
+partitions, brokers, delivery guarantees, and hardware.
+
+### Batching-oriented
 
 ```yaml
 threads: 8
@@ -260,7 +264,7 @@ commit_strategy: "manual"
 commit_interval_ms: 10000
 ```
 
-### Low Latency (< 10ms p95)
+### Latency-oriented
 
 ```yaml
 threads: 2
@@ -272,7 +276,7 @@ performance:
 commit_strategy: "per-message"
 ```
 
-### Balanced (50K msg/s, 50ms p95)
+### Balanced starting point
 
 ```yaml
 threads: 4
@@ -338,16 +342,16 @@ histogram_quantile(0.95, rate(streamforge_processing_duration_seconds_bucket[5m]
 ### Alerts
 
 **Critical:**
-- Consumer lag > 100K
-- Error rate > 10/s
+- Consumer lag is growing without recovery
+- Error rate breaches the workload-specific error budget
 - Pod down
 - Memory exhaustion
 
 **Warning:**
-- Consumer lag > 10K
-- Error rate > 1/s
+- Consumer lag remains above the workload-specific threshold
+- Error rate is elevated
 - DLQ accumulation
-- High latency (p95 > 100ms)
+- Processing latency breaches the workload-specific objective
 
 ---
 
@@ -440,11 +444,11 @@ env:
 - [Deployment Guide](../../docs/DEPLOYMENT.md)
 - [Operations Runbook](../../docs/OPERATIONS.md)
 - [Troubleshooting Guide](../../docs/TROUBLESHOOTING.md)
-- [DSL Specification](../../docs/DSL_SPEC.md)
-- [Performance Tuning](../../docs/PERFORMANCE_TUNING_RESULTS.md)
+- [DSL Reference](../../docs/ADVANCED_DSL_GUIDE.md)
+- [Performance Tuning](../../docs/PERFORMANCE.md)
 
 ---
 
 **Questions or Issues?**
 - GitHub: https://github.com/rahulbsw/streamforge/issues
-- Documentation: https://streamforge.io/docs
+- Documentation: https://github.datasierra.com/streamforge/

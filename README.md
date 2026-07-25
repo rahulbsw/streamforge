@@ -1,118 +1,101 @@
 # StreamForge
 
-> Selective replication for Kafka, with Redpanda as a compatibility target. Filter, transform, redact, and route data between topics and clusters without Kafka Connect.
+> Selective replication for Kafka. Filter, transform, redact, and route records
+> between topics and clusters without deploying Kafka Connect.
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen.svg)](docs/CHANGELOG.md)
-[![Kafka](https://img.shields.io/badge/broker-Kafka-black.svg)](#compatibility)
-[![Redpanda](https://img.shields.io/badge/broker-Redpanda-red.svg)](#compatibility)
+[![Version](https://img.shields.io/badge/version-1.0.0-36d1c4.svg)](CHANGELOG.md)
 [![CI](https://github.com/rahulbsw/streamforge/workflows/CI/badge.svg)](https://github.com/rahulbsw/streamforge/actions)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-38a3ff.svg)](https://rahulbsw.github.io/streamforge/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-d5dde4.svg)](LICENSE)
 
----
+StreamForge moves only the records and fields that downstream systems need.
+One source topic can feed analytics, lake, and lower-trust destinations with an
+independent filter and transform for each route.
 
-StreamForge helps data teams move only the records and fields downstream systems actually need. Instead of mirroring whole topics, StreamForge lets you filter, reshape, redact, and route messages before they land in analytics, lake, or lower-trust environments.
+```text
+Kafka source ──► filter ──► transform ──┬──► analytics topic
+                                       └──► PII-safe topic
+```
 
-## Why Teams Use StreamForge
+## Why StreamForge
 
-- Replicate only analytics-safe fields instead of whole topics
-- Split one source topic into multiple downstream topics
-- Hash or drop PII before data crosses trust boundaries
-- Keep the deployment surface small with a single binary, operator, and Helm chart
+- Route records by payload, key, headers, and timestamps.
+- Reshape events and remove or hash sensitive fields before delivery.
+- Fan out one source topic into destination-specific representations.
+- Run as a standalone Rust binary or through the Kubernetes operator.
+- Observe delivery, errors, lag, retries, and dead-letter records with
+  Prometheus metrics.
 
-## Watch StreamForge Deploy on Minikube
+## Run the local demo
 
-[![StreamForge UI demo on Minikube](docs/assets/demo/ui-minikube-demo-readme.gif)](docs/UI_MINIKUBE_DEMO.md)
+Prerequisites: a Rust toolchain, Podman, and a Podman Compose provider.
 
-This UI-driven demo shows the path most teams actually want to see first: install with Helm, create a pipeline in the browser, review the generated YAML, deploy the CRD, then verify transformed output on Kafka.
+```bash
+podman compose -f examples/redpanda/docker-compose.yml up -d
 
-**[UI Demo](docs/UI_MINIKUBE_DEMO.md)** | **[5-Minute CLI Demo](#5-minute-demo)** | **[Examples](examples/README.md)** | **[Compatibility](#compatibility)** | **[Documentation Index](docs/DOCUMENTATION_INDEX.md)**
+cargo run --quiet --bin streamforge-validate -- \
+  examples/redpanda/selective-replication.yaml
 
----
+CONFIG_FILE=examples/redpanda/selective-replication.yaml \
+  cargo run --release --bin streamforge
+```
 
-## When to Use StreamForge
+Keep StreamForge running, then follow the
+[five-minute quickstart](docs/QUICKSTART.md) to create the topics, publish one
+order, and inspect the two destination-specific outputs.
 
-Use StreamForge when you need:
-- selective replication to analytics or data lake pipelines
-- PII-safe replication across environments
-- topic fan-out with payload shaping
-- a smaller operational footprint than Kafka Connect
+## Choose a path
 
-Do not position StreamForge as:
-- a full replacement for MirrorMaker 2 active-active or offset-sync workflows
-- a general-purpose stateful stream processor
+| Goal | Start here |
+| --- | --- |
+| Understand the product boundary | [When to use StreamForge](docs/WHEN_TO_USE.md) |
+| Build a selective replication pipeline | [Usage guide](docs/USAGE.md) |
+| Learn the filter and transform language | [DSL reference](docs/ADVANCED_DSL_GUIDE.md) |
+| Deploy with Podman or Kubernetes | [Deployment guide](docs/DEPLOYMENT.md) |
+| Configure TLS and SASL | [Security configuration](docs/SECURITY_CONFIGURATION.md) |
+| Operate and troubleshoot a pipeline | [Operations](docs/OPERATIONS.md) |
+| Browse the complete public documentation | [StreamForge documentation](https://rahulbsw.github.io/streamforge/) |
 
-For concrete usage patterns and configs, see [docs/USAGE.md](docs/USAGE.md) and [examples/README.md](examples/README.md).
+## Deployment modes
 
-## 5-Minute Demo
+### Standalone
 
-1. Start the local Redpanda demo broker:
-   ```bash
-   docker compose -f examples/redpanda/docker-compose.yml up -d
-   ```
-2. Validate the selective replication config:
-   ```bash
-   cargo run --quiet --bin streamforge-validate -- examples/redpanda/selective-replication.yaml
-   ```
-3. Run StreamForge with the same config:
-   ```bash
-   CONFIG_FILE=examples/redpanda/selective-replication.yaml \
-     cargo run --release --bin streamforge
-   ```
-   Leave StreamForge running in this terminal.
-4. Open a second terminal and follow [docs/QUICKSTART.md](docs/QUICKSTART.md) to create the demo topics, produce a sample order, and inspect `analytics-orders` and `pii-safe-orders`.
+Use the binary or container when configuration is managed directly by your
+deployment system. Start with [Podman](docs/DOCKER.md).
 
-If you want the Kubernetes + UI path instead of the local CLI path, use [docs/UI_MINIKUBE_DEMO.md](docs/UI_MINIKUBE_DEMO.md).
+### Kubernetes
 
-## Production Trust Signals
+Use the operator and `StreamforgePipeline` custom resource when pipelines
+should be managed declaratively. Start with
+[Kubernetes](docs/KUBERNETES.md) or the
+[Helm chart](helm/streamforge-operator/README.md).
 
-- At-least-once delivery with retry and DLQ support
-- Native Prometheus metrics and lag monitoring
-- Kubernetes operator, Helm chart, and web UI
-- Kafka-first examples for standalone configs and Kubernetes pipelines
+## Compatibility and boundaries
 
-## Compatibility
+StreamForge targets Kafka-compatible brokers. Kafka is the primary target in
+the current documentation; Redpanda is covered for the selective-replication
+workflows exercised by this repository.
 
-StreamForge is built for Kafka-compatible brokers. Kafka is the primary target in current docs and examples, and Redpanda is documented here as a compatibility target for the selective replication workflows covered in this repo.
+StreamForge is not positioned as a replacement for MirrorMaker 2 active-active
+replication and offset-sync workflows, or as a general-purpose stateful stream
+processor. See [Compatibility](docs/COMPATIBILITY.md) for the tested scope.
 
----
+## Performance policy
 
-## Core Capabilities
-
-- Content-based filtering across payload, key, headers, and timestamps
-- Field extraction, reshaping, and PII hashing before downstream delivery
-- Topic fan-out from one source topic to multiple destination topics
-- At-least-once delivery with retry, DLQ handling, and observability hooks
-- Standalone binary and Kubernetes operator deployment modes
-
-## Example Pipelines
-
-- [examples/configs/config.example.yaml](examples/configs/config.example.yaml) for a minimal standalone pipeline
-- [examples/redpanda/selective-replication.yaml](examples/redpanda/selective-replication.yaml) for the validated local Redpanda selective replication demo
-- [examples/production/pii-redaction.yaml](examples/production/pii-redaction.yaml) for analytics-safe redaction
-- [examples/production/cdc-to-datalake.yaml](examples/production/cdc-to-datalake.yaml) for CDC-to-lake shaping
-- [examples/pipelines/README.md](examples/pipelines/README.md) for operator-backed Kubernetes manifests
-
-## Deploy and Operate
-
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for deployment patterns
-- [docs/OPERATIONS.md](docs/OPERATIONS.md) for production runbooks
-- [docs/OBSERVABILITY_QUICKSTART.md](docs/OBSERVABILITY_QUICKSTART.md) for Prometheus and lag monitoring
-- [docs/SECURITY_CONFIGURATION.md](docs/SECURITY_CONFIGURATION.md) for TLS and SASL setup
-- [helm/streamforge-operator/README.md](helm/streamforge-operator/README.md) for Helm-based installs
-
-## Learn More
-
-- [docs/QUICKSTART.md](docs/QUICKSTART.md) for the first local run
-- [docs/USAGE.md](docs/USAGE.md) for deployment patterns and use cases
-- [docs/YAML_CONFIGURATION.md](docs/YAML_CONFIGURATION.md) for config structure and format guidance
-- [docs/ADVANCED_DSL_GUIDE.md](docs/ADVANCED_DSL_GUIDE.md) for the full filtering and transform DSL
-- [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) for the broader doc set
+Performance depends on message shape, partitions, broker configuration,
+delivery guarantees, and hardware. The public documentation therefore provides
+[measurement and tuning guidance](docs/PERFORMANCE.md), not a universal
+throughput claim. Results are published only after a reproducible, like-for-like
+comparison passes record-count and delivery validation.
 
 ## Contributing
 
-Contribution and development setup are documented in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+See the [contributing guide](docs/CONTRIBUTING.md) for development setup,
+testing, and pull-request expectations. Use
+[GitHub Discussions](https://github.com/rahulbsw/streamforge/discussions) for
+questions and [GitHub Issues](https://github.com/rahulbsw/streamforge/issues)
+for reproducible defects or feature proposals.
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for details.
+StreamForge is licensed under the [Apache License 2.0](LICENSE).

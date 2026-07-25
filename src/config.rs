@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MirrorMakerConfig {
@@ -26,6 +27,10 @@ pub struct MirrorMakerConfig {
     /// Number of processing threads
     #[serde(default = "default_threads")]
     pub threads: usize,
+
+    /// Runtime batching and Kafka client performance tuning.
+    #[serde(default)]
+    pub performance: PerformanceConfig,
 
     /// Compression configuration
     #[serde(default)]
@@ -73,6 +78,88 @@ pub struct MirrorMakerConfig {
     /// Dead letter queue configuration for failed messages
     #[serde(default)]
     pub dlq: crate::dlq::DlqConfig,
+}
+
+/// Runtime batching and Kafka client performance tuning.
+///
+/// The in-process batching fields preserve the historical hard-coded defaults.
+/// Kafka fields are optional so omitting `performance` preserves librdkafka's
+/// existing defaults. Explicit `consumer_properties` and `producer_properties`
+/// take precedence over values generated from this section.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PerformanceConfig {
+    /// Maximum messages collected before processing a batch.
+    #[serde(default = "default_consumer_batch_size")]
+    pub consumer_batch_size: usize,
+
+    /// Maximum milliseconds to wait for a partially filled legacy batch. In
+    /// partition-ordered mode this is also the idle queued-delivery flush delay.
+    #[serde(default = "default_consumer_batch_timeout_ms")]
+    pub consumer_batch_timeout_ms: u64,
+
+    /// Concurrent processing multiplier applied to `threads`.
+    #[serde(default = "default_parallelism_factor")]
+    pub parallelism_factor: usize,
+
+    /// In-process scheduling strategy.
+    ///
+    /// `legacy_batch` preserves the historical batch barrier. `partition_ordered`
+    /// routes each source partition to one bounded FIFO worker lane.
+    #[serde(default)]
+    pub processing_mode: ProcessingMode,
+
+    /// Per-worker input queue capacity in `partition_ordered` mode.
+    #[serde(default = "default_worker_queue_capacity")]
+    pub worker_queue_capacity: usize,
+
+    /// Maps to librdkafka `fetch.min.bytes`.
+    #[serde(default)]
+    pub fetch_min_bytes: Option<u32>,
+
+    /// Maps to librdkafka `fetch.wait.max.ms`.
+    #[serde(default)]
+    pub fetch_max_wait_ms: Option<u32>,
+
+    /// Maps to librdkafka `linger.ms`.
+    #[serde(default)]
+    pub linger_ms: Option<u64>,
+
+    /// Maximum messages per producer batch; maps to librdkafka
+    /// `batch.num.messages`.
+    #[serde(default)]
+    pub batch_size: Option<usize>,
+
+    /// Maps to librdkafka `queue.buffering.max.ms`.
+    #[serde(default)]
+    pub queue_buffering_max_ms: Option<u64>,
+
+    /// Producer delivery completion behavior.
+    ///
+    /// `acknowledged` preserves the historical behavior by awaiting Kafka's
+    /// delivery result for every record. `queued` returns after librdkafka
+    /// accepts the record and tracks delivery completion in the background.
+    #[serde(default)]
+    pub producer_delivery_mode: ProducerDeliveryMode,
+
+    /// Maximum queued producer deliveries awaiting acknowledgement.
+    #[serde(default = "default_producer_max_in_flight")]
+    pub producer_max_in_flight: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProducerDeliveryMode {
+    #[default]
+    Acknowledged,
+    Queued,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessingMode {
+    #[default]
+    LegacyBatch,
+    PartitionOrdered,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,8 +482,47 @@ fn default_threads() -> usize {
     4
 }
 
+fn default_consumer_batch_size() -> usize {
+    100
+}
+
+fn default_consumer_batch_timeout_ms() -> u64 {
+    100
+}
+
+fn default_parallelism_factor() -> usize {
+    10
+}
+
+fn default_worker_queue_capacity() -> usize {
+    1_024
+}
+
+fn default_producer_max_in_flight() -> usize {
+    10_000
+}
+
 fn config_error(message: impl Into<String>) -> crate::error::MirrorMakerError {
     crate::error::MirrorMakerError::Config(message.into())
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            consumer_batch_size: default_consumer_batch_size(),
+            consumer_batch_timeout_ms: default_consumer_batch_timeout_ms(),
+            parallelism_factor: default_parallelism_factor(),
+            processing_mode: ProcessingMode::LegacyBatch,
+            worker_queue_capacity: default_worker_queue_capacity(),
+            fetch_min_bytes: None,
+            fetch_max_wait_ms: None,
+            linger_ms: None,
+            batch_size: None,
+            queue_buffering_max_ms: None,
+            producer_delivery_mode: ProducerDeliveryMode::Acknowledged,
+            producer_max_in_flight: default_producer_max_in_flight(),
+        }
+    }
 }
 
 impl Default for CompressionConfig {
@@ -647,6 +773,48 @@ impl MirrorMakerConfig {
     }
 
     pub fn validate(&self) -> crate::Result<()> {
+        if self.threads == 0 {
+            return Err(config_error("threads must be > 0"));
+        }
+        if self.threads > i32::MAX as usize {
+            return Err(config_error("threads must fit in a signed 32-bit integer"));
+        }
+
+        self.performance.validate()?;
+
+        if self.performance.producer_delivery_mode == ProducerDeliveryMode::Queued {
+            if self.commit_strategy.manual_commit {
+                return Err(config_error(
+                    "performance.producer_delivery_mode=queued requires \
+                     commit_strategy.manual_commit=false because delivery errors are deferred",
+                ));
+            }
+
+            if self.retry.max_attempts != 1 {
+                return Err(config_error(
+                    "performance.producer_delivery_mode=queued requires retry.max_attempts=1 \
+                     because deferred delivery errors cannot retry the original envelope",
+                ));
+            }
+
+            if self.dlq.enabled {
+                return Err(config_error(
+                    "performance.producer_delivery_mode=queued requires dlq.enabled=false \
+                     because deferred delivery errors cannot retain the original envelope",
+                ));
+            }
+        }
+
+        if self.performance.processing_mode == ProcessingMode::PartitionOrdered
+            && self.commit_strategy.manual_commit
+        {
+            return Err(config_error(
+                "performance.processing_mode=partition_ordered currently requires \
+                 commit_strategy.manual_commit=false; explicit rebalance-safe offset \
+                 coordination is not yet implemented",
+            ));
+        }
+
         if let Some(routing) = &self.routing {
             for dest in &routing.destinations {
                 if let Some(aggregation) = &dest.aggregation {
@@ -677,6 +845,48 @@ impl MirrorMakerConfig {
         }
 
         Ok(())
+    }
+
+    /// Populate Kafka property maps from optional performance settings.
+    ///
+    /// Existing property-map entries always win. `linger.ms` and
+    /// `queue.buffering.max.ms` are librdkafka aliases, so an explicit value for
+    /// either suppresses generation of both.
+    pub fn apply_performance_property_defaults(&mut self) {
+        if let Some(value) = self.performance.fetch_min_bytes {
+            self.consumer_properties
+                .entry("fetch.min.bytes".to_string())
+                .or_insert_with(|| value.to_string());
+        }
+
+        if let Some(value) = self.performance.fetch_max_wait_ms {
+            self.consumer_properties
+                .entry("fetch.wait.max.ms".to_string())
+                .or_insert_with(|| value.to_string());
+        }
+
+        if let Some(value) = self.performance.batch_size {
+            self.producer_properties
+                .entry("batch.num.messages".to_string())
+                .or_insert_with(|| value.to_string());
+        }
+
+        let buffering_time_is_explicit = self.producer_properties.contains_key("linger.ms")
+            || self
+                .producer_properties
+                .contains_key("queue.buffering.max.ms");
+        if !buffering_time_is_explicit {
+            // `linger.ms` and `queue.buffering.max.ms` are aliases. Preserve
+            // documented configs that set both by giving `linger_ms`
+            // deterministic precedence.
+            if let Some(value) = self.performance.linger_ms {
+                self.producer_properties
+                    .insert("linger.ms".to_string(), value.to_string());
+            } else if let Some(value) = self.performance.queue_buffering_max_ms {
+                self.producer_properties
+                    .insert("queue.buffering.max.ms".to_string(), value.to_string());
+            }
+        }
     }
 
     pub fn get_target_broker(&self) -> String {
@@ -748,6 +958,46 @@ impl MirrorMakerConfig {
                 }
             }
         }
+    }
+}
+
+impl PerformanceConfig {
+    fn validate(&self) -> crate::Result<()> {
+        if self.consumer_batch_size == 0 {
+            return Err(config_error("performance.consumer_batch_size must be > 0"));
+        }
+
+        if self.consumer_batch_timeout_ms == 0 {
+            return Err(config_error(
+                "performance.consumer_batch_timeout_ms must be > 0",
+            ));
+        }
+
+        if self.parallelism_factor == 0 {
+            return Err(config_error("performance.parallelism_factor must be > 0"));
+        }
+
+        if self.worker_queue_capacity == 0 {
+            return Err(config_error(
+                "performance.worker_queue_capacity must be > 0",
+            ));
+        }
+
+        if self.fetch_min_bytes == Some(0) {
+            return Err(config_error("performance.fetch_min_bytes must be > 0"));
+        }
+
+        if self.batch_size == Some(0) {
+            return Err(config_error("performance.batch_size must be > 0"));
+        }
+
+        if self.producer_max_in_flight == 0 {
+            return Err(config_error(
+                "performance.producer_max_in_flight must be > 0",
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -895,6 +1145,10 @@ pub struct ObservabilityConfig {
     #[serde(default = "default_metrics_port")]
     pub metrics_port: u16,
 
+    /// Address for the metrics HTTP server to bind.
+    #[serde(default = "default_metrics_bind_address")]
+    pub metrics_bind_address: IpAddr,
+
     /// Path for metrics endpoint
     #[serde(default = "default_metrics_path")]
     pub metrics_path: String,
@@ -913,6 +1167,7 @@ impl Default for ObservabilityConfig {
         Self {
             metrics_enabled: default_metrics_enabled(),
             metrics_port: default_metrics_port(),
+            metrics_bind_address: default_metrics_bind_address(),
             metrics_path: default_metrics_path(),
             lag_monitoring_enabled: default_lag_monitoring(),
             lag_monitoring_interval_secs: default_lag_interval(),
@@ -926,6 +1181,10 @@ fn default_metrics_enabled() -> bool {
 
 fn default_metrics_port() -> u16 {
     9090
+}
+
+fn default_metrics_bind_address() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::UNSPECIFIED)
 }
 
 fn default_metrics_path() -> String {
@@ -943,6 +1202,242 @@ fn default_lag_interval() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn minimal_config_yaml(extra: &str) -> String {
+        format!(
+            "appid: test\nbootstrap: localhost:9092\ninput: input-topic\n{}",
+            extra
+        )
+    }
+
+    #[test]
+    fn test_performance_config_defaults_preserve_existing_runtime_behavior() {
+        let config: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml("")).unwrap();
+
+        assert_eq!(config.performance.consumer_batch_size, 100);
+        assert_eq!(config.performance.consumer_batch_timeout_ms, 100);
+        assert_eq!(config.performance.parallelism_factor, 10);
+        assert_eq!(
+            config.performance.processing_mode,
+            ProcessingMode::LegacyBatch
+        );
+        assert_eq!(config.performance.worker_queue_capacity, 1_024);
+        assert_eq!(config.performance.fetch_min_bytes, None);
+        assert_eq!(config.performance.fetch_max_wait_ms, None);
+        assert_eq!(config.performance.linger_ms, None);
+        assert_eq!(config.performance.batch_size, None);
+        assert_eq!(config.performance.queue_buffering_max_ms, None);
+        assert_eq!(
+            config.performance.producer_delivery_mode,
+            ProducerDeliveryMode::Acknowledged
+        );
+        assert_eq!(config.performance.producer_max_in_flight, 10_000);
+    }
+
+    #[test]
+    fn test_observability_metrics_bind_address_defaults_and_deserializes() {
+        let default_config: MirrorMakerConfig =
+            serde_yaml::from_str(&minimal_config_yaml("")).unwrap();
+        assert_eq!(
+            default_config.observability.metrics_bind_address,
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        );
+
+        let loopback_config: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(
+            "observability:\n  metrics_bind_address: 127.0.0.1\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            loopback_config.observability.metrics_bind_address,
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        );
+    }
+
+    #[test]
+    fn test_performance_config_deserializes_documented_names() {
+        let yaml = minimal_config_yaml(
+            r#"performance:
+  consumer_batch_size: 2000
+  consumer_batch_timeout_ms: 50
+  parallelism_factor: 15
+  processing_mode: partition_ordered
+  worker_queue_capacity: 2048
+  fetch_min_bytes: 131072
+  fetch_max_wait_ms: 500
+  linger_ms: 20
+  batch_size: 1000
+  queue_buffering_max_ms: 25
+  producer_delivery_mode: queued
+  producer_max_in_flight: 5000
+retry:
+  max_attempts: 1
+dlq:
+  enabled: false
+"#,
+        );
+        let config: MirrorMakerConfig = serde_yaml::from_str(&yaml).unwrap();
+
+        assert_eq!(config.performance.consumer_batch_size, 2000);
+        assert_eq!(config.performance.consumer_batch_timeout_ms, 50);
+        assert_eq!(config.performance.parallelism_factor, 15);
+        assert_eq!(
+            config.performance.processing_mode,
+            ProcessingMode::PartitionOrdered
+        );
+        assert_eq!(config.performance.worker_queue_capacity, 2048);
+        assert_eq!(config.performance.fetch_min_bytes, Some(131072));
+        assert_eq!(config.performance.fetch_max_wait_ms, Some(500));
+        assert_eq!(config.performance.linger_ms, Some(20));
+        assert_eq!(config.performance.batch_size, Some(1000));
+        assert_eq!(config.performance.queue_buffering_max_ms, Some(25));
+        assert_eq!(
+            config.performance.producer_delivery_mode,
+            ProducerDeliveryMode::Queued
+        );
+        assert_eq!(config.performance.producer_max_in_flight, 5000);
+    }
+
+    #[test]
+    fn test_performance_config_rejects_zero_runtime_limits() {
+        for performance in [
+            "consumer_batch_size: 0",
+            "consumer_batch_timeout_ms: 0",
+            "parallelism_factor: 0",
+            "worker_queue_capacity: 0",
+            "fetch_min_bytes: 0",
+            "batch_size: 0",
+            "producer_max_in_flight: 0",
+        ] {
+            let yaml = minimal_config_yaml(&format!("performance:\n  {}\n", performance));
+            let config: MirrorMakerConfig = serde_yaml::from_str(&yaml).unwrap();
+            assert!(
+                config.validate().is_err(),
+                "expected validation failure for {performance}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_queued_delivery_rejects_incompatible_reliability_settings() {
+        let queued = r#"performance:
+  producer_delivery_mode: queued
+"#;
+
+        let config: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(queued)).unwrap();
+        assert!(config.validate().is_err());
+
+        let retry_safe: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(&format!(
+            "{queued}retry:\n  max_attempts: 1\n"
+        )))
+        .unwrap();
+        assert!(retry_safe.validate().is_err());
+
+        let valid: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(&format!(
+            "{queued}retry:\n  max_attempts: 1\ndlq:\n  enabled: false\n"
+        )))
+        .unwrap();
+        assert!(valid.validate().is_ok());
+
+        let manual: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(&format!(
+            "{queued}retry:\n  max_attempts: 1\ndlq:\n  enabled: false\ncommit_strategy:\n  manual_commit: true\n"
+        )))
+        .unwrap();
+        assert!(manual.validate().is_err());
+    }
+
+    #[test]
+    fn test_partition_ordered_rejects_manual_commit_until_offset_coordination_exists() {
+        let config: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(
+            r#"performance:
+  processing_mode: partition_ordered
+commit_strategy:
+  manual_commit: true
+"#,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("partition_ordered"));
+        assert!(error.contains("manual_commit=false"));
+    }
+
+    #[test]
+    fn test_performance_properties_map_to_librdkafka_names() {
+        let mut config: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(
+            r#"performance:
+  fetch_min_bytes: 65536
+  fetch_max_wait_ms: 500
+  batch_size: 1000
+  queue_buffering_max_ms: 25
+"#,
+        ))
+        .unwrap();
+
+        config.apply_performance_property_defaults();
+
+        assert_eq!(
+            config.consumer_properties.get("fetch.min.bytes"),
+            Some(&"65536".to_string())
+        );
+        assert_eq!(
+            config.consumer_properties.get("fetch.wait.max.ms"),
+            Some(&"500".to_string())
+        );
+        assert_eq!(
+            config.producer_properties.get("batch.num.messages"),
+            Some(&"1000".to_string())
+        );
+        assert_eq!(
+            config.producer_properties.get("queue.buffering.max.ms"),
+            Some(&"25".to_string())
+        );
+    }
+
+    #[test]
+    fn test_explicit_kafka_properties_override_generated_settings() {
+        let mut config: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(
+            r#"performance:
+  fetch_min_bytes: 65536
+  fetch_max_wait_ms: 500
+  linger_ms: 20
+  batch_size: 1000
+consumer_properties:
+  fetch.min.bytes: "1"
+  fetch.wait.max.ms: "100"
+producer_properties:
+  batch.num.messages: "500"
+  queue.buffering.max.ms: "5"
+"#,
+        ))
+        .unwrap();
+
+        config.apply_performance_property_defaults();
+
+        assert_eq!(config.consumer_properties["fetch.min.bytes"], "1");
+        assert_eq!(config.consumer_properties["fetch.wait.max.ms"], "100");
+        assert_eq!(config.producer_properties["batch.num.messages"], "500");
+        assert_eq!(config.producer_properties["queue.buffering.max.ms"], "5");
+        assert!(!config.producer_properties.contains_key("linger.ms"));
+    }
+
+    #[test]
+    fn test_linger_ms_wins_when_both_performance_aliases_are_configured() {
+        let mut config: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(
+            r#"performance:
+  linger_ms: 10
+  queue_buffering_max_ms: 20
+"#,
+        ))
+        .unwrap();
+
+        config.validate().unwrap();
+        config.apply_performance_property_defaults();
+
+        assert_eq!(config.producer_properties["linger.ms"], "10");
+        assert!(!config
+            .producer_properties
+            .contains_key("queue.buffering.max.ms"));
+    }
 
     #[test]
     fn test_destination_config_with_envelope_fields() {

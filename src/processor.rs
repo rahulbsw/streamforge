@@ -1,4 +1,4 @@
-use crate::filter::{EnvelopeTransform, Filter, IdentityTransform, PassThroughFilter, Transform};
+use crate::filter::{EnvelopeTransform, Filter, PassThroughFilter, Transform};
 use crate::kafka::sink::KafkaSink;
 use crate::observability::{labels, METRICS};
 use crate::{
@@ -44,20 +44,35 @@ pub trait MessageProcessor: Send + Sync {
 pub struct SingleDestinationProcessor {
     sink: Arc<dyn SinkWriter>,
     transform: Option<Arc<dyn Transform>>,
+    messages_produced_counter: Counter,
 }
 
 impl SingleDestinationProcessor {
     pub fn new(sink: Arc<dyn SinkWriter>) -> Self {
+        Self::for_destination(sink, "single-destination")
+    }
+
+    pub fn for_destination(sink: Arc<dyn SinkWriter>, destination: &str) -> Self {
         Self {
             sink,
             transform: None,
+            messages_produced_counter: METRICS.messages_produced.with_label_values(&[destination]),
         }
     }
 
     pub fn with_transform(sink: Arc<dyn SinkWriter>, transform: Arc<dyn Transform>) -> Self {
+        Self::with_transform_for_destination(sink, transform, "single-destination")
+    }
+
+    pub fn with_transform_for_destination(
+        sink: Arc<dyn SinkWriter>,
+        transform: Arc<dyn Transform>,
+        destination: &str,
+    ) -> Self {
         Self {
             sink,
             transform: Some(transform),
+            messages_produced_counter: METRICS.messages_produced.with_label_values(&[destination]),
         }
     }
 }
@@ -76,7 +91,9 @@ impl MessageProcessor for SingleDestinationProcessor {
         } else {
             envelope
         };
-        self.sink.send(envelope).await
+        self.sink.send(envelope).await?;
+        self.messages_produced_counter.inc();
+        Ok(())
     }
 
     async fn flush(&self) -> Result<()> {
@@ -213,7 +230,7 @@ impl AggregationRuntimeMetrics {
 
 struct DestinationRuntime {
     filter: Arc<dyn Filter>,
-    transform: Arc<dyn Transform>,
+    transform: Option<Arc<dyn Transform>>,
     name: String,
     error_policy: crate::config::ErrorPolicy,
     metrics: DestinationMetrics,
@@ -230,7 +247,7 @@ impl DestinationRuntime {
 
         Self {
             filter: filter.unwrap_or_else(|| Arc::new(PassThroughFilter)),
-            transform: transform.unwrap_or_else(|| Arc::new(IdentityTransform)),
+            transform,
             name,
             error_policy,
             metrics,
@@ -257,19 +274,25 @@ impl DestinationRuntime {
     }
 
     fn apply_value_transform(&self, envelope: &mut MessageEnvelope) -> Result<bool> {
+        let Some(transform) = &self.transform else {
+            return Ok(true);
+        };
+
         self.metrics.transform_value_counter.inc();
 
-        let value_owned =
-            Arc::try_unwrap(Arc::clone(&envelope.value)).unwrap_or_else(|arc| (*arc).clone());
+        // Reuse the existing Arc allocation when this destination uniquely owns
+        // the value. For shared multi-destination values, Arc::make_mut performs
+        // the required copy-on-write clone exactly once.
+        let value_owned = std::mem::take(Arc::make_mut(&mut envelope.value));
 
-        let transformed_value = match self.transform.transform(value_owned) {
+        let transformed_value = match transform.transform(value_owned) {
             Ok(val) => val,
             Err(e) => {
                 return self.handle_error(e, "value transform");
             }
         };
 
-        envelope.value = Arc::new(transformed_value);
+        *Arc::make_mut(&mut envelope.value) = transformed_value;
         Ok(true)
     }
 
@@ -778,6 +801,18 @@ mod tests {
         }
     }
 
+    struct AddTransformedField;
+
+    impl Transform for AddTransformedField {
+        fn transform(&self, mut value: Value) -> Result<Value> {
+            value
+                .as_object_mut()
+                .ok_or_else(|| MirrorMakerError::Processing("expected object".to_string()))?
+                .insert("transformed".to_string(), Value::Bool(true));
+            Ok(value)
+        }
+    }
+
     fn aggregation_config(emit_interval_seconds: u64) -> AggregationConfig {
         AggregationConfig {
             group_by: vec![AggregationGroupBy {
@@ -911,6 +946,129 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[tokio::test]
+    async fn test_no_transform_multi_destination_shares_value_arc_and_skips_metric() {
+        let first_name = "no-transform.shared-value.first";
+        let second_name = "no-transform.shared-value.second";
+        let first_sink = Arc::new(RecordingSink::new());
+        let second_sink = Arc::new(RecordingSink::new());
+        let transform_counter = METRICS
+            .transform_operations
+            .with_label_values(&[first_name, labels::TRANSFORM_TYPE_VALUE]);
+        let transform_count_before = transform_counter.get();
+
+        let processor = MultiDestinationProcessor::new(
+            vec![
+                DestinationProcessor::new(
+                    first_sink.clone(),
+                    None,
+                    vec![],
+                    None,
+                    first_name.to_string(),
+                    ErrorPolicy::Fail,
+                ),
+                DestinationProcessor::new(
+                    second_sink.clone(),
+                    None,
+                    vec![],
+                    None,
+                    second_name.to_string(),
+                    ErrorPolicy::Fail,
+                ),
+            ],
+            None,
+        );
+        let envelope = MessageEnvelope::new(json!({
+            "payload": {
+                "large": ["value", "that", "must", "stay", "shared"]
+            }
+        }));
+        let original_value = Arc::clone(&envelope.value);
+
+        processor.process(envelope).await.unwrap();
+
+        let first_sent = first_sink.sent_messages();
+        let second_sent = second_sink.sent_messages();
+        assert_eq!(first_sent.len(), 1);
+        assert_eq!(second_sent.len(), 1);
+        assert!(Arc::ptr_eq(&original_value, &first_sent[0].value));
+        assert!(Arc::ptr_eq(&first_sent[0].value, &second_sent[0].value));
+        assert_eq!(transform_counter.get(), transform_count_before);
+    }
+
+    #[tokio::test]
+    async fn test_single_destination_success_increments_produced_counter() {
+        let destination_name = "single.metrics.success";
+        let unrelated_name = "single.metrics.success.unrelated";
+        let sink = Arc::new(RecordingSink::new());
+        let processor = SingleDestinationProcessor::for_destination(sink.clone(), destination_name);
+        let produced_counter = METRICS
+            .messages_produced
+            .with_label_values(&[destination_name]);
+        let unrelated_counter = METRICS
+            .messages_produced
+            .with_label_values(&[unrelated_name]);
+        let produced_before = produced_counter.get();
+        let unrelated_before = unrelated_counter.get();
+
+        processor
+            .process(MessageEnvelope::new(json!({"payload": "value"})))
+            .await
+            .unwrap();
+
+        assert_eq!(sink.sent_messages().len(), 1);
+        assert_eq!(produced_counter.get(), produced_before + 1.0);
+        assert_eq!(unrelated_counter.get(), unrelated_before);
+    }
+
+    #[tokio::test]
+    async fn test_single_destination_send_failure_does_not_increment_produced_counter() {
+        let destination_name = "single.metrics.send-failure";
+        let sink = Arc::new(RecordingSink::with_send_failures(1));
+        let processor = SingleDestinationProcessor::for_destination(sink.clone(), destination_name);
+        let produced_counter = METRICS
+            .messages_produced
+            .with_label_values(&[destination_name]);
+        let produced_before = produced_counter.get();
+
+        let error = processor
+            .process(MessageEnvelope::new(json!({"payload": "value"})))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, MirrorMakerError::Kafka(_)));
+        assert!(sink.sent_messages().is_empty());
+        assert_eq!(produced_counter.get(), produced_before);
+    }
+
+    #[tokio::test]
+    async fn test_actual_transform_reuses_unique_value_arc_allocation() {
+        let destination_name = "transform.unique-value";
+        let sink = Arc::new(RecordingSink::new());
+        let destination = DestinationProcessor::new(
+            sink.clone(),
+            None,
+            vec![],
+            Some(Arc::new(AddTransformedField)),
+            destination_name.to_string(),
+            ErrorPolicy::Fail,
+        );
+        let transform_counter = METRICS
+            .transform_operations
+            .with_label_values(&[destination_name, labels::TRANSFORM_TYPE_VALUE]);
+        let transform_count_before = transform_counter.get();
+        let envelope = MessageEnvelope::new(json!({"payload": "value"}));
+        let original_value_ptr = Arc::as_ptr(&envelope.value) as usize;
+
+        assert!(destination.process(envelope).await.unwrap());
+
+        let sent = sink.sent_messages();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(Arc::as_ptr(&sent[0].value) as usize, original_value_ptr);
+        assert_eq!(sent[0].value["transformed"], json!(true));
+        assert_eq!(transform_counter.get(), transform_count_before + 1.0);
     }
 
     #[tokio::test]

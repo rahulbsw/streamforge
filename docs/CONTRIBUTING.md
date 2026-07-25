@@ -1,6 +1,6 @@
 ---
 title: Contributing
-nav_order: 12
+nav_order: 9
 ---
 
 # Contributing Guide
@@ -802,7 +802,8 @@ cargo clippy --fix
 
 ## License
 
-Apache License 2.0 - See [LICENSE](../LICENSE) for details.
+Apache License 2.0 - See
+[LICENSE](https://github.com/rahulbsw/streamforge/blob/main/LICENSE) for details.
 
 Copyright 2025 Rahul Jain
 

@@ -1,8 +1,11 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{
+    black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
+};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use streamforge::filter::*;
 use streamforge::filter_parser::parse_transform;
+use streamforge::MessageEnvelope;
 
 fn create_test_message() -> Value {
     json!({
@@ -138,6 +141,48 @@ fn bench_arithmetic_transform(c: &mut Criterion) {
     });
 }
 
+fn bench_key_template_transform(c: &mut Criterion) {
+    let envelope = MessageEnvelope::new(create_test_message());
+    let single_path = KeyTemplateTransform::new("conference-{/message/confId}").unwrap();
+    let multiple_paths = KeyTemplateTransform::new(
+        "site-{/message/siteId}/conference-{/message/confId}/status-{/message/status}",
+    )
+    .unwrap();
+    assert_eq!(
+        single_path
+            .transform_envelope(envelope.clone())
+            .unwrap()
+            .key,
+        Some(json!("conference-12345"))
+    );
+    assert_eq!(
+        multiple_paths
+            .transform_envelope(envelope.clone())
+            .unwrap()
+            .key,
+        Some(json!("site-67890/conference-12345/status-active"))
+    );
+    let mut group = c.benchmark_group("transform/key_template/evaluate");
+
+    group.bench_function("single_compiled_path", |b| {
+        b.iter_batched(
+            || envelope.clone(),
+            |input| black_box(single_path.transform_envelope(black_box(input)).unwrap()),
+            BatchSize::SmallInput,
+        )
+    });
+
+    group.bench_function("multiple_compiled_paths", |b| {
+        b.iter_batched(
+            || envelope.clone(),
+            |input| black_box(multiple_paths.transform_envelope(black_box(input)).unwrap()),
+            BatchSize::SmallInput,
+        )
+    });
+
+    group.finish();
+}
+
 fn bench_transform_parser(c: &mut Criterion) {
     c.bench_function("parser/simple_transform", |b| {
         b.iter(|| parse_transform(black_box("/message/confId")))
@@ -255,6 +300,7 @@ criterion_group!(
     bench_object_construction,
     bench_array_transform,
     bench_arithmetic_transform,
+    bench_key_template_transform,
     bench_transform_parser,
     bench_transform_throughput,
     bench_combined_operations

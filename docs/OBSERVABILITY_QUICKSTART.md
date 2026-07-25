@@ -1,366 +1,193 @@
 ---
 title: Observability
-nav_order: 11
-parent: Deployment
+nav_order: 1
+parent: Operations
 ---
 
-# Observability Quickstart
+# Observability
 
-Get Prometheus metrics and Kafka lag monitoring running in 5 minutes.
+StreamForge exposes Prometheus metrics and a simple process health endpoint.
+Use them with Kafka consumer-group and destination-topic observations to monitor
+the full pipeline.
 
-## Quick Start
-
-### 1. Enable Metrics in Config
-
-Add to your `config.yaml`:
+## Enable the endpoints
 
 ```yaml
 observability:
   metrics_enabled: true
   metrics_port: 9090
+  metrics_path: /metrics
   lag_monitoring_enabled: true
   lag_monitoring_interval_secs: 30
 ```
 
-### 2. Start Streamforge
+Start StreamForge:
 
 ```bash
-CONFIG_FILE=config.yaml ./streamforge
+CONFIG_FILE=config.yaml target/release/streamforge
 ```
 
-You'll see:
-```
-✅ Metrics registered successfully
-🔍 Metrics server listening on http://0.0.0.0:9090
-   Metrics endpoint: http://localhost:9090/metrics
-   Health endpoint:  http://localhost:9090/health
-✅ Consumer lag monitoring started (interval: 30s)
-```
+The HTTP server listens on all interfaces. It serves `/metrics` and `/health`;
+the current server route is `/metrics` even if a different `metrics_path` value
+is configured.
 
-### 3. View Metrics
+Test from the same private network:
 
-**Browser:**
-```
-http://localhost:9090/metrics
-```
-
-**curl:**
 ```bash
-curl http://localhost:9090/metrics
+curl --fail http://streamforge.internal:9090/health
+curl --fail http://streamforge.internal:9090/metrics
 ```
 
-**Sample Output:**
-```prometheus
-# HELP streamforge_messages_consumed_total Total messages consumed from source Kafka
-# TYPE streamforge_messages_consumed_total counter
-streamforge_messages_consumed_total 125000
+`/health` returns `OK` when the HTTP process responds. It is not a readiness
+check for source consumption or destination delivery.
 
-# HELP streamforge_messages_produced_total Messages successfully produced to destinations
-# TYPE streamforge_messages_produced_total counter
-streamforge_messages_produced_total{destination="premium-events"} 45000
-streamforge_messages_produced_total{destination="standard-events"} 80000
+## Keep the endpoint private
 
-# HELP streamforge_consumer_lag Consumer lag per partition
-# TYPE streamforge_consumer_lag gauge
-streamforge_consumer_lag{topic="input-topic",partition="0"} 1250
-streamforge_consumer_lag{topic="input-topic",partition="1"} 890
+The metrics server does not provide TLS or authentication. Do not expose it to
+the public internet.
 
-# HELP streamforge_processing_duration_seconds End-to-end processing latency per destination
-# TYPE streamforge_processing_duration_seconds histogram
-streamforge_processing_duration_seconds_bucket{destination="premium-events",le="0.001"} 35000
-streamforge_processing_duration_seconds_bucket{destination="premium-events",le="0.005"} 43000
-streamforge_processing_duration_seconds_bucket{destination="premium-events",le="0.01"} 44500
-streamforge_processing_duration_seconds_bucket{destination="premium-events",le="+Inf"} 45000
-streamforge_processing_duration_seconds_sum{destination="premium-events"} 67.5
-streamforge_processing_duration_seconds_count{destination="premium-events"} 45000
-```
+- In Kubernetes, use a `ClusterIP` service and restrict ingress to the
+  monitoring namespace with a `NetworkPolicy`.
+- In Docker, publish the port only on a private interface or scrape it through
+  a private container network.
+- If a proxy is required, add authentication and TLS there.
 
-## Prometheus Setup
+Metrics labels and operational values can reveal topic names and traffic
+patterns. Apply the same access controls used for other production telemetry.
 
-### Add Scrape Config
-
-Edit `prometheus.yml`:
+## Prometheus scrape configuration
 
 ```yaml
 scrape_configs:
-  - job_name: 'streamforge'
+  - job_name: streamforge
     static_configs:
-      - targets: ['localhost:9090']
+      - targets:
+          - streamforge.internal:9090
     scrape_interval: 15s
     scrape_timeout: 10s
 ```
 
-### Start Prometheus
+For Kubernetes, a `ServiceMonitor` can select the private metrics service when
+the Prometheus Operator is installed.
 
-```bash
-docker run -d \
-  -p 9091:9090 \
-  -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml \
-  prom/prometheus
-```
+## Useful metrics
 
-Access Prometheus UI: `http://localhost:9091`
+### Pipeline flow
 
-## Quick Queries
-
-### Message Throughput
 ```promql
-# Messages per second
 rate(streamforge_messages_consumed_total[5m])
-
-# Per destination
-sum(rate(streamforge_messages_produced_total[5m])) by (destination)
 ```
 
-### Error Rate
 ```promql
-# Errors per second
-rate(streamforge_processing_errors_total[5m])
-
-# Error percentage
-rate(streamforge_processing_errors_total[5m]) / 
-rate(streamforge_messages_consumed_total[5m]) * 100
-```
-
-### Consumer Lag
-```promql
-# Total lag
-sum(streamforge_consumer_lag)
-
-# Per partition
-streamforge_consumer_lag
-
-# Lag increasing (alert!)
-delta(streamforge_consumer_lag[5m]) > 1000
-```
-
-### Processing Latency
-```promql
-# P99 latency
-histogram_quantile(0.99, 
-  rate(streamforge_processing_duration_seconds_bucket[5m])
+sum by (destination) (
+  rate(streamforge_messages_delivered_total[5m])
 )
-
-# Average latency
-rate(streamforge_processing_duration_seconds_sum[5m]) /
-rate(streamforge_processing_duration_seconds_count[5m])
 ```
 
-### Filter Effectiveness
+`streamforge_messages_delivered_total` counts successful Kafka delivery
+acknowledgements. Prefer it over enqueue or processor completion when measuring
+delivery.
+
+### Errors
+
 ```promql
-# Pass rate percentage
-rate(streamforge_filter_evaluations_total{result="pass"}[5m]) /
-rate(streamforge_filter_evaluations_total[5m]) * 100
-
-# Messages filtered out per destination
-rate(streamforge_messages_filtered_total[5m])
+sum by (type) (
+  rate(streamforge_processing_errors_total[5m])
+)
 ```
 
-## Grafana Dashboard
-
-### Quick Dashboard JSON
-
-Create a dashboard with these panels:
-
-**Panel 1: Message Throughput**
-```json
-{
-  "title": "Message Throughput",
-  "targets": [{
-    "expr": "rate(streamforge_messages_consumed_total[5m])",
-    "legendFormat": "Consumed"
-  }, {
-    "expr": "sum(rate(streamforge_messages_produced_total[5m]))",
-    "legendFormat": "Produced"
-  }]
-}
+```promql
+sum by (destination) (
+  rate(streamforge_filter_errors_total[5m])
+)
 ```
 
-**Panel 2: Consumer Lag**
-```json
-{
-  "title": "Consumer Lag by Partition",
-  "targets": [{
-    "expr": "streamforge_consumer_lag",
-    "legendFormat": "{{topic}}-{{partition}}"
-  }]
-}
+```promql
+sum by (destination) (
+  rate(streamforge_transform_errors_total[5m])
+)
 ```
 
-**Panel 3: Error Rate**
-```json
-{
-  "title": "Error Rate",
-  "targets": [{
-    "expr": "rate(streamforge_processing_errors_total[5m])",
-    "legendFormat": "{{type}}"
-  }]
-}
+### Lag
+
+```promql
+sum(streamforge_consumer_lag)
 ```
 
-**Panel 4: Processing Latency**
-```json
-{
-  "title": "Processing Latency (P50, P95, P99)",
-  "targets": [
-    {
-      "expr": "histogram_quantile(0.50, rate(streamforge_processing_duration_seconds_bucket[5m]))",
-      "legendFormat": "P50"
-    },
-    {
-      "expr": "histogram_quantile(0.95, rate(streamforge_processing_duration_seconds_bucket[5m]))",
-      "legendFormat": "P95"
-    },
-    {
-      "expr": "histogram_quantile(0.99, rate(streamforge_processing_duration_seconds_bucket[5m]))",
-      "legendFormat": "P99"
-    }
-  ]
-}
+```promql
+max by (topic, partition) (streamforge_consumer_lag)
 ```
 
-Import to Grafana:
-```bash
-# Coming soon: Pre-built dashboard JSON
-# Check examples/grafana-dashboard.json
+Lag metrics appear after the consumer has partition assignments and the lag
+monitor completes a collection interval.
+
+### Processing latency
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le, destination) (
+    rate(streamforge_processing_duration_seconds_bucket[5m])
+  )
+)
 ```
 
-## Alerting Rules
+### Saturation
 
-### prometheus-alerts.yml
+```promql
+streamforge_messages_in_flight
+```
+
+Pair application metrics with container CPU, throttling, memory, restart, and
+network metrics from the runtime platform.
+
+## Alert strategy
+
+Use workload-specific service objectives rather than copied numeric thresholds.
+At minimum, detect:
+
+- StreamForge unavailable;
+- source traffic present while broker-acknowledged delivery stops;
+- sustained consumer-lag growth;
+- processing errors or DLQ traffic;
+- repeated restarts;
+- memory approaching its limit;
+- sustained CPU throttling;
+- abnormal processing-latency changes.
+
+Example availability rule:
 
 ```yaml
 groups:
-  - name: streamforge_alerts
-    interval: 30s
+  - name: streamforge
     rules:
-      # High error rate
-      - alert: StreamforgeHighErrorRate
-        expr: rate(streamforge_processing_errors_total[5m]) > 10
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High error rate in Streamforge"
-          description: "Error rate is {{ $value }} errors/sec"
-
-      # Consumer lag increasing
-      - alert: StreamforgeConsumerLagIncreasing
-        expr: delta(streamforge_consumer_lag[5m]) > 10000
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Consumer lag increasing"
-          description: "Lag increased by {{ $value }} in 5 minutes"
-
-      # High latency
-      - alert: StreamforgeHighLatency
-        expr: |
-          histogram_quantile(0.99,
-            rate(streamforge_processing_duration_seconds_bucket[5m])
-          ) > 1.0
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "P99 latency above 1 second"
-
-      # Service down
-      - alert: StreamforgeDown
+      - alert: StreamForgeUnavailable
         expr: up{job="streamforge"} == 0
-        for: 1m
+        for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "Streamforge service is down"
+          summary: StreamForge metrics endpoint is unavailable
 ```
 
-## Testing Locally
+Choose the `for` duration and severity according to the pipeline objective.
 
-### 1. Generate Load
+## Validate the signal path
 
-```bash
-# Terminal 1: Start Streamforge
-CONFIG_FILE=examples/config.with-observability.yaml ./streamforge
+1. Confirm Prometheus reports the target as healthy.
+2. Produce a controlled source record.
+3. Observe the consumed counter.
+4. Verify the destination record with an independent Kafka consumer.
+5. Observe the delivered counter for that destination.
+6. Confirm lag reflects the committed consumer-group position.
+7. Send an intentionally rejected test record in a non-production pipeline and
+   verify error and DLQ monitoring.
+8. Stop the test instance and verify the availability alert.
 
-# Terminal 2: Produce test messages
-kafka-console-producer.sh --topic input-topic --bootstrap-server localhost:9092
-```
+If metrics disagree with Kafka offsets or destination records, treat Kafka as
+the delivery source of truth and investigate instrumentation before publishing
+performance results.
 
-### 2. Watch Metrics
-
-```bash
-# Watch metrics update
-watch -n 2 'curl -s http://localhost:9090/metrics | grep streamforge_messages'
-
-# Check specific metric
-curl -s http://localhost:9090/metrics | grep streamforge_consumer_lag
-```
-
-### 3. Verify Lag Monitoring
-
-```bash
-# Check lag metrics are updating
-curl -s http://localhost:9090/metrics | grep consumer_lag
-
-# Example output:
-# streamforge_consumer_lag{topic="input-topic",partition="0"} 0
-# streamforge_consumer_lag{topic="input-topic",partition="1"} 0
-```
-
-## Troubleshooting
-
-### Metrics endpoint not accessible
-
-**Check if server started:**
-```bash
-netstat -an | grep 9090
-# Should show: tcp4  0  0  *.9090  *.*  LISTEN
-```
-
-**Check logs:**
-```
-2026-04-03T10:00:00Z INFO streamforge: Metrics server listening on http://0.0.0.0:9090
-```
-
-### No lag metrics
-
-**Possible causes:**
-1. No partitions assigned yet (consumer just started)
-2. Lag monitoring disabled in config
-3. Consumer group has no committed offsets
-
-**Check:**
-```bash
-# Wait 30 seconds for first lag check
-sleep 30
-
-# Check metrics
-curl http://localhost:9090/metrics | grep consumer_lag
-```
-
-### Metrics not updating
-
-**Verify:**
-1. Messages are being consumed (check logs)
-2. Metrics are being incremented (check counter values)
-3. Prometheus is scraping (check Prometheus UI → Targets)
-
-## Next Steps
-
-- [Full Design Document](OBSERVABILITY_METRICS_DESIGN.md) - Complete metrics reference
-- [Prometheus Documentation](https://prometheus.io/docs/)
-- [Grafana Dashboard Tutorial](https://grafana.com/docs/grafana/latest/dashboards/)
-- See `examples/config.with-observability.yaml` for full config example
-
-## Summary
-
-You now have:
-- ✅ Prometheus metrics exposed on `:9090/metrics`
-- ✅ Kafka consumer lag monitoring
-- ✅ Per-destination metrics (throughput, errors, latency)
-- ✅ Filter and transform operation tracking
-- ✅ Health check endpoint
-
-**Total setup time:** < 5 minutes 🚀
+See [Operations](OPERATIONS.md) for incident workflows and
+[Delivery guarantees](DELIVERY_GUARANTEES.md) for counter interpretation in
+acknowledged and queued modes.

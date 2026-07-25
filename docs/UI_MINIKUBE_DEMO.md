@@ -1,55 +1,50 @@
 ---
-title: UI Demo on Minikube
+title: UI preview
 nav_order: 3
 ---
 
-# UI Demo on Minikube
+# UI preview on Minikube
 
-This walkthrough shows the public-facing StreamForge UI flow on a local Minikube cluster:
+This archived two-minute recording shows the StreamForge operator and UI
+running on a local Minikube cluster. It covers Helm installation, pipeline
+authoring, generated YAML review, and CRD deployment.
 
-1. Install the operator and UI with Helm
-2. Open the UI and sign in
-3. Create a pipeline in form mode
-4. Show the generated YAML before deployment
-5. Deploy the CRD to Kubernetes
-6. Produce a sample event to Kafka
-7. Consume the transformed event from the analytics topic
+{: .important }
+The recording is a UI preview, not current end-to-end proof of a transformed
+destination. Its UI-created mirror destination and separately verified
+analytics destination do not represent one continuous pipeline. Use the
+[local quickstart](QUICKSTART.md) for the currently reproducible data-path
+demonstration.
 
-<video controls preload="metadata" style="width:100%;max-width:1200px;border-radius:12px;">
-  <source src="/streamforge/assets/demo/ui-minikube-demo.mp4" type="video/mp4">
+<video controls playsinline preload="metadata" aria-label="Archived StreamForge UI preview" style="width:100%;max-width:1200px;border-radius:12px;">
+  <source src="assets/demo/ui-minikube-demo.mp4" type="video/mp4">
   Your browser does not support embedded MP4 playback.
 </video>
 
-If the embedded player does not load in your renderer, use the repo asset directly: [ui-minikube-demo.mp4](assets/demo/ui-minikube-demo.mp4)
+[Download the archived MP4](assets/demo/ui-minikube-demo.mp4)
 
-## What the Demo Shows
+## What is verified in this recording
 
-- Helm install of the StreamForge operator with the built-in UI enabled
-- Login with the demo credentials `admin` / `admin`
-- Pipeline creation through the UI instead of hand-written YAML
-- YAML preview before create
-- Runtime verification with a produced input event and a consumed transformed output event
+- The operator and UI install on Minikube through Helm.
+- The UI accepts a pipeline definition and displays its generated YAML.
+- The UI submits a `StreamforgePipeline` custom resource.
+- Kubernetes begins reconciling the submitted resource.
 
-Expected transformed output:
+## What is not claimed
 
-```json
-{"amount":125,"order_id":"ord-ui-demo-1001","region":"us"}
-```
+- The recording does not prove that the UI-created destination applies the
+  selected transform.
+- It does not provide a performance, capacity, or latency result.
+- The demo credentials shown in the local environment are not production
+  defaults.
 
-## Demo Topics
+A replacement recording is prepared but will not be published until one
+UI-created pipeline demonstrably writes the expected transformed record to its
+exact configured destination.
 
-- Input topic: `raw-orders-ui-demo`
-- UI-declared destination topic: `mirror-orders-ui-demo`
-- Verified transformed output topic: `analytics-orders-ui-demo`
+## Reproduce the supported paths
 
-## Demo Note
-
-This recording keeps the transformed verification on a dedicated analytics topic so the public walkthrough stays accurate while the current UI deployment flow still mirrors the first declared destination as a raw stream.
-
-## Reproduce It
-
-Use these docs for the same setup shown in the recording:
-
-- [Kubernetes](KUBERNETES.md)
-- [Helm chart README](../helm/streamforge-operator/README.md)
-- [Examples](EXAMPLES.md)
+- [Five-minute local data-path demo](QUICKSTART.md)
+- [Kubernetes deployment](KUBERNETES.md)
+- [Helm chart source](https://github.com/rahulbsw/streamforge/tree/main/helm/streamforge-operator)
+- [Runnable examples](EXAMPLES.md)

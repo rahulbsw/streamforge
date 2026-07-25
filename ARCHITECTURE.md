@@ -1,637 +1,304 @@
-# Architecture Overview
+# Architecture
 
-High-level architecture and design principles for Streamforge (formerly StreamForge).
+StreamForge is a Rust-native Kafka data-plane service for selective replication:
+consume records, evaluate routing rules, optionally transform message envelopes,
+and produce to one or more destinations.
 
----
+This document describes the current architecture. Product boundaries and future
+typed-envelope work are governed by `PROJECT_SPEC.md`.
 
-## System Overview
+## System context
 
-Streamforge is a high-performance Kafka streaming toolkit that mirrors, filters, transforms, and routes messages between Kafka clusters with sub-microsecond latency.
-
-```
-┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
-│  Source Kafka   │────────>│   Streamforge    │────────>│  Target Kafka   │
-│   Cluster(s)    │         │   Processing     │         │   Cluster(s)    │
-└─────────────────┘         └──────────────────┘         └─────────────────┘
-                                      │
-                                      │ Optional:
-                                      ├─ Filter (44-145ns)
-                                      ├─ Transform (810-1,633ns)
-                                      ├─ Hash for deduplication
-                                      └─ Route to multiple destinations
-```
-
----
-
-## Core Architecture
-
-### High-Level Design
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│                        Streamforge                             │
-├────────────────────────────────────────────────────────────────┤
-│  Configuration Layer                                           │
-│  ├─ YAML/JSON Config Parser                                   │
-│  └─ Security Configuration (SSL/TLS, SASL)                    │
-├────────────────────────────────────────────────────────────────┤
-│  Consumer Layer                                                │
-│  ├─ Kafka StreamConsumer (rdkafka)                            │
-│  ├─ Concurrent Batch Processing (80 parallel ops)             │
-│  ├─ At-least-once / At-most-once semantics                    │
-│  └─ Manual/Auto commit strategies                             │
-├────────────────────────────────────────────────────────────────┤
-│  Processing Layer                                              │
-│  ├─ Message Processor (async trait)                           │
-│  │   ├─ Single Destination Processor                          │
-│  │   └─ Multi Destination Processor                           │
-│  ├─ Filter Engine (custom DSL)                                │
-│  │   ├─ Boolean Logic (AND/OR/NOT)                            │
-│  │   ├─ Regex Matching                                        │
-│  │   └─ Array Operations                                      │
-│  ├─ Transform Engine (custom DSL)                             │
-│  │   ├─ Field Mapping                                         │
-│  │   ├─ Object Construction                                   │
-│  │   └─ Arithmetic Operations                                 │
-│  └─ Hashing & Caching (optional)                              │
-│      ├─ SHA256 hashing for deduplication                      │
-│      └─ LRU/Redis cache backends                              │
-├────────────────────────────────────────────────────────────────┤
-│  Producer Layer                                                │
-│  ├─ Kafka Sink (FutureProducer)                               │
-│  ├─ Custom Partitioning                                       │
-│  ├─ Compression (gzip/snappy/zstd/lz4)                        │
-│  └─ Async message delivery                                    │
-├────────────────────────────────────────────────────────────────┤
-│  Observability Layer                                           │
-│  ├─ Metrics (Stats Reporter)                                  │
-│  ├─ Tracing (tracing crate)                                   │
-│  └─ Error Handling                                             │
-└────────────────────────────────────────────────────────────────┘
+```text
+Source Kafka
+    |
+    v
+rust-rdkafka StreamConsumer
+    |
+    v
+selectable legacy batching or bounded source-partition worker lanes
+    |
+    v
+MessageEnvelope (JSON value, optional key, headers, timestamp, source metadata)
+    |
+    +--> destination filter --> optional transform --> KafkaSink --> Target Kafka
+    +--> destination filter --> optional transform --> KafkaSink --> Target Kafka
+    |
+    +--> metrics, retry, DLQ, and offset-commit handling
 ```
 
----
+The current data path parses payloads into `serde_json::Value`. A raw-byte
+passthrough envelope is planned but is not part of the current runtime.
 
-## Key Design Decisions
+## Major layers
 
-### 1. Rust Language Choice
+### Configuration
 
-**Rationale:**
-- **Memory Safety**: Zero-cost abstractions, no garbage collection
-- **Performance**: Native compilation, minimal runtime overhead
-- **Concurrency**: Fearless concurrency with ownership model
-- **Ecosystem**: Rich async ecosystem (Tokio, rdkafka)
+`src/config.rs` parses YAML or JSON into typed configuration and validates
+cross-field constraints.
 
-**Benefits Achieved:**
-- 40x faster filters/transforms vs Java JSLT
-- 10x less memory (~50MB vs ~500MB)
-- 2.5x higher throughput (25K+ msg/s vs 10K msg/s)
-- Zero CVEs with Chainguard base images
+Responsibilities include:
 
-### 2. Custom DSL (No External Dependencies)
+- source, destination, security, commit, retry, DLQ, cache, aggregation, and
+  observability settings;
+- backward-compatible runtime performance defaults;
+- mapping selected performance fields to librdkafka properties;
+- preserving explicit `consumer_properties` and `producer_properties` as the
+  highest-precedence performance settings. StreamForge reapplies
+  `enable.auto.commit` and `enable.auto.offset.store` after raw consumer
+  properties because commit strategy is a validated reliability contract.
 
-**Decision:** Build custom string-based filtering/transformation DSL instead of using JSLT/JavaScript/Rhai
+`src/main.rs` applies the validated configuration to the consumer and processing
+loop.
 
-**Rationale:**
-- JSLT (Java) and JavaScript engines have significant overhead
-- Rhai (Rust scripting) adds ~300KB binary size and runtime complexity
-- Custom DSL optimized for message streaming patterns
-- Sub-microsecond performance critical for throughput
-- Explicit syntax matches Kafka streaming patterns
+### Consumer and processing loop
 
-**Results:**
-- Simple filters: 44-50ns (vs ~2,000ns for JSLT)
-- Transforms: 810-1,633ns (vs ~40,000ns for JSLT)
-- Zero external dependencies for core DSL
-- Colon-delimited syntax (e.g., `/path,==,value`, `AND:cond1:cond2`)
+`src/main.rs` owns the `StreamConsumer`, subscription, processing-mode
+selection, and offset-commit coordination. `src/partition_pipeline.rs` owns the
+bounded partition-ordered worker implementation.
 
-**v1.0 Gaps:**
-- ❌ No formal grammar (EBNF)
-- ❌ Parser lacks validation layer (errors found at runtime)
-- ❌ No AST representation
-- ❌ Error messages lack context
-- ⏭️ Planned: Separate parser/AST/validator/evaluator in Phase 2
+The compatibility mode retains the historical batch barrier:
 
-### 3. Async/Await Architecture
-
-**Decision:** Use Tokio async runtime for all I/O operations
-
-**Rationale:**
-- Non-blocking I/O maximizes CPU utilization
-- Concurrent message processing without thread-per-message overhead
-- Efficient resource usage for high-throughput scenarios
-
-**Implementation:**
-- `async fn process()` for message processing
-- `buffer_unordered()` for concurrent batch processing
-- 80 parallel operations (8 threads × 10 parallelism factor)
-
-### 4. Concurrent Batch Processing
-
-**Decision:** Process messages in batches with configurable concurrency
-
-**Configuration:**
-```rust
-BATCH_SIZE = 100                // Messages per batch
-BATCH_FILL_TIMEOUT_MS = 100     // Max wait for batch
-PARALLELISM_FACTOR = 10         // threads × 10 = concurrency
-```
-
-**Rationale:**
-- Balance throughput and latency
-- Efficient commit strategies
-- Resource pooling (connections, buffers)
-
-**Results:**
-- 132x improvement over sequential (83 → 11,000 msg/s)
-- Perfect linear scaling (2.0x from 4 to 8 threads)
-- Peak throughput: 34,517 msg/s sustained
-
-### 5. Pluggable Delivery Semantics
-
-**Decision:** Support both at-least-once and at-most-once delivery
-
-**Configuration:**
 ```yaml
-commit_strategy:
-  manual_commit: true    # At-least-once
-  commit_mode: sync      # Async or Sync
-
-dead_letter_queue:
-  enabled: true
-  topic: streamforge-dlq
-  max_retries: 3
+performance:
+  processing_mode: legacy_batch
+  consumer_batch_size: 100
+  consumer_batch_timeout_ms: 100
+  parallelism_factor: 10
 ```
 
-**Rationale:**
-- Different use cases have different requirements
-- Trade-off between throughput and guarantees
-- Flexibility for users to choose
+Effective processing concurrency is the saturating product of `threads` and
+`parallelism_factor`, with a minimum of one.
 
-**Performance:**
-- At-least-once: 10,933 msg/s with full durability
-- At-most-once: 11,200 msg/s (~3% overhead for guarantees)
+The opt-in partition-ordered mode detaches consumed records into owned messages
+and routes every `(source topic, source partition)` to one of `threads` bounded
+FIFO worker lanes:
 
-**v1.0 Gaps:**
-- ❌ Commit semantics not formally documented
-- ❌ Retry backoff policy undefined
-- ❌ DLQ message format unspecified
-- ❌ No integration tests for failure scenarios
-- ⏭️ Planned: docs/DELIVERY_GUARANTEES.md + tests in Phase 1
-
-### 6. Multi-Destination Routing
-
-**Decision:** Support content-based routing to multiple destinations
-
-**Architecture:**
-```rust
-pub struct DestinationProcessor {
-    sink: Arc<KafkaSink>,
-    filter: Arc<dyn Filter>,      // Optional
-    transform: Arc<dyn Transform>, // Optional
-    name: String,
-}
-
-pub struct MultiDestinationProcessor {
-    destinations: Vec<DestinationProcessor>,
-    routing_path: Option<String>,
-}
-```
-
-**Rationale:**
-- Single pipeline can serve multiple use cases
-- Filter and transform per destination
-- Efficient: share consumer, process once
-
-### 7. Cache-Based Deduplication
-
-**Decision:** Optional hash-based deduplication with pluggable cache backends
-
-**Supported Backends:**
-- **LRU Cache** (in-memory, fast, bounded)
-- **Redis** (distributed, persistent, shared)
-
-**Rationale:**
-- Handle duplicate messages from upstream
-- Configurable cache backend based on scale
-- Async cache operations don't block processing
-
----
-
-## Data Flow
-
-### Single Destination Flow
-
-```
-1. Consumer reads message batch (100 messages, 100ms timeout)
-   ↓
-2. Parse message key (permissive) and value (strict JSON)
-   ↓
-3. Process batch concurrently (80 parallel operations)
-   ├─ Apply filter (if configured)
-   ├─ Apply transform (if configured)
-   └─ Check cache/hash (if configured)
-   ↓
-4. Send to Kafka sink (async)
-   ↓
-5. Commit offsets (if manual commit mode)
-   ├─ Retry with exponential backoff (3 attempts)
-   └─ Halt on persistent failure (prevent data loss)
-```
-
-### Multi-Destination Flow
-
-```
-1. Consumer reads message batch
-   ↓
-2. Parse message
-   ↓
-3. For each destination (in parallel):
-   ├─ Evaluate destination-specific filter
-   ├─ Apply destination-specific transform
-   ├─ Check destination-specific cache
-   └─ Send to destination sink
-   ↓
-4. Collect results
-   ├─ If any destination failed → halt (data integrity)
-   └─ If all succeeded → commit offsets
-```
-
----
-
-## Component Details
-
-### Configuration Layer
-
-**File:** `src/config.rs`
-
-Responsibilities:
-- Parse YAML/JSON configuration
-- Validate configuration
-- Apply security settings
-- Provide defaults
-
-### Consumer Layer
-
-**File:** `src/main.rs`
-
-Responsibilities:
-- Create Kafka consumer
-- Subscribe to topics
-- Manage consumer groups
-- Handle offset commits
-- Implement commit retry logic
-
-### Processing Layer
-
-**Files:** `src/processor.rs`, `src/filter/`, `src/transform.rs`
-
-Responsibilities:
-- **MessageProcessor trait**: Define processing interface
-- **SingleDestinationProcessor**: Single output processing
-- **MultiDestinationProcessor**: Multi-output routing
-- **Filter Engine**: Evaluate filter expressions (44-145ns)
-- **Transform Engine**: Apply transformations (810-1,633ns)
-
-### Producer Layer
-
-**Files:** `src/kafka/sink.rs`, `src/kafka/partitioner.rs`
-
-Responsibilities:
-- Create Kafka producer (FutureProducer)
-- Handle custom partitioning
-- Apply compression
-- Send messages asynchronously
-- Handle producer errors
-
-### Observability Layer
-
-**Files:** `src/metrics.rs`
-
-Responsibilities:
-- Track processed messages
-- Track completed messages
-- Track errors
-- Report statistics (every 10 seconds)
-- Tracing integration
-
----
-
-## Performance Architecture
-
-### Throughput Optimization
-
-1. **Concurrent Batch Processing**
-   - Process 100 messages per batch
-   - 80 concurrent operations (8 threads × 10)
-   - Result: 132x throughput improvement
-
-2. **Async I/O**
-   - Non-blocking Kafka I/O
-   - Tokio runtime for efficient scheduling
-   - Result: Maximize CPU utilization
-
-3. **Custom DSL**
-   - Zero-overhead parsing (compile-time)
-   - Sub-microsecond filter/transform
-   - Result: 40x faster than JSLT
-
-4. **Efficient Memory Usage**
-   - ~50MB RAM footprint
-   - Zero garbage collection
-   - Result: 10x less memory than Java
-
-### Latency Optimization
-
-1. **Minimal Processing Overhead**
-   - Filters: 44-145ns per message
-   - Transforms: 810-1,633ns per message
-   - Total: < 2µs per message
-
-2. **Batch Timeout**
-   - 100ms max wait for batch
-   - Ensures low-latency during low traffic
-   - Result: P99 latency < 150ms
-
----
-
-## Scaling Architecture
-
-### Vertical Scaling
-
-**Single Instance:**
-- 4 threads → 10,933 msg/s
-- 8 threads → 25,000-30,000 msg/s (linear scaling)
-- Scales with CPU cores
-
-**Configuration:**
 ```yaml
-threads: 8              # Number of consumer threads
+performance:
+  processing_mode: partition_ordered
+  worker_queue_capacity: 1024
 ```
 
-### Horizontal Scaling
+Records from one source partition enter one lane in consumption order. Different
+lanes execute concurrently. This mode currently supports auto commit only;
+manual commit requires a rebalance-aware completed-offset coordinator and is
+rejected during configuration validation.
 
-**Multiple Instances:**
-- Kafka consumer groups
-- Partitions distributed across instances
-- Each instance processes subset of partitions
+### Envelope
 
-**Example:**
-```
-8 partitions, 2 instances:
-- Instance 1: partitions 0-3
-- Instance 2: partitions 4-7
-```
+`src/envelope.rs` defines `MessageEnvelope`. It carries:
 
-### Kubernetes Scaling
+- a JSON message value;
+- an optional JSON key;
+- headers;
+- timestamp;
+- source topic, partition, and offset metadata.
 
-**Horizontal Pod Autoscaler (HPA):**
-```yaml
-minReplicas: 2
-maxReplicas: 10
-targetCPUUtilizationPercentage: 70
-```
+The JSON value is reference-counted for destination fan-out. Destinations without
+a value transform retain the shared allocation. A destination with a transform
+uses copy-on-write ownership: a uniquely owned value can be reused, while a
+shared value is cloned only when mutation is required.
 
-**Scaling triggers:**
-- CPU utilization
-- Custom metrics (lag, throughput)
-- Message queue depth
+### Filter and transform DSL
 
----
+`src/filter_parser.rs`, `src/dsl/`, and `src/filter/` implement the DSL.
 
-## Security Architecture
+Supported execution forms include:
 
-### Authentication
+- legacy colon-delimited filters and transforms;
+- function-style filters parsed into an AST;
+- value, key, header, timestamp, array, string, and cache-aware operations.
 
-Supported mechanisms:
-- **SASL/PLAIN** - Username/password (simple)
-- **SASL/SCRAM-SHA-256** - Username/password (secure)
-- **SASL/SCRAM-SHA-512** - Username/password (more secure)
-- **SASL/GSSAPI** - Kerberos
-- **Mutual TLS** - Certificate-based
+Function-style filter construction lowers the parsed expression into a compiled
+evaluation tree. JSON path segments, regexes, and typed array literals are
+prepared once at construction rather than on every message. Key-template
+transforms similarly tokenize placeholders and paths once.
 
-### Encryption
+Function-style array `any` and `all` evaluation still clone each visited array
+element into a temporary envelope. That boundary is intentionally left for a
+later measured refactor.
 
-- **SSL/TLS** - Transport encryption
-- **TLS 1.2/1.3** - Modern protocols
-- **Certificate validation** - Hostname verification
+### Destination processing
 
-### Secrets Management
+`src/processor.rs` builds a runtime for each configured destination.
 
-- **Environment variables** - For sensitive values
-- **Kubernetes secrets** - For K8s deployments
-- **File-based secrets** - Certificate files
+Each destination can have:
 
----
+- an optional filter;
+- an optional value transform;
+- key, header, and timestamp transforms;
+- optional cache or aggregation behavior;
+- an independent Kafka sink.
 
-## Reliability Architecture
+An absent value transform remains `None`; no identity transform or transform
+metric is executed. Multi-destination routing shares the incoming value until a
+destination requires mutation.
 
-### Error Handling
+### Producer and partitioning
 
-1. **Parse Errors**
-   - Log with full context (topic, partition, offset, key)
-   - Count as error in metrics
-   - Handled per delivery semantics
+`src/kafka/sink.rs` wraps a rust-rdkafka `FutureProducer`, resolves output topic
+templates, applies producer/security settings, serializes envelopes, and sends
+records.
 
-2. **Processing Errors**
-   - Propagate to batch level
-   - Trigger commit failure handling
+Producer delivery is selectable:
 
-3. **Commit Errors**
-   - Retry with exponential backoff (3 attempts)
-   - Halt on persistent failure (prevent data loss)
+- `acknowledged` is the compatibility default and waits for every record's
+  broker delivery result;
+- `queued` uses librdkafka's nonblocking enqueue path, tracks delivery futures,
+  applies a configured pending-delivery bound, faults on asynchronous failure,
+  and drains on flush.
 
-### Delivery Guarantees
+Queued mode deliberately supports only auto commit, with message retries
+disabled and the DLQ disabled. A delayed delivery failure cannot be associated
+with the original envelope, so enabling queued mode with manual commits or
+envelope-level recovery is rejected rather than weakening those contracts
+silently.
 
-**At-least-once:**
-- Manual commits after successful processing
-- Retry logic prevents message loss
-- Duplicates possible on failure recovery
+`src/partitioner.rs` supplies explicit partition choices when StreamForge owns
+the routing decision:
 
-**At-most-once:**
-- Auto-commit mode
-- Lower overhead (~3%)
-- Message loss possible on failure
+- a present key uses deterministic keyed hashing;
+- field-based partitioning hashes the configured JSON field;
+- an absent key with default partitioning returns no explicit partition, so
+  librdkafka selects the partition using its configured keyless behavior.
 
----
+An explicit JSON `null` key is still a present key and follows keyed hashing.
 
-## Deployment Architecture
+### Reliability
 
-### Docker
+The runtime supports manual and automatic commit modes, retry policies, and a
+dead-letter queue. Commit and failure semantics are defined in
+`docs/DELIVERY_GUARANTEES.md`.
 
-```
-streamforge:latest (20MB image)
-├─ Chainguard base (minimal, zero CVEs)
-├─ Static binary (no runtime dependencies)
-└─ Config via volume mount or env vars
-```
+Exactly-once Kafka transactions are not implemented.
 
-### Kubernetes
+### State and aggregation
 
-```
-Deployment
-├─ ConfigMap (configuration)
-├─ Secret (credentials)
-├─ Service (metrics endpoint)
-└─ HPA (auto-scaling)
-```
+`src/cache.rs` and `src/cache_backend.rs` provide local and Redis-backed caching.
+`src/aggregation.rs` provides configured windowed aggregation subject to
+validation constraints in `src/config.rs`.
 
-### Monitoring
+Stateful behavior must not silently change delivery guarantees. Broader
+fault-tolerant state recovery remains future work.
 
-- **Metrics**: Built-in stats reporter
-- **Logs**: Structured logging via tracing
-- **Traces**: OpenTelemetry compatible
+### Observability
 
----
+`src/metrics.rs` and `src/observability/` provide processing metrics, Prometheus
+exposure, HTTP observability endpoints, and consumer-lag monitoring.
 
-## Module Organization (v1.0.0-alpha.1)
+Performance decisions should use completed-message rate, lag, error rate,
+latency, CPU, and memory together. A microbenchmark result is not an end-to-end
+Kafka service-level result.
 
-```
+## Phase 1 performance decisions
+
+Phase 1 deliberately uses low-risk changes that preserve the JSON envelope and
+DSL contracts:
+
+1. Delegate keyless default partition selection to librdkafka.
+2. Skip absent value transforms.
+3. Use copy-on-write values for actual destination transforms.
+4. Compile function-style paths and regexes at filter construction.
+5. Compile key-template placeholders and paths at transform construction.
+6. Expose batching, fill timeout, concurrency, and selected Kafka tuning fields.
+7. Add regression tests and steady-state Criterion benchmarks.
+
+No fixed throughput or latency is part of the architecture contract. See
+`docs/PERFORMANCE.md` for the measurement method.
+
+## Phase 2 delivery and scheduling decisions
+
+The first dedicated profile showed that per-record delivery waiting and the
+100-record batch barrier were stronger candidates than SIMD. The resulting
+opt-in path:
+
+1. replaces batch barriers with bounded partition-affine worker lanes;
+2. makes `threads` the logical worker-lane count;
+3. moves JSON parsing and envelope construction into those workers;
+4. queues Kafka deliveries without awaiting each acknowledgement;
+5. bounds and drains pending delivery futures;
+6. exposes a delivery-acknowledgement metric separate from enqueue success;
+7. keeps the legacy reliability behavior as the default.
+
+The corrected Kafka harness warms the pipeline before timing and records input
+publication, post-publication drain, and end-to-end completion independently.
+This architecture is implemented but does not carry a throughput claim until a
+new controlled benchmark is run.
+
+## Why SIMD is not in Phase 1
+
+The current JSON filter path walks a heterogeneous tree and performs
+pointer-heavy, branch-heavy operations. SIMD does not automatically accelerate
+that representation. A SIMD implementation is justified only when profiling
+identifies a stable, uniform kernel such as byte scanning, hashing, or
+homogeneous numeric processing.
+
+The broader raw/lazy envelope design can avoid more work than vectorizing a
+small part of the current parsed-JSON path. Because that design changes public
+processing contracts, it remains in the later phase already defined by
+`PROJECT_SPEC.md`.
+
+## Scaling model
+
+Vertical scaling is bounded by:
+
+- source partition parallelism;
+- configured processing concurrency;
+- CPU cost of parsing, filters, transforms, aggregation, and serialization;
+- destination producer queues and broker/network latency;
+- memory retained by in-flight messages.
+
+Horizontal scaling uses Kafka consumer-group partition assignment. Adding
+instances beyond the number of useful source partitions does not add consumer
+parallelism.
+
+Ordering is preserved only within the constraints of Kafka partition ordering
+and the configured processing/delivery behavior. Changing partitioning keys can
+change ordering domains.
+
+`partition_ordered` preserves source-partition processing/enqueue order during a
+stable assignment. It does not force source and target partition identity, add
+Kafka transactions, or fence work across a consumer-group rebalance.
+
+## Module map
+
+```text
 src/
-├── main.rs                    # Entry point, tokio runtime setup
-├── lib.rs                     # Public API exports
-├── config.rs                  # YAML/JSON configuration parsing
-├── error.rs                   # Error types (⚠️ currently string-based)
-│
-├── processor.rs               # Message processing traits (~500 lines)
-├── filter_parser.rs           # DSL parser (~1800 lines)
-│
-├── filter/
-│   ├── mod.rs                 # Filter and Transform traits
-│   ├── envelope_filter.rs     # Envelope-aware filters
-│   └── envelope_transform.rs  # Envelope transformations
-│
-├── kafka/
-│   ├── mod.rs                 # Kafka client abstractions
-│   └── sink.rs                # Producer wrapper (~300 lines)
-│
-├── envelope.rs                # MessageEnvelope struct
-├── partitioner.rs             # Partitioning strategies
-├── compression.rs             # Compression codec support
-│
-├── cache.rs                   # Cache trait
-├── cache_backend.rs           # Cache implementations (~600 lines)
-├── hash.rs                    # Hashing functions (MD5/SHA/Murmur)
-│
-└── observability/
-    ├── mod.rs                 # Observability exports
-    ├── metrics.rs             # Prometheus metric definitions
-    ├── server.rs              # HTTP metrics endpoint
-    └── lag_monitor.rs         # Consumer lag tracking
+├── main.rs                     runtime setup, consumer loop, commits
+├── lib.rs                      public exports
+├── config.rs                   typed configuration and validation
+├── envelope.rs                 current JSON message envelope
+├── partition_pipeline.rs       bounded source-partition worker lanes
+├── processor.rs                destination runtime and routing
+├── filter_parser.rs            DSL construction and compiled evaluator
+├── dsl/                        function-style parser and AST
+├── filter/                     filters and transforms
+├── kafka/sink.rs               producer wrapper and serialization
+├── kafka/sink/delivery.rs      bounded asynchronous delivery tracking
+├── partitioner.rs              keyed and field partition decisions
+├── aggregation.rs              windowed aggregation
+├── cache.rs                    cache interfaces
+├── cache_backend.rs            cache implementations
+├── retry.rs                    retry policy
+├── dlq.rs                      dead-letter queue
+├── metrics.rs                  processing metrics
+└── observability/              HTTP metrics and lag monitoring
 ```
 
-**Total:** ~15,638 lines of Rust code (as of v0.4.0)
+## Verification boundaries
 
-### Key Module Dependencies
+Unit tests exercise configuration, DSL, transform, processor, and partitioning
+semantics. Criterion targets cover isolated filter, transform, and end-to-end
+code paths. Kafka integration results require a reproducible broker environment
+and are not inferred from unit or microbenchmark success.
 
-- **filter_parser.rs** → serde_json, regex (no AST layer yet)
-- **processor.rs** → filter/, kafka/sink
-- **kafka/sink.rs** → rdkafka, compression
-- **observability/** → prometheus, axum
-- **cache_backend.rs** → moka, redis (optional), dashmap
+## Related documents
 
-## v1.0 Roadmap and Known Gaps
+- `PROJECT_SPEC.md` — product scope and typed-envelope direction
+- `ROADMAP.md` — planned work
+- `docs/IMPLEMENTATION_STATUS.md` — verified capability status
+- `docs/PERFORMANCE.md` — tuning and benchmark method
+- `docs/DELIVERY_GUARANTEES.md` — commit and failure semantics
 
-### Phase 1: Core Engine Hardening (IN PROGRESS)
-
-**Critical gaps blocking v1.0:**
-
-1. **Error Type System** (`src/error.rs`)
-   - Currently: String-based errors (`anyhow::Error`)
-   - Needed: Typed error hierarchy with context
-   - Deliverable: Refactored `src/error.rs` + `docs/ERROR_HANDLING.md`
-
-2. **Delivery Semantics** (`src/processor.rs`)
-   - Currently: At-least-once implicit, no tests
-   - Needed: Explicit commit strategies, offset management tests
-   - Deliverable: `docs/DELIVERY_GUARANTEES.md` + integration tests
-
-3. **Retry and DLQ** (`src/retry.rs`, `src/dlq.rs`)
-   - Currently: Basic implementation, semantics undefined
-   - Needed: Retry policy (count, backoff), DLQ format
-   - Deliverable: Modules + metrics + tests
-
-4. **Integration Tests** (`tests/integration/`)
-   - Currently: Only unit tests (92 passing)
-   - Needed: End-to-end tests with Testcontainers
-   - Deliverable: 10+ integration scenarios, failure injection
-
-### Phase 2: DSL Stabilization
-
-**DSL gaps:**
-
-5. **Formal Grammar** (`docs/DSL_SPEC.md`)
-   - Currently: Informal syntax examples
-   - Needed: EBNF grammar, operator precedence, escaping rules
-   - Deliverable: Complete DSL specification
-
-6. **Parser Refactor** (`src/dsl/`)
-   - Currently: `filter_parser.rs` monolith
-   - Needed: Separate parser/AST/validator/evaluator
-   - Deliverable: `src/dsl/ast.rs`, `src/dsl/parser.rs`, `src/dsl/validator.rs`
-
-7. **Config Validation** (`src/bin/validate.rs`)
-   - Currently: No pre-deploy validation
-   - Needed: CLI tool to validate config files
-   - Deliverable: `streamforge validate config.yaml` command
-
-### Phase 3-6: See V1_PLAN.md
-
-**Phases:**
-- Phase 3: Envelope/Enrichment/Runtime Maturity
-- Phase 4: Operability and Deployment
-- Phase 5: UI/Operator Polish
-- Phase 6: v1.0 Release Readiness
-
-**Estimated total:** ~30 hours of autonomous execution
-
-## Future Architecture Considerations (Post v1.0)
-
-### Planned Improvements
-
-1. **Exactly-Once Semantics**
-   - Transactional producers (Kafka 3.3+)
-   - Idempotent writes
-   - EOS integration tests
-
-2. **Dynamic Reconfiguration**
-   - Reload config without restart
-   - Add/remove destinations at runtime
-
-3. **Advanced Routing**
-   - Content-based routing with complex rules
-   - Priority queues for message ordering
-
-4. **Enhanced Observability**
-   - Distributed tracing with trace IDs
-   - OpenTelemetry integration
-   - Grafana dashboard templates
-
-5. **Advanced Caching**
-   - Additional cache backends (Memcached, DynamoDB)
-   - TTL-based expiration
-   - Cache warming strategies
-
----
-
-## References
-
-### Documentation
-- [Implementation Notes](docs/IMPLEMENTATION_NOTES.md) - Technical implementation details
-- [Performance Guide](docs/PERFORMANCE.md) - Performance tuning
-- [Scaling Guide](docs/SCALING.md) - Scaling strategies
-
-### Benchmarks
-- [Concurrent Processing Results](benchmarks/results/CONCURRENT_PROCESSING_RESULTS.md)
-- [Scaling Test Results](benchmarks/results/SCALING_TEST_RESULTS.md)
-- [Comprehensive Benchmarks](benchmarks/results/BENCHMARKS.md)
-
-### External
-- [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
-- [rdkafka-rust](https://github.com/fede1024/rust-rdkafka)
-- [Tokio](https://tokio.rs/)
-
----
-
-**Last Updated:** April 2026  
-**Version:** 1.0.0-alpha.1
+**Last updated:** 2026-07-24

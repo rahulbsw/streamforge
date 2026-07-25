@@ -6,7 +6,7 @@ This directory contains StreamForge configurations optimized for different bench
 
 **1. Start Kafka:**
 ```bash
-docker-compose -f ../../docker-compose.benchmark.yml up -d
+podman compose -f ../../docker-compose.benchmark.yml up -d
 ```
 
 **2. Create topics:**
@@ -33,7 +33,7 @@ cargo build --release
 ### throughput-8thread.yaml
 
 **Purpose:** Maximum throughput validation  
-**Target:** 30K+ msg/s sustained
+**Success criterion:** exact input/output counts and a stable measured interval
 
 **Configuration:**
 - 8 threads on 8 partitions
@@ -47,17 +47,19 @@ cargo build --release
 - Stress testing the system
 - Measuring maximum capacity
 
-**Expected results:**
-- Throughput: 30-35K msg/s
-- CPU: 100% (saturated)
-- Latency: 50-100ms (high due to batching)
+**Record with each run:**
+- Completed-message throughput from the validated timing window
+- CPU and memory utilization
+- End-to-end latency percentiles
+- Exact consumed, produced, delivered, and output counts
 
 ---
 
 ### latency-optimized.yaml
 
 **Purpose:** Minimum latency validation  
-**Target:** < 10ms p95 latency
+**Success criterion:** exact delivery counts with latency measured at the same
+message grain as the throughput run
 
 **Configuration:**
 - 2 threads (low contention)
@@ -71,18 +73,19 @@ cargo build --release
 - Testing real-time data pipelines
 - SLA validation
 
-**Expected results:**
-- Latency p50: < 5ms
-- Latency p95: < 10ms
-- Latency p99: < 20ms
-- Throughput: 5-10K msg/s (latency trade-off)
+**Record with each run:**
+- Latency p50, p95, and p99
+- Completed-message throughput
+- Commit strategy and acknowledgement settings
+- Exact consumed, produced, delivered, and output counts
 
 ---
 
 ### filter-transform.yaml
 
 **Purpose:** DSL performance validation  
-**Target:** 10-20K msg/s with filtering
+**Success criterion:** compare filter and transform variants against the same
+validated passthrough workload
 
 **Configuration:**
 - 4 threads
@@ -100,11 +103,11 @@ cargo build --release
 - Testing filter combinations
 - Benchmarking transforms
 
-**Expected results:**
-- Simple filter: ~50K msg/s per thread
-- Complex filter: ~20K msg/s per thread
-- Regex filter: ~10K msg/s per thread
-- With CONSTRUCT: ~15K msg/s per thread
+**Record with each run:**
+- Filter and transform definition
+- Message shape and size distribution
+- Completed-message throughput and latency percentiles
+- Exact per-destination delivery and output counts
 
 ---
 
@@ -212,9 +215,8 @@ Automated benchmark scripts are in `../../scripts/benchmarks/`:
 ## See Also
 
 - [BENCHMARKS.md](../../BENCHMARKS.md) - Complete benchmarking guide
-- [DEPLOYMENT.md](../../docs/DEPLOYMENT.md#performance-tuning) - Performance tuning in production
-- [OPERATIONS.md](../../docs/OPERATIONS.md#performance-optimization) - Operational performance optimization
-- [Benchmark Results](../../docs/benchmarks/results/) - Historical benchmark data
+- [PERFORMANCE.md](../../docs/PERFORMANCE.md) - Measurement and tuning methodology
+- [OPERATIONS.md](../../docs/OPERATIONS.md) - Production operating guidance
 
 ---
 

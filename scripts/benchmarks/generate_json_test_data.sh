@@ -1,115 +1,95 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
-# Generate JSON test data for high-throughput testing
+# Generate a deterministic JSONL workload for Streamforge benchmarks.
 #
 # Usage:
-#   ./generate_json_test_data.sh [num_messages] [output_file]
+#   ./generate_json_test_data.sh [num_messages] [output_file] [seed]
 #
-# Examples:
-#   ./generate_json_test_data.sh 100000 test_data.jsonl
-#   ./generate_json_test_data.sh 1000000 large_test.jsonl
-#
+# The same message count and seed always produce byte-for-byte identical data.
 
-set -e
+set -euo pipefail
 
 NUM_MESSAGES=${1:-100000}
 OUTPUT_FILE=${2:-test_messages.jsonl}
+SEED=${3:-0}
 
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+if [[ ! "$NUM_MESSAGES" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: num_messages must be a positive integer" >&2
+    exit 2
+fi
 
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}  JSON Test Data Generator${NC}"
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo -e "${GREEN}Messages:${NC} $NUM_MESSAGES"
-echo -e "${GREEN}Output:${NC} $OUTPUT_FILE"
-echo ""
+if [[ ! "$SEED" =~ ^[0-9]+$ ]]; then
+    echo "error: seed must be a non-negative integer" >&2
+    exit 2
+fi
 
-# Generate test data using Python for speed
-python3 - "$NUM_MESSAGES" "$OUTPUT_FILE" << 'EOF'
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+python3 - "$NUM_MESSAGES" "$OUTPUT_FILE" "$SEED" <<'PYTHON'
 import json
+import os
 import sys
-import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 num_messages = int(sys.argv[1])
 output_file = sys.argv[2]
+seed = int(sys.argv[3])
 
-# Sample data pools
-first_names = ["Alice", "Bob", "Charlie", "Diana", "Eve", "Frank", "Grace", "Henry", "Ivy", "Jack",
-               "Kate", "Liam", "Mia", "Noah", "Olivia", "Peter", "Quinn", "Rachel", "Sam", "Tina"]
-last_names = ["Smith", "Johnson", "Brown", "Davis", "Wilson", "Moore", "Taylor", "Anderson", "Thomas", "Jackson",
-              "White", "Harris", "Martin", "Garcia", "Martinez", "Robinson", "Clark", "Rodriguez", "Lewis", "Lee"]
-actions = ["login", "logout", "purchase", "view", "click", "search", "add_cart", "checkout", "review", "share"]
+first_names = [
+    "Alice", "Bob", "Charlie", "Diana", "Eve", "Frank", "Grace", "Henry",
+    "Ivy", "Jack", "Kate", "Liam", "Mia", "Noah", "Olivia", "Peter",
+    "Quinn", "Rachel", "Sam", "Tina",
+]
+last_names = [
+    "Smith", "Johnson", "Brown", "Davis", "Wilson", "Moore", "Taylor",
+    "Anderson", "Thomas", "Jackson", "White", "Harris", "Martin", "Garcia",
+    "Martinez", "Robinson", "Clark", "Rodriguez", "Lewis", "Lee",
+]
+actions = [
+    "login", "logout", "purchase", "view", "click", "search", "add_cart",
+    "checkout", "review", "share",
+]
 
-print(f"🔄 Generating {num_messages:,} JSON messages...")
-start = time.time()
+# A fixed epoch plus a seed-derived offset keeps timestamps realistic while
+# preserving byte-for-byte reproducibility.
+base_time = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=seed)
+name_offset = seed % len(first_names)
+last_name_offset = (seed * 7) % len(last_names)
+action_offset = (seed * 11) % len(actions)
 
-with open(output_file, 'w') as f:
-    for i in range(num_messages):
-        user_id = 1000 + (i % 10000)
-        first = first_names[i % len(first_names)]
-        last = last_names[i % len(last_names)]
-        action = actions[i % len(actions)]
+with open(output_file, "w", encoding="utf-8", newline="\n") as output:
+    for sequence in range(num_messages):
+        user_id = 1000 + ((sequence + seed) % 10000)
+        first = first_names[(sequence + name_offset) % len(first_names)]
+        last = last_names[(sequence + last_name_offset) % len(last_names)]
+        action = actions[(sequence + action_offset) % len(actions)]
+        timestamp = (
+            base_time + timedelta(milliseconds=sequence)
+        ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
         message = {
             "userId": user_id,
             "user": {
                 "id": user_id,
                 "name": f"{first} {last}",
-                "email": f"{first.lower()}.{last.lower()}@example.com"
+                "email": f"{first.lower()}.{last.lower()}@example.com",
             },
             "action": action,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": timestamp,
             "metadata": {
                 "source": "perf_test",
-                "sequence": i,
-                "batch": i // 1000
-            }
+                "sequence": sequence,
+                "batch": sequence // 1000,
+                "seed": seed,
+            },
         }
+        output.write(
+            json.dumps(message, sort_keys=True, separators=(",", ":")) + "\n"
+        )
 
-        f.write(json.dumps(message) + '\n')
-
-        # Progress indicator
-        if (i + 1) % 10000 == 0:
-            elapsed = time.time() - start
-            rate = (i + 1) / elapsed
-            print(f"  Progress: {i+1:,} messages ({rate:,.0f} msg/s)", flush=True)
-
-elapsed = time.time() - start
-rate = num_messages / elapsed
-print(f"\n✅ Generated {num_messages:,} messages in {elapsed:.2f}s ({rate:,.0f} msg/s)")
-
-# File size
-import os
-size_mb = os.path.getsize(output_file) / (1024 * 1024)
-print(f"📦 File size: {size_mb:.2f} MB")
-EOF
-
-echo ""
-echo -e "${GREEN}✅ Test data ready!${NC}"
-echo ""
-echo -e "${YELLOW}Sample messages:${NC}"
-head -3 "$OUTPUT_FILE"
-echo ""
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}  Usage Examples${NC}"
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo "1. Stream to Kafka (console producer):"
-echo "   cat $OUTPUT_FILE | kafka-console-producer \\"
-echo "     --bootstrap-server localhost:9092 \\"
-echo "     --topic test-8p-input"
-echo ""
-echo "2. Batch load with rate limit:"
-echo "   cat $OUTPUT_FILE | kafka-console-producer \\"
-echo "     --bootstrap-server localhost:9092 \\"
-echo "     --topic test-8p-input \\"
-echo "     --batch-size 1000"
-echo ""
-echo "3. Check message format:"
-echo "   head -1 $OUTPUT_FILE | jq ."
-echo ""
+size_bytes = os.path.getsize(output_file)
+print(
+    f"generated {num_messages} deterministic messages "
+    f"(seed={seed}, bytes={size_bytes}) at {output_file}"
+)
+PYTHON

@@ -30,7 +30,7 @@ These documents:
 ## For Users
 
 If you're looking for user-facing documentation, see:
-- [Main Documentation Index](../../DOCUMENTATION_INDEX.md)
+- [Documentation Home](../../index.md)
 - [Quick Start Guide](../../QUICKSTART.md)
 - [Usage Guide](../../USAGE.md)
 

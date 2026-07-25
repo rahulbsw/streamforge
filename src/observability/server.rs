@@ -1,17 +1,22 @@
 use axum::{routing::get, Router};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tracing::{error, info};
 
 /// Start the metrics HTTP server
 pub async fn start_metrics_server(port: u16) {
+    start_metrics_server_on(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port).await;
+}
+
+/// Start the metrics HTTP server on an explicit bind address.
+pub async fn start_metrics_server_on(bind_address: IpAddr, port: u16) {
     let app = Router::new()
         .route("/metrics", get(metrics_handler))
         .route("/health", get(health_handler));
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!("🔍 Metrics server listening on http://0.0.0.0:{}", port);
-    info!("   Metrics endpoint: http://localhost:{}/metrics", port);
-    info!("   Health endpoint:  http://localhost:{}/health", port);
+    let addr = SocketAddr::new(bind_address, port);
+    info!("🔍 Metrics server listening on http://{}", addr);
+    info!("   Metrics endpoint: http://{}/metrics", addr);
+    info!("   Health endpoint:  http://{}/health", addr);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

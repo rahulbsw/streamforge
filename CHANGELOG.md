@@ -131,11 +131,11 @@ StreamForge v1.0.0 is the first production-ready release. This release focuses o
   - 3 complete example configurations in schema
 
 - **Production Examples** ([`examples/production/`](examples/production/))
-  - `user-filtering.yaml`: Multi-destination routing (~50K msg/s)
-  - `cross-region-replication.yaml`: DR replication (~100K msg/s)
-  - `cdc-to-datalake.yaml`: Database CDC streaming (~20K msg/s)
-  - `multi-tenant-filtering.yaml`: Tenant routing (~30K msg/s)
-  - `pii-redaction.yaml`: Data masking and PII redaction (~15K msg/s)
+  - `user-filtering.yaml`: Multi-destination routing
+  - `cross-region-replication.yaml`: DR replication
+  - `cdc-to-datalake.yaml`: Database CDC streaming
+  - `multi-tenant-filtering.yaml`: Multi-tenant routing
+  - `pii-redaction.yaml`: Data minimization and pseudonymization
   - `README.md`: Production examples guide with tuning and deployment instructions
 
 #### Testing
@@ -215,7 +215,7 @@ The `streamforge-validate` CLI will warn about deprecated syntax.
 - **Full generic `Envelope<K, V>` implementation** deferred to v1.1
   - Reason: 20-30 hours of work, high risk, touches entire codebase
   - v1.0: Documentation complete, runtime type awareness planned
-  - v1.1: Full implementation for 3-4x performance gains
+  - v1.1: Evaluate the implementation with the reproducible benchmark harness
   - See: [`docs/TYPED_ENVELOPE_DESIGN.md`](docs/TYPED_ENVELOPE_DESIGN.md) and [`docs/PHASE_3_PRAGMATIC_APPROACH.md`](docs/PHASE_3_PRAGMATIC_APPROACH.md)
 
 #### Parser Refactor
@@ -398,7 +398,7 @@ See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#performance-tuning) for guidance.
 ## What's Next (v1.1 Roadmap)
 
 ### Planned Features
-1. **Typed Envelope System** - Generic `Envelope<K, V>` for 3-4x performance
+1. **Typed Envelope System** - Generic `Envelope<K, V>` evaluated with the reproducible benchmark harness
 2. **Parser Refactor** - Better error messages, AST-based validation
 3. **Redis Cache Backend** - Distributed caching for enrichment
 4. **Trace Correlation** - End-to-end message tracing with OpenTelemetry
