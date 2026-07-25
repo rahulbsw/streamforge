@@ -10,6 +10,7 @@ use tracing::{debug, warn};
 
 /// Retry configuration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct RetryConfig {
     /// Maximum number of retry attempts
     pub max_attempts: u32,

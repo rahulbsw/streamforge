@@ -54,55 +54,76 @@
     },
     "performance": {
       "type": "object",
-      "description": "Performance tuning parameters",
+      "description": "Runtime batching and selected librdkafka performance settings. Explicit consumer_properties and producer_properties entries take precedence.",
       "properties": {
+        "consumer_batch_size": {
+          "type": "integer",
+          "description": "Maximum messages collected for one processing batch",
+          "minimum": 1,
+          "default": 100
+        },
+        "consumer_batch_timeout_ms": {
+          "type": "integer",
+          "description": "Maximum wait for a partially filled legacy batch and idle queued-delivery flush delay in partition_ordered mode (ms)",
+          "minimum": 1,
+          "default": 100
+        },
+        "parallelism_factor": {
+          "type": "integer",
+          "description": "Concurrent processing multiplier applied to threads",
+          "minimum": 1,
+          "default": 10
+        },
+        "processing_mode": {
+          "type": "string",
+          "description": "Runtime scheduling mode. partition_ordered uses bounded FIFO worker lanes keyed by source partition.",
+          "enum": ["legacy_batch", "partition_ordered"],
+          "default": "legacy_batch"
+        },
+        "worker_queue_capacity": {
+          "type": "integer",
+          "description": "Per-worker bounded queue capacity in partition_ordered mode",
+          "minimum": 1,
+          "default": 1024
+        },
+        "producer_delivery_mode": {
+          "type": "string",
+          "description": "acknowledged waits for each delivery result; queued tracks bounded asynchronous deliveries and is restricted to auto-commit with retries and DLQ disabled",
+          "enum": ["acknowledged", "queued"],
+          "default": "acknowledged"
+        },
+        "producer_max_in_flight": {
+          "type": "integer",
+          "description": "Maximum pending delivery futures in queued mode",
+          "minimum": 1,
+          "default": 10000
+        },
         "fetch_min_bytes": {
           "type": "integer",
-          "description": "Minimum bytes to fetch from Kafka",
+          "description": "Maps to librdkafka fetch.min.bytes",
           "minimum": 1,
-          "maximum": 10485760,
-          "default": 1024
+          "maximum": 4294967295
         },
         "fetch_max_wait_ms": {
           "type": "integer",
-          "description": "Maximum wait time for fetch request (ms)",
-          "minimum": 1,
-          "maximum": 10000,
-          "default": 100
-        },
-        "max_partition_fetch_bytes": {
-          "type": "integer",
-          "description": "Maximum bytes per partition fetch",
-          "minimum": 1024,
-          "maximum": 10485760,
-          "default": 1048576
+          "description": "Maps to librdkafka fetch.wait.max.ms",
+          "minimum": 0,
+          "maximum": 4294967295
         },
         "queue_buffering_max_ms": {
           "type": "integer",
-          "description": "Producer queue buffering time (ms)",
-          "minimum": 0,
-          "maximum": 10000,
-          "default": 5
+          "description": "Maps to librdkafka queue.buffering.max.ms; linger_ms takes precedence when both are set",
+          "minimum": 0
         },
         "batch_size": {
           "type": "integer",
-          "description": "Producer batch size (number of messages)",
-          "minimum": 1,
-          "maximum": 100000,
-          "default": 1000
+          "description": "Maximum producer batch message count; maps to librdkafka batch.num.messages",
+          "minimum": 1
         },
         "linger_ms": {
           "type": "integer",
-          "description": "Producer linger time to allow batching (ms)",
-          "minimum": 0,
-          "maximum": 1000,
-          "default": 10
-        },
-        "compression": {
-          "type": "string",
-          "description": "Producer compression codec",
-          "enum": ["none", "gzip", "snappy", "lz4", "zstd"],
-          "default": "none"
+          "description": "Maps to librdkafka linger.ms; takes precedence over queue_buffering_max_ms",
+          "minimum": 0
         }
       }
     },
@@ -369,10 +390,12 @@
       "offset": "latest",
       "threads": 4,
       "performance": {
+        "consumer_batch_size": 100,
+        "consumer_batch_timeout_ms": 100,
+        "parallelism_factor": 10,
         "fetch_min_bytes": 1024,
         "batch_size": 1000,
-        "linger_ms": 10,
-        "compression": "zstd"
+        "linger_ms": 10
       },
       "retry": {
         "max_attempts": 3,
@@ -411,10 +434,12 @@
       "offset": "earliest",
       "threads": 8,
       "performance": {
+        "consumer_batch_size": 500,
+        "consumer_batch_timeout_ms": 50,
+        "parallelism_factor": 10,
         "fetch_min_bytes": 10240,
         "batch_size": 5000,
-        "linger_ms": 50,
-        "compression": "zstd"
+        "linger_ms": 50
       },
       "kafka": {
         "security": {

@@ -6,7 +6,7 @@ Vision and planned features for StreamForge.
 
 StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka selective replication engine**. We focus on:
 
-1. **Performance** - Rust-native speed (25K-45K msg/s sustained throughput)
+1. **Performance** - Measured Rust-native efficiency on representative workloads
 2. **Reliability** - Production-grade stability with typed errors, retry, and DLQ
 3. **Usability** - Simple DSL, great documentation, validation CLI
 4. **Security** - Enterprise-ready security features (SSL/TLS, SASL, Kerberos)
@@ -24,9 +24,9 @@ StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka se
 ✅ **Core Engine:**
 - Rust + rdkafka + tokio async runtime
 - At-least-once delivery semantics (documented and tested)
-- Configurable threading model (linear scaling to 8+ threads)
+- Configurable threading and in-flight processing model
 - Consumer/producer tuning knobs (exposed via `performance:` config block)
-- Typed error system (14+ error types with recovery actions)
+- Typed error system with recovery actions
 - Dead letter queue (DLQ) with error metadata headers
 - Exponential backoff retry policy (configurable max attempts, delays, jitter)
 
@@ -38,29 +38,29 @@ StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka se
 - **v2.1 Dollar shorthand** (concise field access)
   - Example: `"and($status == 'active', $tier == 'premium')"`
   - Dot notation: `$user.email`, `$data.nested.path`
-- **v2.2 Transform evaluators** (35 functions)
-  - 14 string transforms: uppercase, lowercase, length, substring, split, join, replace, pad, trim, type conversions
-  - 21 date/time transforms: now, parse_date, format_date, add_days, year, month, day, hour, etc.
+- **v2.2 Transform evaluators**
+  - String transforms: uppercase, lowercase, length, substring, split, join, replace, pad, trim, and type conversions
+  - Date/time transforms: now, parse, format, arithmetic, and component extraction
 - AST-based parser with position-tracked errors
 - Semantic validation pass before execution
 - Complete EBNF grammar specification (docs/DSL_SPEC.md)
 
 ✅ **Data Plane:**
 - Multi-destination routing with filter-based selection
-- 40+ filter types (AND/OR/NOT, regex, array ops, key/header/timestamp filters, null/empty checks)
-- 30+ transform types (extract, construct, arithmetic, hash, string ops, date/time ops)
+- Filters for boolean logic, regex, arrays, keys, headers, timestamps, and null/empty checks
+- Transforms for extraction, construction, arithmetic, hashing, strings, and date/time values
 - Envelope access (msg value, key, headers, timestamp, partition, offset, topic)
 - Compression support (gzip, snappy, zstd, lz4)
-- Partitioning strategies (default, random, hash, field-based)
+- Default keyed/keyless partitioning and field-based partitioning
 - Key transformation pipeline
 - Header manipulation
 - Timestamp control
 
 ✅ **Observability:**
-- 60+ Prometheus metrics with per-destination tracking
+- Prometheus metrics with per-destination tracking
 - Kafka consumer lag monitoring
 - Filter/transform operation tracking
-- HTTP metrics endpoint (< 2% overhead)
+- HTTP metrics endpoint
 - Structured logging (tracing with span IDs)
 - Grafana dashboard templates with alert rules
 
@@ -69,32 +69,27 @@ StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka se
 - Helm chart for Kubernetes Operator
 - Kubernetes CRD (StreamforgePipeline v1alpha1)
 - Web UI (Next.js with JWT auth)
-- Chainguard distroless container images (~20MB)
+- Chainguard distroless container images
 
 ✅ **Performance:**
-- 25,000–45,000 msg/s sustained throughput (JSON processing)
-- 12ms p99 latency end-to-end
-- 44–50ns simple filter latency
-- ~50MB memory footprint
+- Configurable consumer batching, fill timeout, and processing concurrency
+- Configuration-time compilation of function-style paths, regexes, and key templates
+- Copy-on-write values for transformed destinations and shared values for passthrough destinations
+- Keyless default partitioning delegated to librdkafka
+- Criterion filter, transform, and end-to-end benchmark targets
 
 ✅ **Testing:**
-- **333 unit tests passing** (0 failures, 0 warnings)
-  - 102 parser tests (v1 + v2 syntax)
-  - 15 dollar syntax tests
-  - 11 string transform tests
-  - 18 date/time transform tests
-  - 187 other tests (filters, transforms, core engine)
+- Unit coverage for parser, filter, transform, routing, partitioning, configuration, and core modules
 - Integration test infrastructure (testcontainers-based)
-- Comprehensive benchmarks (filter, transform, end-to-end)
+- Criterion benchmarks for filter, transform, and end-to-end paths
 
 ✅ **Documentation:**
-- **10,000+ lines across 42 documentation files**
 - Complete DSL reference (docs/ADVANCED_DSL_GUIDE.md, docs/DSL_SPEC.md)
 - Function-style DSL guide (docs/DSL_V2_FUNCTION_SYNTAX.md)
 - Production deployment guides (docs/DEPLOYMENT.md, docs/DOCKER.md, docs/KUBERNETES.md)
-- Operations runbook (docs/OPERATIONS.md, 40 KB)
-- Troubleshooting guide (docs/TROUBLESHOOTING.md, 70+ issues covered)
-- 40+ real-world example configurations
+- Operations runbook (docs/OPERATIONS.md)
+- Troubleshooting guide (docs/TROUBLESHOOTING.md)
+- Real-world example configurations
 - Delivery guarantees specification (docs/DELIVERY_GUARANTEES.md)
 - Error handling taxonomy (docs/ERROR_HANDLING.md)
 
@@ -141,10 +136,48 @@ StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka se
 
 ### Performance Enhancements
 
-- [ ] Zero-copy optimizations for Envelope<Bytes, Bytes>
-- [ ] SIMD operations for bulk filtering
-- [ ] Parallel message processing within partition
-- [ ] Target: 60K+ messages/second (with zero-copy)
+- [x] **Phase 1 hot-path hardening**
+  - Delegate keyless default partitioning to librdkafka
+  - Skip absent transforms and use copy-on-write for actual transforms
+  - Precompile function-style paths/regexes and key-template paths
+  - Expose runtime batching and concurrency controls
+  - Add focused regression tests and steady-state benchmarks
+- [x] Establish the deterministic synthetic and Kafka-backed baseline framework
+  - Add stage-level JSON/envelope Criterion measurements
+  - Add isolated Kafka repetitions with structured environment/result manifests
+  - Record the initial local Phase 2 baseline
+- [x] Capture a whole-process CPU profile on representative dedicated hardware
+  - AWS c7i.2xlarge passthrough profile captured 614 cycle samples with zero
+    lost samples
+  - Parsing was about 16.5% inclusive and serialization about 3.2%; the result
+    does not trigger the 30% raw/lazy-envelope threshold
+- [x] Implement bounded queued delivery and source-partition worker lanes
+  - Keep legacy batching and acknowledged delivery as compatibility defaults
+  - Reject unsafe queued/manual-commit/retry/DLQ combinations
+  - Expose broker-delivery completion separately from enqueue completion
+- [x] Correct the sustained Kafka harness measurement contract
+  - Start StreamForge and persistent ingress before the timed barrier
+  - Separate ingress, timed metrics, and post-window output-validation jobs
+  - Exclude startup, warm-up, drain, validation, and teardown
+  - Require exact counters/offsets and physical topic-file reclamation
+- [x] Add single-destination produced accounting and focused regression tests
+- [x] Pass the loopback-only local Podman sustained validation with exact
+  consumed, produced, delivered, output, and error counts
+- [ ] Run the corrected legacy/partition-ordered and
+  acknowledged/queued live Kafka comparison matrix
+- [ ] Produce a clean-worktree, matched Java/Rust comparison before publishing
+  a public throughput claim
+- [ ] Replace ad hoc AWS host provisioning with cost-bounded Terraform and
+  ECS-on-EC2 benchmark jobs after the local comparison matrix passes
+- [ ] Implement rebalance-aware completed-offset coordination before supporting
+  partition-ordered manual commits
+- [ ] Profile transform-heavy and aggregation-heavy workloads
+- [ ] Implement raw/lazy envelope paths where profiling confirms parse or
+  serialization cost
+- [ ] Remove array-element cloning from function-style `any`/`all` evaluation
+- [ ] Evaluate SIMD only for a profiled vectorizable kernel; the c7i
+  passthrough profile did not identify one
+- [ ] Measure and tune aggregation data structures and timers
 
 ### Developer Experience
 
@@ -258,7 +291,7 @@ Want to contribute? Here are high-impact areas:
 - Add integration tests for complex scenarios
 - Performance regression testing
 - Chaos engineering (failure injection)
-- Load testing at scale (100K+ msg/s)
+- Load testing at production-representative scale
 
 ### Community Contributions
 - Answer questions on GitHub Discussions
@@ -296,5 +329,6 @@ We value community input and prioritize features based on user demand!
 
 ---
 
-**Last Updated:** 2026-04-18  
+**Last Updated:** 2026-07-25
+
 **Maintained By:** StreamForge Core Team

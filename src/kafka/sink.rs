@@ -1,5 +1,5 @@
 use crate::compression::Compressor;
-use crate::config::{CompressionAlgo, CompressionType, MirrorMakerConfig};
+use crate::config::{CompressionAlgo, CompressionType, MirrorMakerConfig, ProducerDeliveryMode};
 use crate::envelope::MessageEnvelope;
 use crate::error::MirrorMakerError;
 use crate::partitioner::{DefaultPartitioner, FieldPartitioner, Partitioner};
@@ -8,12 +8,16 @@ use rdkafka::config::ClientConfig;
 use rdkafka::message::OwnedHeaders;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
-use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::{debug, error, info, warn};
+
+#[path = "sink/delivery.rs"]
+mod delivery;
+use delivery::DeliveryState;
 
 // Thread-local buffer for JSON serialization to reduce allocations
 thread_local! {
@@ -52,6 +56,13 @@ pub struct KafkaSink {
     /// Per-topic partition count cache. Fixed topics are populated at construction;
     /// template-resolved topics are populated lazily on first send.
     partition_cache: Mutex<HashMap<String, i32>>,
+    /// When true, `send` returns after librdkafka accepts an owned copy of the
+    /// record instead of waiting for the broker delivery acknowledgement.
+    queued_delivery: bool,
+    /// Maximum number of delivery futures retained before applying backpressure.
+    max_pending_deliveries: usize,
+    /// Delivery futures and the first asynchronous producer failure.
+    delivery_state: AsyncMutex<DeliveryState>,
 }
 
 impl KafkaSink {
@@ -69,10 +80,21 @@ impl KafkaSink {
         let compression_type = config.compression.compression_type;
         let compression_algo = config.compression.compression_algo;
         let is_template = output_template.contains("{source_topic}");
+        let queued_delivery = matches!(
+            config.performance.producer_delivery_mode,
+            ProducerDeliveryMode::Queued
+        );
+        let max_pending_deliveries = config.performance.producer_max_in_flight.max(1);
 
         info!(
-            "Creating KafkaSink: broker={}, output={}, template={}, compression={:?}",
-            target_broker, output_template, is_template, compression_type
+            "Creating KafkaSink: broker={}, output={}, template={}, compression={:?}, \
+             queued_delivery={}, max_pending_deliveries={}",
+            target_broker,
+            output_template,
+            is_template,
+            compression_type,
+            queued_delivery,
+            max_pending_deliveries
         );
 
         // Build producer configuration
@@ -151,12 +173,13 @@ impl KafkaSink {
             info!("Using field-based partitioner: {}", field);
             Arc::new(FieldPartitioner::new(field))
         } else {
-            info!("Using default hash-based partitioner");
+            info!("Using default partitioner (keyed hash; keyless delegated to librdkafka)");
             Arc::new(DefaultPartitioner)
         };
 
         // Create compressor (for Enveloped compression type)
         let compressor = Compressor::new(compression_type, compression_algo);
+        let delivery_state = AsyncMutex::new(DeliveryState::new(output_template.clone()));
 
         Ok(Self {
             producer,
@@ -165,6 +188,9 @@ impl KafkaSink {
             partitioner,
             compressor,
             partition_cache: Mutex::new(initial_cache),
+            queued_delivery,
+            max_pending_deliveries,
+            delivery_state,
         })
     }
 
@@ -248,18 +274,24 @@ impl KafkaSink {
         let num_partitions = self.get_or_fetch_partitions(&target_topic)?;
 
         // Determine partition
-        let key_for_partition = envelope.key.as_ref().unwrap_or(&Value::Null);
         let partition = self.partitioner.partition(
             &target_topic,
-            key_for_partition,
+            envelope.key.as_ref(),
             &envelope.value,
             num_partitions,
         );
 
-        debug!(
-            "Sending to topic '{}' partition {}/{}",
-            target_topic, partition, num_partitions
-        );
+        if let Some(partition) = partition {
+            debug!(
+                "Sending to topic '{}' explicit partition {}/{}",
+                target_topic, partition, num_partitions
+            );
+        } else {
+            debug!(
+                "Sending keyless message to topic '{}' using librdkafka partitioning",
+                target_topic
+            );
+        }
 
         // Serialize key (if present) using thread-local buffer
         let key_bytes = envelope.key.as_ref().map(serialize_to_vec).transpose()?;
@@ -283,9 +315,15 @@ impl KafkaSink {
 
         // Create record with all envelope components
         let mut record = FutureRecord::to(&target_topic)
-            .partition(partition)
             .payload(&value_bytes)
             .headers(headers);
+
+        // Keyless messages using the default partitioner intentionally omit an
+        // explicit partition so librdkafka can distribute them with its sticky
+        // partitioning strategy.
+        if let Some(partition) = partition {
+            record = record.partition(partition);
+        }
 
         // Add key if present
         if let Some(ref kb) = key_bytes {
@@ -297,34 +335,92 @@ impl KafkaSink {
             record = record.timestamp(ts);
         }
 
-        // Send record
-        match self
-            .producer
-            .send(record, Timeout::After(Duration::from_secs(10)))
-            .await
-        {
-            Ok((partition, offset)) => {
-                debug!("Message sent: partition={}, offset={}", partition, offset);
-                Ok(())
+        if self.queued_delivery {
+            // `send_result` synchronously copies the borrowed record into
+            // librdkafka's owned queue. The local key/value buffers can safely
+            // be released once this call returns.
+            let mut delivery_state = self.delivery_state.lock().await;
+            delivery_state
+                .wait_for_capacity(self.max_pending_deliveries)
+                .await?;
+
+            match self.producer.send_result(record) {
+                Ok(delivery) => {
+                    delivery_state.push(delivery);
+                    Ok(())
+                }
+                Err((err, _record)) => {
+                    error!("Failed to enqueue message: {err}");
+                    Err(err.into())
+                }
             }
-            Err((err, _record)) => {
-                error!("Failed to send message: {:?}", err);
-                Err(err.into())
+        } else {
+            // Acknowledged mode preserves the original per-record contract.
+            match self
+                .producer
+                .send(record, Timeout::After(Duration::from_secs(10)))
+                .await
+            {
+                Ok((partition, offset)) => {
+                    crate::observability::METRICS
+                        .messages_delivered
+                        .with_label_values(&[&target_topic])
+                        .inc();
+                    debug!("Message sent: partition={}, offset={}", partition, offset);
+                    Ok(())
+                }
+                Err((err, _record)) => {
+                    error!("Failed to send message: {err}");
+                    Err(err.into())
+                }
             }
         }
     }
 
     /// Flush all pending messages, propagating any producer error.
     pub async fn flush(&self) -> Result<()> {
-        self.producer
-            .flush(Timeout::After(Duration::from_secs(30)))
-            .map_err(|e| {
+        if self.queued_delivery {
+            // Hold the delivery-state lock across producer flush so no later
+            // send can enqueue a record inside this flush boundary.
+            let mut delivery_state = self.delivery_state.lock().await;
+            let producer = Arc::clone(&self.producer);
+            let flush_result = tokio::task::block_in_place(|| {
+                producer.flush(Timeout::After(Duration::from_secs(30)))
+            });
+
+            if flush_result.is_ok() {
+                // Successful producer flush means all callbacks have fired, so
+                // every tracked future is ready and this drain will not extend
+                // the configured producer flush timeout.
+                delivery_state.drain().await?;
+            } else {
+                // Preserve completed delivery failures for the more specific
+                // error below while retaining unfinished futures for a later
+                // send or flush attempt.
+                delivery_state.reap_ready();
+                if let Some(err) = delivery_state.failure() {
+                    return Err(err);
+                }
+            }
+
+            flush_result.map_err(|e| {
                 error!(
-                    "Failed to flush producer for '{}': {}",
+                    "Failed to flush queued producer for '{}': {}",
                     self.output_template, e
                 );
                 MirrorMakerError::Kafka(e.to_string())
             })
+        } else {
+            self.producer
+                .flush(Timeout::After(Duration::from_secs(30)))
+                .map_err(|e| {
+                    error!(
+                        "Failed to flush producer for '{}': {}",
+                        self.output_template, e
+                    );
+                    MirrorMakerError::Kafka(e.to_string())
+                })
+        }
     }
 }
 
@@ -370,113 +466,5 @@ impl MultiSink {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::{CommitStrategyConfig, CompressionConfig, MirrorMakerConfig};
-
-    fn create_test_config() -> MirrorMakerConfig {
-        MirrorMakerConfig {
-            appid: "test-app".to_string(),
-            bootstrap: "localhost:9092".to_string(),
-            input: "test-input".to_string(),
-            output: Some("test-output".to_string()),
-            target_broker: None,
-            offset: "latest".to_string(),
-            threads: 4,
-            compression: CompressionConfig::default(),
-            routing: None,
-            transform: None,
-            consumer_properties: HashMap::new(),
-            producer_properties: HashMap::new(),
-            security: None,
-            commit_strategy: CommitStrategyConfig::default(),
-            cache: None,
-            observability: Default::default(),
-            retry: Default::default(),
-            dlq: Default::default(),
-        }
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires running Kafka
-    async fn test_kafka_sink_creation() {
-        let config = create_test_config();
-        let result = KafkaSink::new(&config, "test-topic".to_string(), None).await;
-
-        // This will fail without a running Kafka, but tests the API
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_multi_sink() {
-        let multi = MultiSink::new();
-        assert_eq!(multi.sinks.len(), 0);
-    }
-
-    mod topic_template_tests {
-        use crate::envelope::MessageEnvelope;
-        use serde_json::json;
-
-        /// Mirror `KafkaSink::resolve_topic` logic for unit tests without a real broker.
-        fn resolve(
-            template: &str,
-            is_template: bool,
-            source: Option<&str>,
-        ) -> Result<String, String> {
-            if is_template {
-                source
-                    .ok_or_else(|| "no source topic".to_string())
-                    .map(|src| template.replace("{source_topic}", src))
-            } else {
-                Ok(template.to_string())
-            }
-        }
-
-        #[test]
-        fn test_fixed_topic_unchanged() {
-            assert_eq!(
-                resolve("events-copy", false, Some("events")).unwrap(),
-                "events-copy"
-            );
-        }
-
-        #[test]
-        fn test_template_replaced_with_source_topic() {
-            assert_eq!(
-                resolve("mirror.{source_topic}", true, Some("payments")).unwrap(),
-                "mirror.payments"
-            );
-        }
-
-        #[test]
-        fn test_template_with_prefix_and_suffix() {
-            assert_eq!(
-                resolve("prod.{source_topic}.v2", true, Some("orders")).unwrap(),
-                "prod.orders.v2"
-            );
-        }
-
-        #[test]
-        fn test_template_no_source_is_error() {
-            // A missing source topic must now produce an error — not silently
-            // route to "mirror.unknown".
-            assert!(resolve("copy.{source_topic}", true, None).is_err());
-        }
-
-        #[test]
-        fn test_is_template_detection() {
-            assert!("mirror.{source_topic}".contains("{source_topic}"));
-            assert!("{source_topic}-copy".contains("{source_topic}"));
-            assert!(!"fixed-topic".contains("{source_topic}"));
-        }
-
-        #[test]
-        fn test_envelope_source_topic_used() {
-            let mut envelope = MessageEnvelope::new(json!({"event": "login"}));
-            envelope.topic = Some("auth-events".to_string());
-
-            let resolved = resolve("processed.{source_topic}", true, envelope.topic.as_deref());
-            assert_eq!(resolved.unwrap(), "processed.auth-events");
-        }
-    }
-}
+#[path = "sink_tests.rs"]
+mod tests;

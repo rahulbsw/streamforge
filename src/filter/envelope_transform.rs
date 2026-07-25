@@ -3,7 +3,7 @@ use crate::error::{MirrorMakerError, Result};
 use crate::hash::{hash_value, HashAlgorithm};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 // ============================================================================
 // KEY TRANSFORMS
@@ -106,49 +106,137 @@ impl EnvelopeTransform for KeyConstantTransform {
 /// ```
 pub struct KeyTemplateTransform {
     template: String,
+    tokens: Vec<KeyTemplateToken>,
+}
+
+#[derive(Debug)]
+enum KeyTemplateToken {
+    Literal(String),
+    Placeholder {
+        placeholder: String,
+        path: String,
+        path_segments: Box<[String]>,
+    },
 }
 
 impl KeyTemplateTransform {
     pub fn new(template: &str) -> Result<Self> {
+        static PLACEHOLDER_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+        let placeholder_regex = PLACEHOLDER_REGEX.get_or_init(|| {
+            regex::Regex::new(r"\{(/[^}]+)\}")
+                .expect("the static key-template placeholder regex must be valid")
+        });
+
+        let mut tokens = Vec::new();
+        let mut cursor = 0;
+        for captures in placeholder_regex.captures_iter(template) {
+            let placeholder = captures
+                .get(0)
+                .expect("capture group zero always contains the full match");
+            let path = captures
+                .get(1)
+                .expect("the key-template regex always captures the placeholder path")
+                .as_str();
+
+            if placeholder.start() > cursor {
+                tokens.push(KeyTemplateToken::Literal(
+                    template[cursor..placeholder.start()].to_string(),
+                ));
+            }
+            tokens.push(KeyTemplateToken::Placeholder {
+                placeholder: placeholder.as_str().to_string(),
+                path: path.to_string(),
+                path_segments: path
+                    .trim_matches('/')
+                    .split('/')
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            });
+            cursor = placeholder.end();
+        }
+
+        if cursor < template.len() || tokens.is_empty() {
+            tokens.push(KeyTemplateToken::Literal(template[cursor..].to_string()));
+        }
+
         Ok(Self {
             template: template.to_string(),
+            tokens,
         })
     }
 
     fn apply_template(&self, value: &Value) -> Result<String> {
-        let mut result = self.template.clone();
-
-        // Find all {/path} placeholders
-        let re = regex::Regex::new(r"\{(/[^}]+)\}").unwrap();
-
-        for cap in re.captures_iter(&self.template.clone()) {
-            let placeholder = &cap[0];
-            let path = &cap[1];
-
-            // Extract value from path
-            let extracted = self.extract_from_path(value, path)?;
-            let value_str = match &extracted {
-                Value::String(s) => s.clone(),
-                Value::Number(n) => n.to_string(),
-                Value::Bool(b) => b.to_string(),
-                _ => serde_json::to_string(&extracted).unwrap_or_default(),
-            };
-
-            result = result.replace(placeholder, &value_str);
+        let mut rendered_values = Vec::new();
+        for token in &self.tokens {
+            if let KeyTemplateToken::Placeholder {
+                path,
+                path_segments,
+                ..
+            } = token
+            {
+                let extracted = Self::extract_from_path(value, path, path_segments)?;
+                let value_str = match extracted {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    _ => serde_json::to_string(extracted).unwrap_or_default(),
+                };
+                rendered_values.push(value_str);
+            }
         }
 
+        // The previous implementation applied replacements sequentially. Preserve
+        // that edge-case behavior when a value itself contains a placeholder.
+        let requires_sequential_rewrite = rendered_values.iter().any(|rendered| {
+            self.tokens.iter().any(|token| match token {
+                KeyTemplateToken::Placeholder { placeholder, .. } => rendered.contains(placeholder),
+                KeyTemplateToken::Literal(_) => false,
+            })
+        });
+        if requires_sequential_rewrite {
+            let mut result = self.template.clone();
+            let mut rendered = rendered_values.iter();
+            for token in &self.tokens {
+                if let KeyTemplateToken::Placeholder { placeholder, .. } = token {
+                    let value = rendered
+                        .next()
+                        .expect("each placeholder has one pre-rendered value");
+                    result = result.replace(placeholder, value);
+                }
+            }
+            return Ok(result);
+        }
+
+        let mut result = String::with_capacity(self.template.len());
+        let mut rendered = rendered_values.iter();
+        for token in &self.tokens {
+            match token {
+                KeyTemplateToken::Literal(literal) => result.push_str(literal),
+                KeyTemplateToken::Placeholder { .. } => {
+                    result.push_str(
+                        rendered
+                            .next()
+                            .expect("each placeholder has one pre-rendered value"),
+                    );
+                }
+            }
+        }
         Ok(result)
     }
 
-    fn extract_from_path(&self, value: &Value, path: &str) -> Result<Value> {
-        let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+    fn extract_from_path<'a>(
+        value: &'a Value,
+        path: &str,
+        path_segments: &[String],
+    ) -> Result<&'a Value> {
         let mut current = value;
-        for part in parts {
+        for part in path_segments {
             current = current
                 .get(part)
                 .ok_or_else(|| MirrorMakerError::Processing(format!("Path not found: {}", path)))?;
         }
-        Ok(current.clone())
+        Ok(current)
     }
 }
 
@@ -615,6 +703,66 @@ mod tests {
 
         let result = transform.transform_envelope(envelope).unwrap();
         assert_eq!(result.key, Some(json!("user-123")));
+    }
+
+    #[test]
+    fn test_key_template_transform_tokenizes_paths_at_startup() {
+        let transform = KeyTemplateTransform::new("tenant-{/tenant}/user-{/user/id}").unwrap();
+        assert_eq!(transform.tokens.len(), 4);
+
+        let KeyTemplateToken::Placeholder {
+            path,
+            path_segments,
+            ..
+        } = &transform.tokens[3]
+        else {
+            panic!("expected the final token to be a placeholder");
+        };
+        assert_eq!(path, "/user/id");
+        assert_eq!(
+            path_segments.as_ref(),
+            &["user".to_string(), "id".to_string()]
+        );
+
+        let envelope = MessageEnvelope::new(json!({
+            "tenant": "acme",
+            "user": {"id": 42}
+        }));
+        let result = transform.transform_envelope(envelope).unwrap();
+        assert_eq!(result.key, Some(json!("tenant-acme/user-42")));
+    }
+
+    #[test]
+    fn test_key_template_transform_preserves_sequential_replacement_semantics() {
+        let transform = KeyTemplateTransform::new("{/first}-{/second}").unwrap();
+        let envelope = MessageEnvelope::new(json!({
+            "first": "{/second}",
+            "second": "resolved"
+        }));
+
+        let result = transform.transform_envelope(envelope).unwrap();
+        assert_eq!(result.key, Some(json!("resolved-resolved")));
+    }
+
+    #[test]
+    fn test_key_template_transform_preserves_unmatched_placeholder_literal() {
+        let transform = KeyTemplateTransform::new("literal-{/}").unwrap();
+        let result = transform
+            .transform_envelope(MessageEnvelope::new(json!({})))
+            .unwrap();
+        assert_eq!(result.key, Some(json!("literal-{/}")));
+    }
+
+    #[test]
+    fn test_key_template_transform_preserves_missing_path_error() {
+        let transform = KeyTemplateTransform::new("user-{/user/id}").unwrap();
+        let error = transform
+            .transform_envelope(MessageEnvelope::new(json!({})))
+            .expect_err("missing template path must fail");
+        assert_eq!(
+            error.to_string(),
+            "Processing error: Path not found: /user/id"
+        );
     }
 
     #[test]

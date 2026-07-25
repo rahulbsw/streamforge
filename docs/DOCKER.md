@@ -1,490 +1,157 @@
 ---
-title: Docker
-nav_order: 6
+title: Podman
+nav_order: 1
 parent: Deployment
 ---
 
-# Docker Deployment Guide
+# Run StreamForge with Podman
 
-## Overview
+The repository contains two container builds:
 
-Two Dockerfile options are provided:
+- `Dockerfile` builds the default Chainguard-based image.
+- `Dockerfile.static` builds an x86-64 musl binary on a Chainguard static
+  runtime.
 
-1. **`Dockerfile`** - Dynamic linking (recommended for most use cases)
-   - Runtime: `cgr.dev/chainguard/glibc-dynamic`
-   - Size: ~20-30MB
-   - Includes necessary shared libraries
+Build and scan the exact image revision that you plan to deploy. Do not infer
+current vulnerability status from a base-image brand or an unpinned `latest`
+tag.
 
-2. **`Dockerfile.static`** - Fully static binary (maximum security)
-   - Runtime: `cgr.dev/chainguard/static`
-   - Size: ~10-15MB
-   - No dependencies, ultra-minimal
+## Build
 
-## Why Chainguard Images?
-
-- ✅ **Minimal attack surface** - Only essential components
-- ✅ **Daily updates** - Automatic CVE patching
-- ✅ **Non-root by default** - Enhanced security
-- ✅ **SBOM included** - Software Bill of Materials
-- ✅ **Signed with Sigstore** - Supply chain security
-- ✅ **No CVEs** - Zero known vulnerabilities
-
-## Quick Start
-
-### 1. Build the Image
-
-**Dynamic version (recommended):**
 ```bash
-docker build -t streamforge:latest .
+podman build --pull --tag streamforge:local .
 ```
 
-**Static version:**
+For the static x86-64 image:
+
 ```bash
-docker build -f Dockerfile.static -t streamforge:static .
+podman build --pull \
+  --file Dockerfile.static \
+  --tag streamforge:static-local .
 ```
 
-### 2. Create Configuration
+For a reproducible release, replace moving base-image tags with approved
+digests in your release process and record the resulting StreamForge image
+digest.
+
+## Prepare a configuration
+
+Build the local validation binary:
 
 ```bash
-# Copy example config
-cp config.example.json config.json
-
-# Edit for your environment
-vim config.json
+cp examples/configs/config.example.yaml streamforge.yaml
+cargo build --release --locked --bin streamforge-validate
+target/release/streamforge-validate streamforge.yaml --fail-on-warnings
 ```
 
-### 3. Run the Container
+Do not commit credentials in `streamforge.yaml`. If the file contains secrets,
+render it from an approved secret store into a protected runtime path.
+
+## Run without public exposure
 
 ```bash
-docker run -d \
+podman run --detach \
   --name streamforge \
-  -v $(pwd)/config.json:/app/config/config.json:ro \
-  -e RUST_LOG=info \
   --restart unless-stopped \
-  streamforge:latest
-```
-
-### 4. Check Logs
-
-```bash
-docker logs -f streamforge
-```
-
-## Docker Compose
-
-### Basic Usage
-
-```bash
-# Start with your config
-docker-compose up -d
-
-# View logs
-docker-compose logs -f mirrormaker
-
-# Stop
-docker-compose down
-```
-
-### With Local Kafka (for testing)
-
-```bash
-# Start Kafka + MirrorMaker
-docker-compose --profile kafka up -d
-
-# Check all services
-docker-compose --profile kafka ps
-```
-
-### Static Version
-
-```bash
-# Use the static build
-docker-compose --profile static up -d mirrormaker-static
-```
-
-## Configuration Options
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONFIG_FILE` | `/app/config/config.json` | Path to config file |
-| `RUST_LOG` | `info` | Log level (trace, debug, info, warn, error) |
-
-### Volume Mounts
-
-```bash
-docker run -d \
-  --name streamforge \
-  -v $(pwd)/config.json:/app/config/config.json:ro \  # Config (read-only)
-  -v $(pwd)/logs:/app/logs \                          # Logs (optional)
-  streamforge:latest
-```
-
-### Network Modes
-
-**Bridge mode (default):**
-```bash
-docker run --network bridge ...
-```
-
-**Host mode (for local Kafka):**
-```bash
-docker run --network host ...
-```
-
-**Custom network:**
-```bash
-docker network create kafka-network
-docker run --network kafka-network ...
-```
-
-## Resource Limits
-
-### Recommended Settings
-
-```bash
-docker run -d \
-  --name streamforge \
-  --cpus="2" \
-  --memory="512m" \
-  --memory-reservation="256m" \
-  -v $(pwd)/config.json:/app/config/config.json:ro \
-  streamforge:latest
-```
-
-### In docker-compose.yml
-
-```yaml
-deploy:
-  resources:
-    limits:
-      cpus: '2'
-      memory: 512M
-    reservations:
-      cpus: '1'
-      memory: 256M
-```
-
-## Health Checks
-
-### Built-in Health Check
-
-The Dockerfile includes a health check:
-
-```dockerfile
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep -f streamforge || exit 1
-```
-
-### Check Health Status
-
-```bash
-docker inspect --format='{{json .State.Health}}' streamforge | jq
-```
-
-## Logging
-
-### View Logs
-
-```bash
-# Follow logs
-docker logs -f streamforge
-
-# Last 100 lines
-docker logs --tail 100 streamforge
-
-# With timestamps
-docker logs -f --timestamps streamforge
-```
-
-### Structured Logging
-
-Set `RUST_LOG` for different verbosity:
-
-```bash
-# Info level (default)
-docker run -e RUST_LOG=info ...
-
-# Debug level
-docker run -e RUST_LOG=debug ...
-
-# Module-specific
-docker run -e RUST_LOG=streamforge::kafka=debug,streamforge::processor=trace ...
-```
-
-## Image Size Comparison
-
-| Image | Size | Security | Use Case |
-|-------|------|----------|----------|
-| Dynamic | ~25MB | High | Production (recommended) |
-| Static | ~12MB | Highest | Maximum security |
-| Java equivalent | ~200MB+ | Medium | Legacy |
-
-## Multi-Architecture Builds
-
-### Build for ARM64
-
-```bash
-docker buildx build \
-  --platform linux/arm64 \
-  -t streamforge:arm64 \
-  .
-```
-
-### Multi-arch Manifest
-
-```bash
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -t streamforge:latest \
-  --push \
-  .
-```
-
-## Security Best Practices
-
-### 1. Run as Non-Root ✅
-
-Both Dockerfiles use non-root user by default.
-
-```bash
-# Verify
-docker run --rm streamforge:latest id
-# Should show: uid=65532(nonroot) gid=65532(nonroot)
-```
-
-### 2. Read-Only Root Filesystem
-
-```bash
-docker run -d \
   --read-only \
-  --tmpfs /tmp \
-  -v $(pwd)/config.json:/app/config/config.json:ro \
-  streamforge:latest
+  --tmpfs /tmp:rw,noexec,nosuid \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --mount type=bind,src="$(pwd)/streamforge.yaml",dst=/run/streamforge/config.yaml,readonly \
+  --env CONFIG_FILE=/run/streamforge/config.yaml \
+  --env RUST_LOG=info \
+  --publish 127.0.0.1:9090:9090 \
+  streamforge:local
 ```
 
-### 3. Drop Capabilities
+Binding the published metrics port to `127.0.0.1` prevents remote network
+access. Omit `--publish` when Prometheus shares a private Podman network with
+StreamForge.
+
+The metrics server has no authentication or TLS. Never publish it on
+`0.0.0.0` on an internet-reachable host.
+
+## Verify
 
 ```bash
-docker run -d \
-  --cap-drop=ALL \
-  --security-opt=no-new-privileges:true \
-  streamforge:latest
+podman logs --tail 200 streamforge
+curl --fail http://127.0.0.1:9090/health
+curl --fail http://127.0.0.1:9090/metrics
 ```
 
-### 4. Complete Secure Configuration
+`/health` proves that the HTTP process responds; it does not prove Kafka source
+or destination health. Produce a controlled source record and verify the
+destination independently before accepting a deployment.
+
+## Private container network
+
+Create a dedicated network when StreamForge and a private Kafka endpoint are
+containerized on the same host:
 
 ```bash
-docker run -d \
-  --name streamforge-secure \
+podman network create streamforge-private
+podman run --detach \
+  --name streamforge \
+  --network streamforge-private \
   --read-only \
-  --tmpfs /tmp:rw,noexec,nosuid,size=10m \
-  --cap-drop=ALL \
-  --security-opt=no-new-privileges:true \
-  --cpus="2" \
-  --memory="512m" \
-  --pids-limit=100 \
-  -v $(pwd)/config.json:/app/config/config.json:ro \
-  streamforge:latest
+  --tmpfs /tmp:rw,noexec,nosuid \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --mount type=bind,src="$(pwd)/streamforge.yaml",dst=/run/streamforge/config.yaml,readonly \
+  --env CONFIG_FILE=/run/streamforge/config.yaml \
+  streamforge:local
 ```
 
-## Kubernetes Deployment
+Attach only the required private Kafka and monitoring services to that network.
+Do not use host networking as a generic connectivity fix.
 
-### Basic Deployment
+## Resource controls
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: streamforge
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: streamforge
-  template:
-    metadata:
-      labels:
-        app: streamforge
-    spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
-        fsGroup: 65532
-      containers:
-      - name: mirrormaker
-        image: streamforge:latest
-        imagePullPolicy: Always
-        env:
-        - name: CONFIG_FILE
-          value: /app/config/config.json
-        - name: RUST_LOG
-          value: info
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "500m"
-          limits:
-            memory: "512Mi"
-            cpu: "2000m"
-        volumeMounts:
-        - name: config
-          mountPath: /app/config
-          readOnly: true
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop:
-            - ALL
-      volumes:
-      - name: config
-        configMap:
-          name: mirrormaker-config
-```
-
-### ConfigMap
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: mirrormaker-config
-data:
-  config.json: |
-    {
-      "appid": "streamforge",
-      "bootstrap": "kafka-broker:9092",
-      "input": "source-topic",
-      "output": "destination-topic",
-      "offset": "latest",
-      "threads": 4
-    }
-```
-
-## Troubleshooting
-
-### Container Won't Start
+Set CPU and memory limits from a representative workload test:
 
 ```bash
-# Check logs
-docker logs streamforge
-
-# Run interactively
-docker run --rm -it \
-  -v $(pwd)/config.json:/app/config/config.json:ro \
-  streamforge:latest
+podman update \
+  --cpus 2 \
+  --memory 1g \
+  --memory-swap 1g \
+  streamforge
 ```
 
-### Config Validation
+The values above demonstrate Podman syntax, not production sizing. Observe
+consumer lag, broker-acknowledged deliveries, CPU throttling, memory, and
+restarts before and after applying limits.
+
+Memory use is affected by payload size, application batch size, processing
+parallelism, worker queue capacity, destination fan-out, and queued producer
+depth.
+
+## Logs and shutdown
 
 ```bash
-# Test config file
-docker run --rm \
-  -v $(pwd)/config.json:/app/config/config.json:ro \
-  streamforge:latest --help
+podman logs --follow streamforge
+podman stop --time 30 streamforge
 ```
 
-### Network Issues
+Keep application logs on the container output stream. Avoid mounting a writable
+host log directory unless retention, rotation, and permissions are managed by
+the platform.
 
-```bash
-# Test connectivity to Kafka
-docker run --rm --network host nicolaka/netshoot \
-  nc -zv kafka-broker 9092
-```
+After shutdown, verify the last committed source offsets and destination
+records according to the selected
+[delivery profile](DELIVERY_GUARANTEES.md).
 
-### Permission Issues
+## Image publishing checklist
 
-```bash
-# Check file permissions
-ls -l config.json
+- Build from a reviewed source revision and locked dependencies.
+- Use an immutable registry tag or digest.
+- Generate an SBOM and retain it with the release.
+- Scan the final image, including the current base layers.
+- Sign the image according to the registry policy.
+- Run as a non-root identity and verify it in the built image.
+- Keep the root filesystem read-only and drop Linux capabilities.
+- Mount configuration and certificate material read-only.
+- Bind metrics only to loopback or a private container network.
+- Test on every published CPU architecture.
 
-# Should be readable by all
-chmod 644 config.json
-```
-
-## Performance Monitoring
-
-### Container Stats
-
-```bash
-docker stats streamforge
-```
-
-### Resource Usage
-
-```bash
-# CPU and memory
-docker inspect streamforge | jq '.[0].HostConfig.Memory'
-
-# Current usage
-docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" streamforge
-```
-
-## CI/CD Integration
-
-### GitHub Actions Example
-
-```yaml
-name: Build and Push Docker Image
-
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-
-    - name: Build Docker image
-      run: docker build -t streamforge:${{ github.sha }} .
-
-    - name: Run tests
-      run: docker run --rm streamforge:${{ github.sha }} cargo test
-
-    - name: Push to registry
-      run: |
-        echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
-        docker push streamforge:${{ github.sha }}
-```
-
-## Best Practices Summary
-
-✅ Use Chainguard base images for security
-✅ Multi-stage builds to minimize size
-✅ Run as non-root user (uid 65532)
-✅ Mount config as read-only
-✅ Set resource limits
-✅ Use health checks
-✅ Enable structured logging
-✅ Read-only root filesystem
-✅ Drop all capabilities
-✅ Regular image updates
-
-## Image Registry
-
-### Push to Registry
-
-```bash
-# Tag
-docker tag streamforge:latest your-registry.com/streamforge:latest
-
-# Push
-docker push your-registry.com/streamforge:latest
-```
-
-### Pull from Registry
-
-```bash
-docker pull your-registry.com/streamforge:latest
-```
-
-## Questions?
-
-See:
-- `README.md` - Application overview
-- `QUICKSTART.md` - Getting started
-- `IMPLEMENTATION_NOTES.md` - Architecture details
+Continue with [Security](SECURITY_CONFIGURATION.md) and
+[Operations](OPERATIONS.md).

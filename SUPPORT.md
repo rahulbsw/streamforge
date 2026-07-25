@@ -10,8 +10,8 @@ Start with our comprehensive documentation:
 
 - **[Quick Start Guide](docs/QUICKSTART.md)** - Get up and running in 5 minutes
 - **[Usage Guide](docs/USAGE.md)** - 8 real-world use cases with complete examples
-- **[Documentation Index](docs/DOCUMENTATION_INDEX.md)** - Complete guide to all documentation
-- **[Quick Reference](docs/QUICK_REFERENCE.md)** - Handy reference card
+- **[Documentation Site](https://github.datasierra.com/streamforge/)** - Curated product and operator documentation
+- **[Configuration Guide](docs/YAML_CONFIGURATION.md)** - Pipeline configuration reference
 
 ### 💬 Community Support
 
@@ -42,9 +42,9 @@ To help us help you faster, please:
 
 ### 1. Check the Documentation
 
-- Browse the [documentation index](docs/DOCUMENTATION_INDEX.md)
+- Search the [documentation site](https://github.datasierra.com/streamforge/)
 - Search the [existing issues](https://github.com/rahulbsw/streamforge/issues)
-- Check the [troubleshooting sections](docs/USAGE.md#troubleshooting)
+- Check the [troubleshooting guide](docs/TROUBLESHOOTING.md)
 
 ### 2. Gather Information
 
@@ -103,8 +103,7 @@ See [Quick Start Guide - Prerequisites](docs/QUICKSTART.md#prerequisites)
 ### Performance Issues
 
 - [Performance Tuning Guide](docs/PERFORMANCE.md)
-- [Scaling Guide](docs/SCALING.md)
-- [Benchmark Results](benchmarks/results/)
+- [Operations Guide](docs/OPERATIONS.md)
 
 ### Security Configuration
 
@@ -171,8 +170,8 @@ Please note that all interactions are governed by our [Code of Conduct](CODE_OF_
 
 ### Official Documentation
 - [GitHub Repository](https://github.com/rahulbsw/streamforge)
-- [Documentation Site](docs/)
-- [Changelog](docs/CHANGELOG.md)
+- [Documentation Site](https://github.datasierra.com/streamforge/)
+- [Changelog](CHANGELOG.md)
 
 ### Related Projects
 - [Apache Kafka](https://kafka.apache.org/)

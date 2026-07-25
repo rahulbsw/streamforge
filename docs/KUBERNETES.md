@@ -1,820 +1,280 @@
 ---
 title: Kubernetes
-nav_order: 7
+nav_order: 2
 parent: Deployment
 ---
 
-# Streamforge on Kubernetes
+# Run StreamForge on Kubernetes
 
-Complete guide for deploying and managing Streamforge pipelines on Kubernetes using the Operator pattern.
+The repository includes a `StreamforgePipeline` custom resource, a Rust
+operator, and a Helm chart at `helm/streamforge-operator`. Install from a local
+checkout or a reviewed internal artifact; this guide does not assume a public
+chart repository or public image tag.
 
-## Table of Contents
+## Current operator scope
 
-- [Architecture](#architecture)
-- [Quick Start](#quick-start)
-- [Helm Chart](#helm-chart)
-- [CRD & Operator](#crd--operator)
-- [UI Options](#ui-options)
-- [Examples](#examples)
-- [Best Practices](#best-practices)
+The operator currently:
 
----
+- watches namespaced `StreamforgePipeline` resources;
+- creates a `ConfigMap` and `Deployment` for each pipeline;
+- reports ready replica count and a coarse phase;
+- reconciles on changes and on a periodic interval;
+- materializes only the first configured destination into the runtime
+  configuration.
 
-## Architecture
+Important limitations:
 
-### Traditional Deployment vs Operator Pattern
+- CR fields for additional destinations are not emitted to the generated
+  runtime configuration.
+- The CR `source.groupId` value is not used by the runtime; the generated
+  `appid` remains the Kafka consumer group.
+- CR security and compression fields are not currently emitted to the runtime
+  configuration.
+- Operator status is based on Deployment readiness, not verified Kafka
+  delivery.
+- The bundled chart creates cluster-scoped RBAC for the controller.
 
-**❌ Traditional Approach (Limitations):**
-```
-User creates Deployment + ConfigMap manually
-→ Hard to manage multiple pipelines
-→ No dynamic updates
-→ Requires manual scaling
-→ No validation
-```
+Review those limitations and the rendered RBAC before using the operator in a
+shared cluster. Use a direct Kubernetes Deployment when they do not fit the
+required security or routing model.
 
-**✅ Operator Pattern (Recommended):**
-```
-┌──────────────────────────────────────────────────────┐
-│                  Kubernetes Cluster                   │
-│                                                        │
-│  ┌─────────────────────────────────────────────┐     │
-│  │         Streamforge Operator                │     │
-│  │  • Watches StreamforgePipeline CRDs         │     │
-│  │  • Reconciles desired vs actual state       │     │
-│  │  • Creates Deployment + ConfigMap          │     │
-│  │  • Updates status                           │     │
-│  │  • Self-healing                             │     │
-│  └─────────────────────────────────────────────┘     │
-│                         │                              │
-│                         │ manages                      │
-│                         ▼                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐           │
-│  │Pipeline 1│  │Pipeline 2│  │Pipeline 3│           │
-│  │          │  │          │  │          │           │
-│  │Deployment│  │Deployment│  │Deployment│           │
-│  │ConfigMap │  │ConfigMap │  │ConfigMap │           │
-│  └──────────┘  └──────────┘  └──────────┘           │
-└──────────────────────────────────────────────────────┘
-```
+## Prerequisites
 
-### Key Benefits
+- `kubectl` access to the intended cluster
+- Helm 3
+- private registry images for the StreamForge runtime and operator
+- Kafka reachable through private cluster egress
+- pre-created topics and least-privilege Kafka ACLs
+- a namespace dedicated to StreamForge workloads
 
-✅ **Dynamic Management**: Add/update/delete pipelines without affecting others
-✅ **Declarative**: Define pipelines as YAML resources
-✅ **Self-Healing**: Operator reconciles failures automatically
-✅ **Validation**: CRD validates specs before creation
-✅ **Status Tracking**: Real-time pipeline status
-✅ **GitOps Ready**: Perfect for ArgoCD, Flux
+## Render before install
 
----
-
-## Quick Start
-
-### Prerequisites
-
-- Kubernetes 1.19+
-- Helm 3.0+
-- kubectl configured
-
-### 1. Install Operator
-
-```bash
-# Add Helm repository (when published)
-helm repo add streamforge https://rahulbsw.github.io/streamforge
-helm repo update
-
-# Install operator
-helm install streamforge-operator streamforge/streamforge-operator \
-  --namespace streamforge-system \
-  --create-namespace
-```
-
-### 2. Create Your First Pipeline
-
-```bash
-kubectl apply -f - <<EOF
-apiVersion: streamforge.io/v1alpha1
-kind: StreamforgePipeline
-metadata:
-  name: my-pipeline
-spec:
-  appid: my-pipeline
-  source:
-    brokers: "kafka:9092"
-    topic: "input"
-    groupId: "streamforge"
-  destinations:
-    - brokers: "kafka:9092"
-      topic: "output"
-  replicas: 2
-EOF
-```
-
-### 3. Check Status
-
-```bash
-# List pipelines
-kubectl get sfp
-
-# Details
-kubectl describe sfp my-pipeline
-
-# Logs
-kubectl logs -l streamforge.io/pipeline=my-pipeline -f
-```
-
-### 4. Update Pipeline (Zero Downtime)
-
-```bash
-# Add a filter
-kubectl patch sfp my-pipeline --type=merge -p '
-spec:
-  destinations:
-    - brokers: "kafka:9092"
-      topic: "output"
-      filter: "/status,==,active"
-'
-```
-
-### 5. Scale Pipeline
-
-```bash
-# Scale to 4 replicas
-kubectl patch sfp my-pipeline -p '{"spec":{"replicas":4}}' --type=merge
-```
-
----
-
-## Helm Chart
-
-### Installation Options
-
-**Basic Installation:**
-```bash
-helm install streamforge-operator ./helm/streamforge-operator \
-  --namespace streamforge-system \
-  --create-namespace
-```
-
-**Custom Values:**
-```bash
-helm install streamforge-operator ./helm/streamforge-operator \
-  --namespace streamforge-system \
-  --create-namespace \
-  --set operator.replicas=2 \
-  --set defaults.image.tag=0.3.1 \
-  --set monitoring.enabled=true
-```
-
-**Using values file:**
-```yaml
-# my-values.yaml
-operator:
-  replicas: 2
-  resources:
-    limits:
-      memory: 512Mi
-
-defaults:
-  image:
-    tag: "0.3.1"
-  resources:
-    requests:
-      cpu: 200m
-      memory: 256Mi
-
-monitoring:
-  enabled: true
-  serviceMonitor:
-    enabled: true
-```
-
-```bash
-helm install streamforge-operator ./helm/streamforge-operator \
-  -f my-values.yaml \
-  --namespace streamforge-system \
-  --create-namespace
-```
-
-### Helm Values
-
-See [helm/streamforge-operator/values.yaml](../helm/streamforge-operator/values.yaml) for all options.
-
-Key configurations:
+Create a private values file with immutable image references:
 
 ```yaml
 operator:
   image:
-    repository: ghcr.io/rahulbsw/streamforge-operator
-    tag: "0.1.0"
-  replicas: 1
-  resources: {}
+    repository: registry.internal/streamforge-operator
+    tag: reviewed-release
 
 defaults:
   image:
-    repository: ghcr.io/rahulbsw/streamforge
-    tag: "0.3.0"
-  resources: {}
-  replicas: 1
-  threads: 4
+    repository: registry.internal/streamforge
+    tag: reviewed-release
 
-monitoring:
-  enabled: false
-  serviceMonitor:
-    enabled: false
-```
-
----
-
-## CRD & Operator
-
-### StreamforgePipeline CRD
-
-The `StreamforgePipeline` CRD defines a Kafka streaming pipeline.
-
-**Full Spec:**
-
-```yaml
-apiVersion: streamforge.io/v1alpha1
-kind: StreamforgePipeline
-metadata:
-  name: example-pipeline
-  namespace: default
-spec:
-  # Application ID
-  appid: example-pipeline
-
-  # Source Kafka
-  source:
-    brokers: "broker1:9092,broker2:9092"
-    topic: "source-topic"
-    groupId: "consumer-group"
-    offset: "latest"  # or "earliest"
-    security:
-      protocol: "SASL_SSL"
-      ssl:
-        caLocation: "/certs/ca.crt"
-      sasl:
-        mechanism: "SCRAM-SHA-256"
-        username: "user"
-        password: "pass"
-
-  # Destinations (multiple allowed)
-  destinations:
-    - brokers: "target:9092"
-      topic: "target-topic"
-      filter: "/status,==,active"
-      transform: "EXTRACT:/user/email,userEmail"
-      partitioner: "field"
-      partitionerField: "/userId"
-      compression: "snappy"
-
-  # Resources
-  resources:
-    requests:
-      cpu: "200m"
-      memory: "256Mi"
-    limits:
-      cpu: "1000m"
-      memory: "512Mi"
-
-  # Scaling
-  replicas: 2
-  threads: 4
-
-  # Logging
-  logLevel: "info"
-
-  # Pod configuration
-  image:
-    repository: ghcr.io/rahulbsw/streamforge
-    tag: "0.3.0"
-  serviceAccount: streamforge-pipeline
-  nodeSelector:
-    disktype: ssd
-```
-
-### Operator Behavior
-
-The operator watches `StreamforgePipeline` resources and:
-
-1. **Creates/Updates Deployment**: One per pipeline
-2. **Creates/Updates ConfigMap**: Contains pipeline configuration
-3. **Mounts Config**: ConfigMap mounted to pods at `/etc/streamforge/config.yaml`
-4. **Updates Status**: Tracks phase (Pending/Running/Failed)
-5. **Self-Heals**: Reconciles every 5 minutes or on changes
-
-**Reconciliation Loop:**
-
-```
-Watch CRD Changes
-     │
-     ▼
-Compare Desired vs Actual State
-     │
-     ├─► ConfigMap exists? → Create/Update
-     │
-     ├─► Deployment exists? → Create/Update
-     │
-     ├─► Pods ready? → Update status
-     │
-     └─► Requeue in 5 minutes
-```
-
-### Status Fields
-
-The operator updates pipeline status:
-
-```yaml
-status:
-  phase: Running        # Pending/Running/Failed/Stopped
-  replicas: 2          # Number of ready pods
-  conditions:
-    - type: Ready
-      status: "True"
-      lastTransitionTime: "2026-03-10T08:00:00Z"
-  lastUpdated: "2026-03-10T08:00:00Z"
-```
-
-Check status:
-```bash
-kubectl get sfp my-pipeline -o jsonpath='{.status.phase}'
-```
-
----
-
-## UI Options
-
-### Option 1: Kubernetes Dashboard + CRDs
-
-**Pros:**
-- Native Kubernetes UI
-- No additional components
-- Secure (RBAC integrated)
-
-**Cons:**
-- Generic UI (not streamforge-specific)
-- Limited validation
-- Basic editing
-
-**Setup:**
-
-```bash
-# Install Kubernetes Dashboard
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-
-# Create service account
-kubectl create serviceaccount streamforge-dashboard -n kubernetes-dashboard
-kubectl create clusterrolebinding streamforge-dashboard \
-  --clusterrole=cluster-admin \
-  --serviceaccount=kubernetes-dashboard:streamforge-dashboard
-
-# Get token
-kubectl create token streamforge-dashboard -n kubernetes-dashboard
-```
-
-Access: http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/
-
-### Option 2: Lens (Desktop App) ⭐ Recommended
-
-**Pros:**
-- Best developer experience
-- CRD support out-of-the-box
-- Multi-cluster management
-- Terminal, logs, port-forwarding built-in
-
-**Cons:**
-- Desktop app (not web-based)
-- Free for open source, paid for teams
-
-**Setup:**
-
-1. Download: https://k8slens.dev
-2. Connect your cluster
-3. Navigate to Custom Resources → streamforgepipelines
-
-Lens will show all pipelines with create/edit/delete options.
-
-### Option 3: Headlamp (Web-based)
-
-**Pros:**
-- Web-based (self-hosted)
-- Open source
-- CRD support
-- Modern UI
-
-**Cons:**
-- Requires deployment
-
-**Setup:**
-
-```bash
-helm repo add headlamp https://headlamp-k8s.github.io/headlamp/
-helm install headlamp headlamp/headlamp \
-  --namespace headlamp \
-  --create-namespace
-
-# Access
-kubectl port-forward -n headlamp svc/headlamp 8080:80
-```
-
-Access: http://localhost:8080
-
-### Option 4: Streamforge UI (Built-in) ⭐ New!
-
-**Web UI for managing pipelines - included with the Helm chart!**
-
-**Features:**
-- 🔐 JWT authentication
-- 📝 Visual pipeline builder (form + YAML editor)
-- 📊 Real-time pipeline monitoring
-- 📋 Live log viewer with auto-refresh
-- 🎯 Direct CRD management via Kubernetes API
-- 🎨 Modern Next.js + React + Tailwind CSS
-
-**Architecture:**
-
-```
-┌────────────────────────────────────────┐
-│      Streamforge UI (Next.js)          │
-│  • Pipeline form builder                │
-│  • DSL syntax editor                    │
-│  • Real-time status monitoring          │
-│  • Pod log viewer                       │
-└────────────────────────────────────────┘
-                  │
-                  │ Kubernetes API
-                  ▼
-┌────────────────────────────────────────┐
-│     Kubernetes API Server               │
-│  • RBAC authentication                  │
-│  • StreamforgePipeline CRD ops          │
-│  • Pod logs access                      │
-└────────────────────────────────────────┘
-                  │
-                  │ watches/reconciles
-                  ▼
-┌────────────────────────────────────────┐
-│      Streamforge Operator               │
-└────────────────────────────────────────┘
-```
-
-**Setup (via Helm):**
-
-```bash
-# Install operator with UI enabled
-helm install streamforge-operator ./helm/streamforge-operator \
-  --namespace streamforge-system \
-  --create-namespace \
-  --set ui.enabled=true
-
-# Access the UI
-# Option 1: Minikube
-minikube service streamforge-operator-ui -n streamforge-system
-
-# Option 2: Port forward
-kubectl port-forward -n streamforge-system svc/streamforge-operator-ui 3001:3001
-# Access at: http://localhost:3001
-
-# Option 3: Ingress
-helm upgrade streamforge-operator ./helm/streamforge-operator \
-  -n streamforge-system \
-  --reuse-values \
-  --set ui.ingress.enabled=true \
-  --set ui.ingress.hosts[0].host=streamforge.example.com
-```
-
-**Default credentials:**
-- Username: `admin`
-- Password: `admin`
-
-⚠️ **Change these in production!**
-
-See [UI Demo on Minikube](UI_MINIKUBE_DEMO.md) for a full recorded walkthrough of the Helm install, UI pipeline creation, YAML preview, and transformed output verification.
-
-**UI Configuration:**
-
-```yaml
-# custom-ui-values.yaml
 ui:
-  enabled: true
-  replicas: 2
-  
-  service:
-    type: LoadBalancer  # or NodePort, ClusterIP
-    port: 3001
-  
-  # Secure JWT secret
-  jwtSecret: "your-secure-random-secret-key"
-  
-  # Enable ingress
-  ingress:
-    enabled: true
-    className: nginx
-    annotations:
-      cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    hosts:
-      - host: streamforge.example.com
-        paths:
-          - path: /
-            pathType: Prefix
-    tls:
-      - secretName: streamforge-tls
-        hosts:
-          - streamforge.example.com
+  enabled: false
 ```
 
-See [ui/README.md](../ui/README.md) for more details.
-
-### Option 5: kubectl Plugin
-
-**Quick CLI management:**
+Render and inspect the manifests:
 
 ```bash
-# Install kubectl-streamforge plugin (planned v1.1)
-kubectl krew install streamforge
-
-# Usage
-kubectl streamforge create my-pipeline \
-  --source kafka:9092/input \
-  --dest kafka:9092/output \
-  --replicas 2
-
-kubectl streamforge list
-kubectl streamforge logs my-pipeline
-kubectl streamforge scale my-pipeline --replicas=4
+helm template streamforge-operator ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --values private-values.yaml > rendered-streamforge.yaml
 ```
 
----
+Review:
 
-## Examples
+- `ClusterRole` permissions and cluster-wide watch scope;
+- service accounts and image references;
+- pod and container security contexts;
+- resource requests and limits;
+- whether any `Service`, `Ingress`, `NodePort`, or `LoadBalancer` would be
+  created;
+- all generated configuration for secrets or public endpoints.
 
-### Simple Mirror
+The UI is disabled above. Do not enable it until its authentication, RBAC,
+secret handling, and private access path have completed a production security
+review.
+
+## Install the local chart
+
+```bash
+kubectl create namespace streamforge-system
+
+helm upgrade --install streamforge-operator ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --values private-values.yaml \
+  --wait
+```
+
+Verify the controller:
+
+```bash
+kubectl get deployment,pods -n streamforge-system
+kubectl logs -n streamforge-system \
+  deployment/streamforge-operator \
+  --tail=200
+```
+
+The generated Deployment name can include Helm release-name expansion. Use
+`kubectl get deployment -n streamforge-system` if the exact name differs.
+
+## Create a basic pipeline
+
+The operator's generated runtime configuration currently supports one
+destination:
 
 ```yaml
 apiVersion: streamforge.io/v1alpha1
 kind: StreamforgePipeline
 metadata:
-  name: simple-mirror
+  name: orders-copy
+  namespace: streamforge-system
 spec:
+  appid: orders-copy
   source:
-    brokers: "kafka:9092"
-    topic: "events"
+    brokers: source-kafka.kafka.svc.cluster.local:9092
+    topic: orders
+    offset: earliest
   destinations:
-    - brokers: "kafka:9092"
-      topic: "events-backup"
-  replicas: 2
-```
-
-### Filtered Multi-Destination
-
-```yaml
-apiVersion: streamforge.io/v1alpha1
-kind: StreamforgePipeline
-metadata:
-  name: filtered-routing
-spec:
-  source:
-    brokers: "kafka-source:9092"
-    topic: "events"
-  destinations:
-    # Active events
-    - brokers: "kafka-target:9092"
-      topic: "active-events"
-      filter: "/status,==,active"
-    # High priority
-    - brokers: "kafka-priority:9092"
-      topic: "priority"
-      filter: "AND:/priority,==,high:/status,==,active"
-  replicas: 3
-```
-
-### With Transformation
-
-```yaml
-apiVersion: streamforge.io/v1alpha1
-kind: StreamforgePipeline
-metadata:
-  name: transform-pipeline
-spec:
-  source:
-    brokers: "kafka:9092"
-    topic: "raw-events"
-  destinations:
-    - brokers: "kafka:9092"
-      topic: "processed"
-      transform: "CONSTRUCT:output,/user/id:userId,/event/type:eventType"
-      compression: "zstd"
-  replicas: 4
-  threads: 8
-```
-
-### Secure with SSL/SASL
-
-See [examples/pipelines/03-secure-transform.yaml](../examples/pipelines/03-secure-transform.yaml)
-
----
-
-## Best Practices
-
-### 1. Resource Management
-
-**Set resource limits:**
-```yaml
-spec:
+    - brokers: destination-kafka.kafka.svc.cluster.local:9092
+      topic: orders-copy
+  replicas: 1
+  threads: 4
+  image:
+    repository: registry.internal/streamforge
+    tag: reviewed-release
+    pullPolicy: IfNotPresent
   resources:
     requests:
-      cpu: "200m"
-      memory: "256Mi"
+      cpu: 250m
+      memory: 256Mi
     limits:
-      cpu: "1000m"
-      memory: "512Mi"
+      cpu: 1
+      memory: 1Gi
 ```
 
-**Adjust based on load:**
-- Light: 100m CPU, 128Mi memory
-- Medium: 500m CPU, 512Mi memory
-- Heavy: 2000m CPU, 2Gi memory
-
-### 2. Scaling Strategy
-
-**Replicas = Kafka Partitions**
-
-If source topic has 10 partitions:
-- Set replicas: 10 (one pod per partition)
-- Or replicas: 5 (two partitions per pod)
-
-**Horizontal scaling:**
-```bash
-kubectl patch sfp my-pipeline -p '{"spec":{"replicas":10}}' --type=merge
-```
-
-**Vertical scaling:**
-```bash
-kubectl patch sfp my-pipeline --type=merge -p '
-spec:
-  resources:
-    limits:
-      memory: "2Gi"
-  threads: 8
-'
-```
-
-### 3. Security
-
-**Use Secrets for credentials:**
+Apply and inspect:
 
 ```bash
-# Create secret
-kubectl create secret generic kafka-creds \
-  --from-literal=username=myuser \
-  --from-literal=password=mypass
-
-# Reference in pipeline
+kubectl apply -f pipeline.yaml
+kubectl get streamforgepipelines -n streamforge-system
+kubectl describe streamforgepipeline orders-copy -n streamforge-system
+kubectl get deployment,pods,configmap -n streamforge-system \
+  -l streamforge.io/pipeline=orders-copy
 ```
+
+The resource values demonstrate schema and Kubernetes syntax; establish
+production sizing with the target workload.
+
+## Secure Kafka connections
+
+Because the operator does not currently emit CR security fields into the
+runtime configuration, do not put Kafka usernames or passwords directly in the
+CR and assume they will be applied.
+
+For TLS/SASL pipelines, use a directly managed Deployment with a complete
+StreamForge configuration supplied from a Kubernetes `Secret`, or update and
+verify the operator before using it. See [Security](SECURITY_CONFIGURATION.md).
+
+Never store a secret-bearing StreamForge configuration in a `ConfigMap`.
+
+## Private metrics access
+
+StreamForge listens on the configured metrics port on all pod interfaces. The
+endpoint has no authentication or TLS.
+
+If a metrics service is required, make it internal:
 
 ```yaml
-spec:
-  source:
-    security:
-      sasl:
-        mechanism: SCRAM-SHA-256
-        username: myuser
-        password: mypass  # TODO: Support secret references in operator
-```
-
-### 4. Monitoring
-
-**Enable Prometheus:**
-```yaml
-# values.yaml
-monitoring:
-  enabled: true
-  serviceMonitor:
-    enabled: true
-```
-
-**Key metrics:**
-- `streamforge_messages_consumed_total`
-- `streamforge_messages_produced_total`
-- `streamforge_lag_current`
-- `streamforge_filter_duration_seconds`
-
-### 5. Naming Conventions
-
-```
-<environment>-<purpose>-<source>-<dest>
-
-Examples:
-- prod-mirror-events-backup
-- staging-filter-logs-analytics
-- dev-transform-users-warehouse
-```
-
-### 6. GitOps
-
-**Store pipelines in Git:**
-
-```
-pipelines/
-├── prod/
-│   ├── critical-mirror.yaml
-│   └── analytics-pipeline.yaml
-├── staging/
-│   └── test-pipeline.yaml
-└── dev/
-    └── dev-pipeline.yaml
-```
-
-**Deploy with ArgoCD/Flux:**
-```bash
-# ArgoCD
-argocd app create streamforge-pipelines \
-  --repo https://github.com/myorg/pipelines \
-  --path pipelines/prod \
-  --dest-namespace default \
-  --sync-policy automated
-```
-
-### 7. Testing
-
-**Test pipeline before production:**
-
-```yaml
-apiVersion: streamforge.io/v1alpha1
-kind: StreamforgePipeline
+apiVersion: v1
+kind: Service
 metadata:
-  name: test-pipeline
-  namespace: dev
+  name: streamforge-metrics
+  namespace: streamforge-system
 spec:
-  source:
-    brokers: "kafka-dev:9092"
-    topic: "test-input"
-  destinations:
-    - brokers: "kafka-dev:9092"
-      topic: "test-output"
-  replicas: 1
-  logLevel: "debug"
+  type: ClusterIP
+  selector:
+    streamforge.io/pipeline: orders-copy
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
 ```
 
----
+Add a `NetworkPolicy` that permits ingress only from the monitoring namespace
+and egress only to Kafka, DNS, and other required private services. Do not use a
+public `LoadBalancer`, `NodePort`, or internet-facing `Ingress` for metrics or
+the UI.
 
-## Troubleshooting
-
-### Pipeline Not Starting
+For temporary local inspection:
 
 ```bash
-# Check events
-kubectl get events --sort-by='.lastTimestamp' | grep my-pipeline
-
-# Check operator logs
-kubectl logs -n streamforge-system -l app.kubernetes.io/name=streamforge-operator
-
-# Check pod status
-kubectl describe pod -l streamforge.io/pipeline=my-pipeline
+kubectl port-forward -n streamforge-system \
+  deployment/orders-copy 9090:9090
+curl --fail http://127.0.0.1:9090/health
 ```
 
-### High Memory Usage
+## Scaling
+
+Useful consumer parallelism is bounded by source partitions. Increase replicas
+only while partitions remain available for assignment and watch the rebalance.
 
 ```bash
-# Reduce threads
-kubectl patch sfp my-pipeline -p '{"spec":{"threads":2}}' --type=merge
-
-# Increase memory limit
-kubectl patch sfp my-pipeline --type=merge -p '
-spec:
-  resources:
-    limits:
-      memory: "1Gi"
-'
+kubectl patch streamforgepipeline orders-copy \
+  --namespace streamforge-system \
+  --type merge \
+  --patch '{"spec":{"replicas":2}}'
 ```
 
-### Lag Increasing
+Measure lag, broker-acknowledged deliveries, processing errors, CPU, memory, and
+restart behavior after each change. More replicas do not divide a single hot
+partition.
+
+## Upgrade and rollback
+
+Render the new chart and diff it before applying:
 
 ```bash
-# Scale up
-kubectl patch sfp my-pipeline -p '{"spec":{"replicas":6}}' --type=merge
+helm template streamforge-operator ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --values private-values.yaml > rendered-streamforge-next.yaml
 
-# Check consumer group lag
-kafka-consumer-groups.sh --bootstrap-server kafka:9092 \
-  --group streamforge-my-pipeline --describe
+kubectl diff --server-side -f rendered-streamforge-next.yaml
 ```
 
----
+Then upgrade:
 
-## Next Steps
+```bash
+helm upgrade streamforge-operator ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --values private-values.yaml \
+  --wait
+```
 
-1. **Install Operator**: `helm install streamforge-operator`
-2. **Enable UI**: `--set ui.enabled=true`
-3. **Create First Pipeline**: Apply example YAML or use UI
-4. **Monitor**: Enable Prometheus metrics
-5. **Scale**: Test with production load
+Retain the previous image digests and values file. A Helm rollback restores
+chart state, but it does not undo Kafka records, consumer offsets, topic
+changes, or externally managed secrets.
 
-## Contributing
+## Removal
 
-See [CONTRIBUTING.md](CONTRIBUTING.md)
+Before uninstalling, decide whether pipeline custom resources and their
+consumer groups must be retained. The chart is configured to keep the CRD by
+default.
 
-## License
+```bash
+helm uninstall streamforge-operator --namespace streamforge-system
+```
 
-Apache License 2.0
+Inventory remaining custom resources, deployments, config maps, service
+accounts, cluster roles, cluster role bindings, services, secrets, and CRDs.
+Deleting a namespace or custom resource is destructive and should follow an
+approved data and offset-retention plan.
+
+## Production checklist
+
+- Images are private, immutable, scanned, and signed.
+- Rendered cluster-scoped RBAC has been approved.
+- UI remains disabled unless separately security-reviewed.
+- No public service, ingress, listener, or security-group rule is created.
+- Secret-bearing configuration is stored in a `Secret`, not a `ConfigMap`.
+- Kafka TLS/SASL and ACLs are verified from the running pod.
+- Metrics use `ClusterIP` plus restrictive network policy.
+- Resource sizing comes from a representative workload.
+- Delivery behavior is tested across a restart and rebalance.
+- Rollback and teardown inventories have been rehearsed.
+
+Continue with [Deployment](DEPLOYMENT.md), [Observability](OBSERVABILITY_QUICKSTART.md),
+and [Troubleshooting](TROUBLESHOOTING.md).

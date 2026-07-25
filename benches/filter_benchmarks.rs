@@ -2,6 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use serde_json::{json, Value};
 use streamforge::filter::*;
 use streamforge::filter_parser::parse_filter;
+use streamforge::MessageEnvelope;
 
 fn create_test_message() -> Value {
     json!({
@@ -97,6 +98,46 @@ fn bench_regex_filter(c: &mut Criterion) {
     });
 }
 
+fn bench_function_style_filter_evaluation(c: &mut Criterion) {
+    let envelope = MessageEnvelope::new(create_test_message());
+    let path_filter = parse_filter("field('/message/siteId') > 10000").unwrap();
+    let regex_filter =
+        parse_filter("regex(field('/message/email'), '^[^@]+@example\\\\.com$')").unwrap();
+    let multi_path_filter =
+        parse_filter("and(field('/message/siteId') > 10000, field('/message/status') == 'active')")
+            .unwrap();
+    assert!(path_filter.evaluate_envelope(&envelope).unwrap());
+    assert!(regex_filter.evaluate_envelope(&envelope).unwrap());
+    assert!(multi_path_filter.evaluate_envelope(&envelope).unwrap());
+    let mut group = c.benchmark_group("filter/function_style/evaluate");
+
+    group.bench_function("compiled_path_comparison", |b| {
+        b.iter(|| black_box(path_filter.evaluate_envelope(black_box(&envelope)).unwrap()))
+    });
+
+    group.bench_function("compiled_regex", |b| {
+        b.iter(|| {
+            black_box(
+                regex_filter
+                    .evaluate_envelope(black_box(&envelope))
+                    .unwrap(),
+            )
+        })
+    });
+
+    group.bench_function("compiled_multi_path_and", |b| {
+        b.iter(|| {
+            black_box(
+                multi_path_filter
+                    .evaluate_envelope(black_box(&envelope))
+                    .unwrap(),
+            )
+        })
+    });
+
+    group.finish();
+}
+
 fn bench_array_filter(c: &mut Criterion) {
     let msg = create_test_message();
 
@@ -182,6 +223,7 @@ criterion_group!(
     bench_simple_filter,
     bench_boolean_logic,
     bench_regex_filter,
+    bench_function_style_filter_evaluation,
     bench_array_filter,
     bench_filter_parser,
     bench_filter_throughput

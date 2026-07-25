@@ -2,6 +2,7 @@ use futures::stream::StreamExt;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::{Headers, Message};
+#[cfg(test)]
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,7 +14,10 @@ use streamforge::filter_parser::{
 use streamforge::kafka::KafkaSink;
 use streamforge::metrics::{Stats, StatsReporter};
 use streamforge::observability::{
-    labels, register_metrics, start_lag_monitor, start_metrics_server, METRICS,
+    labels, register_metrics, start_lag_monitor, start_metrics_server_on, METRICS,
+};
+use streamforge::partition_pipeline::{
+    parse_message_key, parse_message_value, PartitionOrderedExecutor, ProcessingCompletion,
 };
 use streamforge::processor::{
     DestinationProcessor, MessageProcessor, MultiDestinationProcessor, SingleDestinationProcessor,
@@ -50,8 +54,9 @@ async fn main() -> Result<()> {
 
         // Start metrics HTTP server
         let metrics_port = config.observability.metrics_port;
+        let metrics_bind_address = config.observability.metrics_bind_address;
         tokio::spawn(async move {
-            start_metrics_server(metrics_port).await;
+            start_metrics_server_on(metrics_bind_address, metrics_port).await;
         });
     } else {
         info!("⏭️  Metrics disabled in configuration");
@@ -202,26 +207,26 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Main processing loop with concurrent message processing
+    if config.performance.processing_mode == streamforge::ProcessingMode::PartitionOrdered {
+        info!(
+            "Starting partition-ordered processing (workers: {}, queue_capacity_per_worker: {})",
+            config.threads, config.performance.worker_queue_capacity
+        );
+        run_partition_ordered_pipeline(
+            consumer,
+            processor.clone(),
+            stats,
+            config.threads,
+            config.performance.worker_queue_capacity,
+            config.performance.consumer_batch_timeout_ms,
+        )
+        .await?;
+        return Ok(());
+    }
 
-    /// Maximum messages to collect before processing as a batch.
-    /// Higher values improve throughput but increase latency and memory usage.
-    /// Typical range: 50-500 depending on message size and processing complexity.
-    const BATCH_SIZE: usize = 100;
-
-    /// Maximum time (ms) to wait for batch to fill before processing partial batch.
-    /// Lower values reduce latency during low-traffic periods.
-    /// Higher values maximize batch utilization during high traffic.
-    /// Should be much smaller than consumer session timeout (default 30s).
-    const BATCH_FILL_TIMEOUT_MS: u64 = 100;
-
-    /// Multiplier applied to config.threads to determine concurrent processing limit.
-    /// Example: threads=4, factor=10 → parallelism=40 concurrent operations.
-    /// Higher values improve CPU utilization for I/O-bound tasks but increase memory overhead.
-    /// Adjust based on: I/O wait time, message processing duration, available memory.
-    const PARALLELISM_FACTOR: usize = 10;
-
-    let parallelism = (config.threads * PARALLELISM_FACTOR).max(1);
+    // Compatibility processing loop with configurable batched concurrency.
+    let (batch_size_limit, batch_fill_timeout_ms, parallelism) =
+        processing_runtime_settings(&config);
     let manual_commit = config.commit_strategy.manual_commit;
     let commit_mode = match config.commit_strategy.commit_mode {
         streamforge::config::CommitMode::Async => rdkafka::consumer::CommitMode::Async,
@@ -229,8 +234,8 @@ async fn main() -> Result<()> {
     };
 
     info!(
-        "Starting concurrent message processing (parallelism: {}, batch_size: {})",
-        parallelism, BATCH_SIZE
+        "Starting concurrent message processing (parallelism: {}, batch_size: {}, batch_fill_timeout_ms: {})",
+        parallelism, batch_size_limit, batch_fill_timeout_ms
     );
 
     if manual_commit {
@@ -244,11 +249,11 @@ async fn main() -> Result<()> {
 
     loop {
         // Collect batch of messages with single deadline
-        let mut batch = Vec::with_capacity(BATCH_SIZE);
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(BATCH_FILL_TIMEOUT_MS);
+        let mut batch = Vec::with_capacity(batch_size_limit);
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(batch_fill_timeout_ms);
         let mut stream_ended = false;
 
-        for _ in 0..BATCH_SIZE {
+        for _ in 0..batch_size_limit {
             match tokio::time::timeout_at(deadline, message_stream.next()).await {
                 Ok(Some(msg_result)) => batch.push(msg_result),
                 Ok(None) => {
@@ -264,7 +269,7 @@ async fn main() -> Result<()> {
                 info!("Consumer stream ended, shutting down");
                 break;
             }
-            // Timeout already provides backoff (100ms), continue to next batch
+            // The configured timeout already provides backoff; continue to the next batch.
             continue;
         }
 
@@ -401,7 +406,6 @@ async fn main() -> Result<()> {
                 }
             } else {
                 // Batch has errors - halt processing to prevent skipping failed messages
-                METRICS.messages_in_flight.sub(batch_size as f64);
                 error!(
                     "CRITICAL: Batch processing failed with {} errors out of {} messages. \
                         Halting to prevent data loss.",
@@ -499,14 +503,18 @@ fn load_config() -> Result<MirrorMakerConfig> {
     // Check for config file path in environment or use default
     let config_path = std::env::var("CONFIG_FILE").unwrap_or_else(|_| "config.json".to_string());
 
-    if std::path::Path::new(&config_path).exists() {
+    let mut config = if std::path::Path::new(&config_path).exists() {
         info!("Loading configuration from: {}", config_path);
-        MirrorMakerConfig::from_file(&config_path)
+        MirrorMakerConfig::from_file(&config_path)?
     } else {
         // Create default config for testing
         warn!("Config file not found, using default configuration");
-        Ok(create_default_config())
-    }
+        create_default_config()
+    };
+
+    config.validate()?;
+    config.apply_performance_property_defaults();
+    Ok(config)
 }
 
 fn create_default_config() -> MirrorMakerConfig {
@@ -518,6 +526,7 @@ fn create_default_config() -> MirrorMakerConfig {
         target_broker: None,
         offset: "latest".to_string(),
         threads: 4,
+        performance: Default::default(),
         compression: Default::default(),
         routing: None,
         transform: None,
@@ -532,6 +541,94 @@ fn create_default_config() -> MirrorMakerConfig {
     }
 }
 
+fn processing_runtime_settings(config: &MirrorMakerConfig) -> (usize, u64, usize) {
+    let performance = &config.performance;
+    let parallelism = config
+        .threads
+        .saturating_mul(performance.parallelism_factor)
+        .max(1);
+
+    (
+        performance.consumer_batch_size,
+        performance.consumer_batch_timeout_ms,
+        parallelism,
+    )
+}
+
+async fn run_partition_ordered_pipeline(
+    consumer: Arc<StreamConsumer>,
+    processor: Arc<dyn MessageProcessor>,
+    stats: Arc<Stats>,
+    worker_count: usize,
+    worker_queue_capacity: usize,
+    idle_flush_timeout_ms: u64,
+) -> Result<()> {
+    let mut executor = PartitionOrderedExecutor::new(
+        processor.clone(),
+        stats.clone(),
+        worker_count,
+        worker_queue_capacity,
+    );
+    let mut message_stream = consumer.stream();
+    let idle_flush = tokio::time::sleep(Duration::from_millis(idle_flush_timeout_ms));
+    tokio::pin!(idle_flush);
+    let mut flush_pending = false;
+
+    loop {
+        tokio::select! {
+            completion = executor.next_completion() => {
+                if let Some(completion) = completion {
+                    report_auto_commit_completion(completion);
+                    flush_pending = true;
+                    idle_flush
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + Duration::from_millis(idle_flush_timeout_ms));
+                }
+            }
+            _ = &mut idle_flush, if flush_pending => {
+                processor.flush().await?;
+                flush_pending = false;
+            }
+            message = message_stream.next() => {
+                match message {
+                    Some(Ok(message)) => executor.dispatch(message.detach()).await?,
+                    Some(Err(kafka_error)) => {
+                        error!("Kafka consumer error: {}", kafka_error);
+                        stats.error();
+                        METRICS
+                            .processing_errors
+                            .with_label_values(&[labels::ERROR_TYPE_KAFKA])
+                            .inc();
+                    }
+                    None => {
+                        info!("Consumer stream ended, draining partition workers");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    for completion in executor.shutdown().await? {
+        report_auto_commit_completion(completion);
+    }
+    processor.flush().await?;
+    Ok(())
+}
+
+fn report_auto_commit_completion(completion: ProcessingCompletion) {
+    if let Err(processing_error) = completion.result {
+        error!(
+            "Message processing failed in auto-commit mode (data loss): {} \
+             (topic={}, partition={}, offset={})",
+            processing_error,
+            completion.position.topic,
+            completion.position.partition,
+            completion.position.offset
+        );
+    }
+}
+
 fn create_consumer(config: &MirrorMakerConfig) -> Result<StreamConsumer> {
     let mut consumer_config = ClientConfig::new();
     consumer_config
@@ -541,8 +638,6 @@ fn create_consumer(config: &MirrorMakerConfig) -> Result<StreamConsumer> {
 
     // Configure commit strategy based on config
     let auto_commit = !config.commit_strategy.manual_commit;
-    consumer_config.set("enable.auto.commit", auto_commit.to_string());
-
     if !auto_commit {
         info!("Manual commit enabled - at-least-once semantics");
         info!("Commit mode: {:?}", config.commit_strategy.commit_mode);
@@ -558,6 +653,13 @@ fn create_consumer(config: &MirrorMakerConfig) -> Result<StreamConsumer> {
         consumer_config.set(key, value);
     }
 
+    // Commit strategy is a reliability contract, not a performance override.
+    // Re-apply these after arbitrary client properties so user-provided maps
+    // cannot silently contradict the validated StreamForge mode.
+    consumer_config
+        .set("enable.auto.commit", auto_commit.to_string())
+        .set("enable.auto.offset.store", "true");
+
     let consumer: StreamConsumer = consumer_config.create()?;
     Ok(consumer)
 }
@@ -572,17 +674,24 @@ async fn build_single_destination_processor(
         .clone()
         .ok_or_else(|| MirrorMakerError::Config("Output topic not specified".to_string()))?;
 
-    let sink = Arc::new(KafkaSink::new(config, output_topic, None).await?);
+    let sink = Arc::new(KafkaSink::new(config, output_topic.clone(), None).await?);
 
     // Parse optional top-level transform (supports CACHE_LOOKUP, CACHE_PUT, STRING:, etc.)
     if let Some(ref transform_expr) = config.transform {
         info!("Value transform: {}", transform_expr);
         let transform = parse_transform_with_cache(transform_expr, Some(cache_manager))?;
-        Ok(Arc::new(SingleDestinationProcessor::with_transform(
-            sink, transform,
-        )))
+        Ok(Arc::new(
+            SingleDestinationProcessor::with_transform_for_destination(
+                sink,
+                transform,
+                output_topic.as_str(),
+            ),
+        ))
     } else {
-        Ok(Arc::new(SingleDestinationProcessor::new(sink)))
+        Ok(Arc::new(SingleDestinationProcessor::for_destination(
+            sink,
+            output_topic.as_str(),
+        )))
     }
 }
 
@@ -710,98 +819,6 @@ fn aggregation_flush_interval_seconds(config: &MirrorMakerConfig) -> Option<u64>
                 .map(|aggregation| aggregation.window.emit_interval_seconds)
         })
         .min()
-}
-
-/// Parse Kafka message key into a JSON Value.
-///
-/// Handles three cases with permissive fallback behavior:
-/// 1. `None` → Returns `Value::Null` (keys are optional in Kafka)
-/// 2. Valid JSON → Parses and returns the JSON Value
-/// 3. Invalid JSON → Returns `Value::String` with UTF-8 decoded content
-///    (using lossy conversion, replacing invalid UTF-8 sequences with �)
-///
-/// # Permissive Parsing Rationale
-///
-/// Keys use permissive parsing because they're primarily used for:
-/// - Message partitioning/routing (hash-based distribution)
-/// - Lookup/correlation (joining streams)
-/// - Logging and debugging
-///
-/// Keys don't typically contain complex structured data that requires
-/// strict validation. Failing on invalid key JSON would reject messages
-/// that are otherwise processable.
-///
-/// # Examples
-///
-/// ```ignore
-/// // Valid JSON key
-/// parse_message_key(Some(br#"{"id":123}"#)) // → Value::Object({"id": 123})
-///
-/// // Non-JSON key (common for simple string keys)
-/// parse_message_key(Some(b"user-123")) // → Value::String("user-123")
-///
-/// // No key
-/// parse_message_key(None) // → Value::Null
-/// ```
-fn parse_message_key(raw: Option<&[u8]>) -> Value {
-    match raw {
-        Some(k) => match serde_json::from_slice::<Value>(k) {
-            Ok(v) => v,
-            Err(_) => Value::String(String::from_utf8_lossy(k).to_string()),
-        },
-        None => Value::Null,
-    }
-}
-
-/// Parse Kafka message payload into a JSON Value.
-///
-/// Requires valid JSON payload - returns error if:
-/// - Payload is `None` or empty (Kafka tombstone messages not supported)
-/// - Payload is not valid JSON
-/// - Payload contains invalid UTF-8
-///
-/// # Strict Parsing Rationale
-///
-/// Unlike keys, payloads use strict validation because:
-/// - Message processing logic depends on accessing specific JSON fields
-/// - Filters and transforms expect well-formed JSON structure
-/// - Invalid payloads indicate data quality issues that should be surfaced
-/// - Failed parses trigger error handling and potential reprocessing
-///
-/// # Error Handling
-///
-/// Parse failures are logged with full message context (topic, partition, offset)
-/// in the caller, and:
-/// - In manual commit mode → message reprocessed on restart
-/// - In auto-commit mode → message lost (logged as data loss)
-///
-/// # Examples
-///
-/// ```ignore
-/// // Valid JSON payload
-/// parse_message_value(Some(br#"{"event":"login"}"#))
-///     // → Ok(Value::Object({"event": "login"}))
-///
-/// // Invalid JSON
-/// parse_message_value(Some(b"not-json"))
-///     // → Err(MirrorMakerError::Processing("Invalid JSON: ..."))
-///
-/// // Empty payload (tombstone)
-/// parse_message_value(None)
-///     // → Err(MirrorMakerError::Processing("Empty payload"))
-/// ```
-///
-/// # Errors
-///
-/// Returns `MirrorMakerError::Processing` if:
-/// - Payload is missing (None)
-/// - JSON deserialization fails
-fn parse_message_value(raw: Option<&[u8]>) -> Result<Value> {
-    match raw {
-        Some(v) => serde_json::from_slice::<Value>(v)
-            .map_err(|e| MirrorMakerError::Processing(format!("Invalid JSON: {}", e))),
-        None => Err(MirrorMakerError::Processing("Empty payload".to_string())),
-    }
 }
 
 #[cfg(test)]
@@ -944,8 +961,32 @@ mod tests {
             assert_eq!(config.output, Some("output-topic".to_string()));
             assert_eq!(config.offset, "latest");
             assert_eq!(config.threads, 4);
+            assert_eq!(config.performance.consumer_batch_size, 100);
+            assert_eq!(config.performance.consumer_batch_timeout_ms, 100);
+            assert_eq!(config.performance.parallelism_factor, 10);
             assert!(config.routing.is_none());
             assert!(!config.commit_strategy.manual_commit);
+        }
+
+        #[test]
+        fn test_processing_runtime_settings_use_performance_config() {
+            let mut config = create_default_config();
+            config.threads = 8;
+            config.performance.consumer_batch_size = 2000;
+            config.performance.consumer_batch_timeout_ms = 50;
+            config.performance.parallelism_factor = 15;
+
+            assert_eq!(processing_runtime_settings(&config), (2000, 50, 120));
+        }
+
+        #[test]
+        fn test_processing_runtime_settings_saturate_parallelism() {
+            let mut config = create_default_config();
+            config.threads = usize::MAX;
+            config.performance.parallelism_factor = 2;
+
+            let (_, _, parallelism) = processing_runtime_settings(&config);
+            assert_eq!(parallelism, usize::MAX);
         }
 
         #[test]

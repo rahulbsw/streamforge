@@ -153,6 +153,7 @@ pub fn test_config_base(bootstrap: &str, input: &str, output: &str) -> MirrorMak
         target_broker: None,
         offset: "earliest".to_string(),
         threads: 2,
+        performance: Default::default(),
         compression: Default::default(),
         routing: None,
         transform: None,

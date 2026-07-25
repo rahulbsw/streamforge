@@ -51,7 +51,7 @@ fn parse_filter_as_box(expr: &str) -> Result<Box<dyn Filter>> {
         let parsed = parse_filter_expr(trimmed).map_err(|e| {
             MirrorMakerError::Config(format!("Invalid function-style filter: {}", e))
         })?;
-        return Ok(Box::new(FunctionStyleFilter::new(parsed)));
+        return Ok(Box::new(FunctionStyleFilter::new(parsed)?));
     }
 
     let parts: Vec<&str> = expr.split(':').collect();
@@ -103,12 +103,14 @@ fn is_v2_filter_syntax(expr: &str) -> bool {
 }
 
 struct FunctionStyleFilter {
-    expr: Node<FilterExpr>,
+    expr: CompiledFilterExpr,
 }
 
 impl FunctionStyleFilter {
-    fn new(expr: Node<FilterExpr>) -> Self {
-        Self { expr }
+    fn new(expr: Node<FilterExpr>) -> Result<Self> {
+        Ok(Self {
+            expr: CompiledFilterExpr::compile(&expr)?,
+        })
     }
 }
 
@@ -119,182 +121,364 @@ impl Filter for FunctionStyleFilter {
     }
 
     fn evaluate_envelope(&self, envelope: &MessageEnvelope) -> Result<bool> {
-        evaluate_function_style_filter(&self.expr, envelope)
+        self.expr.evaluate(envelope)
     }
 }
 
-fn evaluate_function_style_filter(
-    node: &Node<FilterExpr>,
-    envelope: &MessageEnvelope,
-) -> Result<bool> {
-    match &node.value {
-        FilterExpr::JsonPath { path, op, value } => {
-            let Some(actual) = extract_value(&envelope.value, path) else {
-                return Ok(false);
-            };
-            Ok(compare_values(actual, op, value))
+#[derive(Debug)]
+struct CompiledPath {
+    segments: Box<[String]>,
+}
+
+impl CompiledPath {
+    fn new(path: &str) -> Self {
+        let segments = if path == "/." {
+            Vec::new()
+        } else {
+            path.trim_matches('/')
+                .split('/')
+                .filter(|part| !part.is_empty())
+                .map(str::to_string)
+                .collect()
+        };
+        Self {
+            segments: segments.into_boxed_slice(),
         }
-        FilterExpr::And(exprs) => {
-            for expr in exprs {
-                if !evaluate_function_style_filter(expr, envelope)? {
-                    return Ok(false);
-                }
+    }
+
+    fn extract<'a>(&self, value: &'a Value) -> Option<&'a Value> {
+        let mut current = value;
+        for part in &self.segments {
+            current = current.get(part.as_str())?;
+        }
+        Some(current)
+    }
+}
+
+#[derive(Debug)]
+enum CompiledFilterExpr {
+    JsonPath {
+        path: CompiledPath,
+        op: DslComparisonOp,
+        value: Literal,
+    },
+    And(Vec<CompiledFilterExpr>),
+    Or(Vec<CompiledFilterExpr>),
+    Not(Box<CompiledFilterExpr>),
+    Regex {
+        path: CompiledPath,
+        regex: Regex,
+    },
+    ArrayAny {
+        array_path: CompiledPath,
+        element_filter: Box<CompiledFilterExpr>,
+    },
+    ArrayAll {
+        array_path: CompiledPath,
+        element_filter: Box<CompiledFilterExpr>,
+    },
+    ArrayContains {
+        array_path: CompiledPath,
+        value: Value,
+    },
+    ArrayLength {
+        array_path: CompiledPath,
+        op: DslComparisonOp,
+        length: usize,
+    },
+    KeyPrefix(String),
+    KeyMatches(Regex),
+    KeySuffix(String),
+    KeyContains(String),
+    Header {
+        name: String,
+        op: DslComparisonOp,
+        value: String,
+    },
+    TimestampAge {
+        op: DslComparisonOp,
+        seconds: u64,
+    },
+    Exists(CompiledPath),
+    NotExists(CompiledPath),
+    IsNull(CompiledPath),
+    IsNotNull(CompiledPath),
+    IsEmpty(CompiledPath),
+    IsNotEmpty(CompiledPath),
+    IsBlank(CompiledPath),
+    StartsWith {
+        path: CompiledPath,
+        prefix: String,
+    },
+    EndsWith {
+        path: CompiledPath,
+        suffix: String,
+    },
+    Contains {
+        path: CompiledPath,
+        substring: String,
+    },
+    StringLength {
+        path: CompiledPath,
+        op: DslComparisonOp,
+        length: usize,
+    },
+}
+
+impl CompiledFilterExpr {
+    fn compile(node: &Node<FilterExpr>) -> Result<Self> {
+        match &node.value {
+            FilterExpr::JsonPath { path, op, value } => Ok(Self::JsonPath {
+                path: CompiledPath::new(path),
+                op: op.clone(),
+                value: value.clone(),
+            }),
+            FilterExpr::And(exprs) => Ok(Self::And(
+                exprs
+                    .iter()
+                    .map(Self::compile)
+                    .collect::<Result<Vec<_>>>()?,
+            )),
+            FilterExpr::Or(exprs) => Ok(Self::Or(
+                exprs
+                    .iter()
+                    .map(Self::compile)
+                    .collect::<Result<Vec<_>>>()?,
+            )),
+            FilterExpr::Not(expr) => Ok(Self::Not(Box::new(Self::compile(expr)?))),
+            FilterExpr::Regex { path, pattern } => {
+                let regex = Regex::new(pattern).map_err(|e| {
+                    MirrorMakerError::Config(format!("Invalid regex pattern '{}': {}", pattern, e))
+                })?;
+                Ok(Self::Regex {
+                    path: CompiledPath::new(path),
+                    regex,
+                })
             }
-            Ok(true)
-        }
-        FilterExpr::Or(exprs) => {
-            for expr in exprs {
-                if evaluate_function_style_filter(expr, envelope)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        FilterExpr::Not(expr) => Ok(!evaluate_function_style_filter(expr, envelope)?),
-        FilterExpr::Regex { path, pattern } => {
-            let Some(actual) = extract_value(&envelope.value, path).and_then(Value::as_str) else {
-                return Ok(false);
-            };
-            let regex = Regex::new(pattern).map_err(|e| {
-                MirrorMakerError::Config(format!("Invalid regex pattern '{}': {}", pattern, e))
-            })?;
-            Ok(regex.is_match(actual))
-        }
-        FilterExpr::ArrayAny {
-            array_path,
-            element_filter,
-        } => {
-            let Some(values) = extract_value(&envelope.value, array_path).and_then(Value::as_array)
-            else {
-                return Ok(false);
-            };
-            for value in values {
-                let element = MessageEnvelope::new(value.clone());
-                if evaluate_function_style_filter(element_filter, &element)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        FilterExpr::ArrayAll {
-            array_path,
-            element_filter,
-        } => {
-            let Some(values) = extract_value(&envelope.value, array_path).and_then(Value::as_array)
-            else {
-                return Ok(false);
-            };
-            for value in values {
-                let element = MessageEnvelope::new(value.clone());
-                if !evaluate_function_style_filter(element_filter, &element)? {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
-        }
-        FilterExpr::ArrayContains { array_path, value } => {
-            let Some(values) = extract_value(&envelope.value, array_path).and_then(Value::as_array)
-            else {
-                return Ok(false);
-            };
-            let expected = literal_to_value(value);
-            Ok(values.iter().any(|actual| actual == &expected))
-        }
-        FilterExpr::ArrayLength {
-            array_path,
-            op,
-            length,
-        } => {
-            let Some(actual) = extract_value(&envelope.value, array_path).and_then(Value::as_array)
-            else {
-                return Ok(false);
-            };
-            Ok(compare_numbers(actual.len() as f64, op, *length as f64))
-        }
-        FilterExpr::KeyPrefix(prefix) => Ok(key_as_string(envelope)
-            .as_deref()
-            .is_some_and(|key| key.starts_with(prefix))),
-        FilterExpr::KeyMatches(pattern) => {
-            let Some(key) = key_as_string(envelope) else {
-                return Ok(false);
-            };
-            let regex = Regex::new(pattern).map_err(|e| {
-                MirrorMakerError::Config(format!("Invalid key regex '{}': {}", pattern, e))
-            })?;
-            Ok(regex.is_match(&key))
-        }
-        FilterExpr::KeySuffix(suffix) => Ok(key_as_string(envelope)
-            .as_deref()
-            .is_some_and(|key| key.ends_with(suffix))),
-        FilterExpr::KeyContains(substring) => Ok(key_as_string(envelope)
-            .as_deref()
-            .is_some_and(|key| key.contains(substring))),
-        FilterExpr::Header { name, op, value } => {
-            let Some(actual) = envelope.header_str(name) else {
-                return Ok(false);
-            };
-            Ok(compare_strings(&actual, op, value))
-        }
-        FilterExpr::TimestampAge { op, seconds } => {
-            let Some(age) = envelope.age_seconds() else {
-                return Ok(false);
-            };
-            Ok(compare_numbers(age as f64, op, *seconds as f64))
-        }
-        FilterExpr::Exists(path) => Ok(extract_value(&envelope.value, path).is_some()),
-        FilterExpr::NotExists(path) => Ok(extract_value(&envelope.value, path).is_none()),
-        FilterExpr::IsNull(path) => Ok(matches!(
-            extract_value(&envelope.value, path),
-            Some(Value::Null)
-        )),
-        FilterExpr::IsNotNull(path) => Ok(matches!(
-            extract_value(&envelope.value, path),
-            Some(value) if !value.is_null()
-        )),
-        FilterExpr::IsEmpty(path) => {
-            Ok(extract_value(&envelope.value, path).is_some_and(is_empty_value))
-        }
-        FilterExpr::IsNotEmpty(path) => {
-            Ok(extract_value(&envelope.value, path).is_some_and(|value| !is_empty_value(value)))
-        }
-        FilterExpr::IsBlank(path) => {
-            Ok(extract_value(&envelope.value, path).is_none_or(is_blank_value))
-        }
-        FilterExpr::StartsWith { path, prefix } => Ok(extract_value(&envelope.value, path)
-            .and_then(Value::as_str)
-            .is_some_and(|actual| actual.starts_with(prefix))),
-        FilterExpr::EndsWith { path, suffix } => Ok(extract_value(&envelope.value, path)
-            .and_then(Value::as_str)
-            .is_some_and(|actual| actual.ends_with(suffix))),
-        FilterExpr::Contains { path, substring } => Ok(extract_value(&envelope.value, path)
-            .and_then(Value::as_str)
-            .is_some_and(|actual| actual.contains(substring))),
-        FilterExpr::StringLength { path, op, length } => {
-            let Some(actual) = extract_value(&envelope.value, path).and_then(Value::as_str) else {
-                return Ok(false);
-            };
-            Ok(compare_numbers(
-                actual.chars().count() as f64,
+            FilterExpr::ArrayAny {
+                array_path,
+                element_filter,
+            } => Ok(Self::ArrayAny {
+                array_path: CompiledPath::new(array_path),
+                element_filter: Box::new(Self::compile(element_filter)?),
+            }),
+            FilterExpr::ArrayAll {
+                array_path,
+                element_filter,
+            } => Ok(Self::ArrayAll {
+                array_path: CompiledPath::new(array_path),
+                element_filter: Box::new(Self::compile(element_filter)?),
+            }),
+            FilterExpr::ArrayContains { array_path, value } => Ok(Self::ArrayContains {
+                array_path: CompiledPath::new(array_path),
+                value: literal_to_value(value),
+            }),
+            FilterExpr::ArrayLength {
+                array_path,
                 op,
-                *length as f64,
-            ))
+                length,
+            } => Ok(Self::ArrayLength {
+                array_path: CompiledPath::new(array_path),
+                op: op.clone(),
+                length: *length,
+            }),
+            FilterExpr::KeyPrefix(prefix) => Ok(Self::KeyPrefix(prefix.clone())),
+            FilterExpr::KeyMatches(pattern) => {
+                let regex = Regex::new(pattern).map_err(|e| {
+                    MirrorMakerError::Config(format!("Invalid key regex '{}': {}", pattern, e))
+                })?;
+                Ok(Self::KeyMatches(regex))
+            }
+            FilterExpr::KeySuffix(suffix) => Ok(Self::KeySuffix(suffix.clone())),
+            FilterExpr::KeyContains(substring) => Ok(Self::KeyContains(substring.clone())),
+            FilterExpr::Header { name, op, value } => Ok(Self::Header {
+                name: name.clone(),
+                op: op.clone(),
+                value: value.clone(),
+            }),
+            FilterExpr::TimestampAge { op, seconds } => Ok(Self::TimestampAge {
+                op: op.clone(),
+                seconds: *seconds,
+            }),
+            FilterExpr::Exists(path) => Ok(Self::Exists(CompiledPath::new(path))),
+            FilterExpr::NotExists(path) => Ok(Self::NotExists(CompiledPath::new(path))),
+            FilterExpr::IsNull(path) => Ok(Self::IsNull(CompiledPath::new(path))),
+            FilterExpr::IsNotNull(path) => Ok(Self::IsNotNull(CompiledPath::new(path))),
+            FilterExpr::IsEmpty(path) => Ok(Self::IsEmpty(CompiledPath::new(path))),
+            FilterExpr::IsNotEmpty(path) => Ok(Self::IsNotEmpty(CompiledPath::new(path))),
+            FilterExpr::IsBlank(path) => Ok(Self::IsBlank(CompiledPath::new(path))),
+            FilterExpr::StartsWith { path, prefix } => Ok(Self::StartsWith {
+                path: CompiledPath::new(path),
+                prefix: prefix.clone(),
+            }),
+            FilterExpr::EndsWith { path, suffix } => Ok(Self::EndsWith {
+                path: CompiledPath::new(path),
+                suffix: suffix.clone(),
+            }),
+            FilterExpr::Contains { path, substring } => Ok(Self::Contains {
+                path: CompiledPath::new(path),
+                substring: substring.clone(),
+            }),
+            FilterExpr::StringLength { path, op, length } => Ok(Self::StringLength {
+                path: CompiledPath::new(path),
+                op: op.clone(),
+                length: *length,
+            }),
         }
     }
-}
 
-fn extract_value<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-    if matches!(path, "" | "/" | "/.") {
-        return Some(value);
-    }
-
-    let mut current = value;
-    for part in path.trim_matches('/').split('/') {
-        if part.is_empty() {
-            continue;
+    fn evaluate(&self, envelope: &MessageEnvelope) -> Result<bool> {
+        match self {
+            Self::JsonPath { path, op, value } => {
+                let Some(actual) = path.extract(&envelope.value) else {
+                    return Ok(false);
+                };
+                Ok(compare_values(actual, op, value))
+            }
+            Self::And(exprs) => {
+                for expr in exprs {
+                    if !expr.evaluate(envelope)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            Self::Or(exprs) => {
+                for expr in exprs {
+                    if expr.evaluate(envelope)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            Self::Not(expr) => Ok(!expr.evaluate(envelope)?),
+            Self::Regex { path, regex } => {
+                let Some(actual) = path.extract(&envelope.value).and_then(Value::as_str) else {
+                    return Ok(false);
+                };
+                Ok(regex.is_match(actual))
+            }
+            Self::ArrayAny {
+                array_path,
+                element_filter,
+            } => {
+                let Some(values) = array_path
+                    .extract(&envelope.value)
+                    .and_then(Value::as_array)
+                else {
+                    return Ok(false);
+                };
+                for value in values {
+                    let element = MessageEnvelope::new(value.clone());
+                    if element_filter.evaluate(&element)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            Self::ArrayAll {
+                array_path,
+                element_filter,
+            } => {
+                let Some(values) = array_path
+                    .extract(&envelope.value)
+                    .and_then(Value::as_array)
+                else {
+                    return Ok(false);
+                };
+                for value in values {
+                    let element = MessageEnvelope::new(value.clone());
+                    if !element_filter.evaluate(&element)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            Self::ArrayContains { array_path, value } => {
+                let Some(values) = array_path
+                    .extract(&envelope.value)
+                    .and_then(Value::as_array)
+                else {
+                    return Ok(false);
+                };
+                Ok(values.iter().any(|actual| actual == value))
+            }
+            Self::ArrayLength {
+                array_path,
+                op,
+                length,
+            } => {
+                let Some(actual) = array_path
+                    .extract(&envelope.value)
+                    .and_then(Value::as_array)
+                else {
+                    return Ok(false);
+                };
+                Ok(compare_numbers(actual.len() as f64, op, *length as f64))
+            }
+            Self::KeyPrefix(prefix) => Ok(key_as_string(envelope)
+                .as_deref()
+                .is_some_and(|key| key.starts_with(prefix))),
+            Self::KeyMatches(regex) => {
+                let Some(key) = key_as_string(envelope) else {
+                    return Ok(false);
+                };
+                Ok(regex.is_match(&key))
+            }
+            Self::KeySuffix(suffix) => Ok(key_as_string(envelope)
+                .as_deref()
+                .is_some_and(|key| key.ends_with(suffix))),
+            Self::KeyContains(substring) => Ok(key_as_string(envelope)
+                .as_deref()
+                .is_some_and(|key| key.contains(substring))),
+            Self::Header { name, op, value } => {
+                let Some(actual) = envelope.header_str(name) else {
+                    return Ok(false);
+                };
+                Ok(compare_strings(&actual, op, value))
+            }
+            Self::TimestampAge { op, seconds } => {
+                let Some(age) = envelope.age_seconds() else {
+                    return Ok(false);
+                };
+                Ok(compare_numbers(age as f64, op, *seconds as f64))
+            }
+            Self::Exists(path) => Ok(path.extract(&envelope.value).is_some()),
+            Self::NotExists(path) => Ok(path.extract(&envelope.value).is_none()),
+            Self::IsNull(path) => Ok(matches!(path.extract(&envelope.value), Some(Value::Null))),
+            Self::IsNotNull(path) => Ok(matches!(
+                path.extract(&envelope.value),
+                Some(value) if !value.is_null()
+            )),
+            Self::IsEmpty(path) => Ok(path.extract(&envelope.value).is_some_and(is_empty_value)),
+            Self::IsNotEmpty(path) => Ok(path
+                .extract(&envelope.value)
+                .is_some_and(|value| !is_empty_value(value))),
+            Self::IsBlank(path) => Ok(path.extract(&envelope.value).is_none_or(is_blank_value)),
+            Self::StartsWith { path, prefix } => Ok(path
+                .extract(&envelope.value)
+                .and_then(Value::as_str)
+                .is_some_and(|actual| actual.starts_with(prefix))),
+            Self::EndsWith { path, suffix } => Ok(path
+                .extract(&envelope.value)
+                .and_then(Value::as_str)
+                .is_some_and(|actual| actual.ends_with(suffix))),
+            Self::Contains { path, substring } => Ok(path
+                .extract(&envelope.value)
+                .and_then(Value::as_str)
+                .is_some_and(|actual| actual.contains(substring))),
+            Self::StringLength { path, op, length } => {
+                let Some(actual) = path.extract(&envelope.value).and_then(Value::as_str) else {
+                    return Ok(false);
+                };
+                Ok(compare_numbers(
+                    actual.chars().count() as f64,
+                    op,
+                    *length as f64,
+                ))
+            }
         }
-        current = current.get(part)?;
     }
-    Some(current)
 }
 
 fn compare_values(actual: &Value, op: &DslComparisonOp, expected: &Literal) -> bool {
@@ -1744,6 +1928,64 @@ mod tests {
         assert!(!filter
             .evaluate(&json!({"customer": {"email": "alice@example.com"}}))
             .unwrap());
+    }
+
+    #[test]
+    fn test_function_style_filter_rejects_invalid_regex_at_startup() {
+        let error = parse_filter("regex(field('/email'), '[')")
+            .err()
+            .expect("invalid regex must fail while the filter is constructed");
+        assert!(
+            error.to_string().contains("Invalid regex pattern '['"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn test_function_style_filter_precompiles_key_regex() {
+        let parsed = parse_filter_expr("KEY_MATCHES:[").unwrap();
+        let error = FunctionStyleFilter::new(parsed)
+            .err()
+            .expect("invalid key regex must fail while the filter is constructed");
+        assert!(
+            error.to_string().contains("Invalid key regex '['"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn test_function_style_filter_precompiles_paths_and_array_literals() {
+        let cases = [
+            ("ARRAY_CONTAINS:/payload/values,42", json!(42.0)),
+            ("ARRAY_CONTAINS:/payload/values,true", json!(true)),
+            ("ARRAY_CONTAINS:/payload/values,null", Value::Null),
+            ("ARRAY_CONTAINS:/payload/values,admin", json!("admin")),
+        ];
+
+        for (expression, expected) in cases {
+            let parsed = parse_filter_expr(expression).unwrap();
+            let filter = FunctionStyleFilter::new(parsed).unwrap();
+            let CompiledFilterExpr::ArrayContains { array_path, value } = &filter.expr else {
+                panic!("expected a compiled ARRAY_CONTAINS filter");
+            };
+            assert_eq!(
+                array_path.segments.as_ref(),
+                &["payload".to_string(), "values".to_string()]
+            );
+            assert_eq!(value, &expected);
+            assert!(filter
+                .evaluate(&json!({"payload": {"values": [expected]}}))
+                .unwrap());
+        }
+    }
+
+    #[test]
+    fn test_function_style_filter_preserves_root_path_semantics() {
+        let filter = parse_filter("field('/') == 42").unwrap();
+        assert!(filter.evaluate(&json!(42)).unwrap());
+        assert!(!filter.evaluate(&json!(41)).unwrap());
     }
 
     #[test]

@@ -1,717 +1,194 @@
 ---
 title: Performance
-nav_order: 9
-parent: Deployment
+nav_order: 4
+parent: Operations
 ---
 
-# Performance Guide
+# Performance
 
-Comprehensive guide for optimizing StreamForge performance.
+StreamForge performance depends on payload size, partition count, broker and
+network latency, filter and transform complexity, destination fan-out, delivery
+semantics, and available CPU and memory.
 
-## Table of Contents
+No headline throughput result is published here. A result belongs in public
+documentation only when it comes from a reproducible end-to-end comparison,
+uses the same workload and delivery guarantees as the comparison target, and
+improves the approved baseline without correctness regressions.
 
-- [Performance Overview](#performance-overview)
-- [Benchmarks](#benchmarks)
-- [Configuration Tuning](#configuration-tuning)
-- [Best Practices](#best-practices)
-- [Monitoring](#monitoring)
-- [Troubleshooting](#troubleshooting)
-- [Advanced Optimization](#advanced-optimization)
+## Runtime controls
 
-## Performance Overview
+```yaml
+threads: 4
 
-### Key Metrics
+performance:
+  consumer_batch_size: 100
+  consumer_batch_timeout_ms: 100
+  parallelism_factor: 10
 
-| Metric | Typical Value | Excellent Value |
-|--------|---------------|-----------------|
-| Throughput | 10K-25K msg/s | 50K+ msg/s |
-| Latency (p50) | 5-10ms | <5ms |
-| Latency (p99) | 15-30ms | <15ms |
-| Memory Usage | 50-100MB | <50MB |
-| CPU Usage | 50-100% | 200-400% (multi-core) |
+  processing_mode: legacy_batch
+  worker_queue_capacity: 1024
 
-### Performance Characteristics
+  producer_delivery_mode: acknowledged
+  producer_max_in_flight: 10000
 
-**Filter Performance:**
-- Simple comparison: ~100ns
-- Boolean logic (AND/OR/NOT): ~100-300ns
-- Regular expressions: ~500ns-1µs
-- Array operations: ~1-10µs (size dependent)
+  fetch_min_bytes: 65536
+  fetch_max_wait_ms: 500
+  batch_size: 1000
+  linger_ms: 10
+```
 
-**Transform Performance:**
-- JSON path extraction: ~50-100ns
-- Object construction: ~200-500ns
-- Array mapping: ~1-10µs (size dependent)
-- Arithmetic: ~50ns
+These values illustrate the schema; they are not recommended production sizing.
 
-**Overall Overhead:**
-- Per-message processing: ~2-10µs
-- Network I/O: Dominant factor (>99% of time)
+| Field | Default | Effect |
+|---|---:|---|
+| `consumer_batch_size` | `100` | Maximum records collected for one application batch |
+| `consumer_batch_timeout_ms` | `100` | Maximum legacy batch fill wait; queued-delivery drain delay in partition-ordered mode |
+| `parallelism_factor` | `10` | Processing concurrency multiplier applied to `threads` |
+| `processing_mode` | `legacy_batch` | Legacy batch barrier or bounded partition worker lanes |
+| `worker_queue_capacity` | `1024` | Per-worker input bound in `partition_ordered` mode |
+| `producer_delivery_mode` | `acknowledged` | Await Kafka acknowledgement or track delivery after enqueue |
+| `producer_max_in_flight` | `10000` | Bound for queued delivery futures |
+
+Effective legacy processing concurrency is:
+
+```text
+max(1, threads × parallelism_factor)
+```
+
+Configuration validation enforces reliability constraints:
+
+- `partition_ordered` requires auto commit;
+- `queued` delivery requires auto commit;
+- `queued` delivery requires `retry.max_attempts: 1`;
+- `queued` delivery requires `dlq.enabled: false`.
+
+Review [Delivery guarantees](DELIVERY_GUARANTEES.md) before using either mode.
+
+## Kafka client mappings
+
+| Performance field | librdkafka property |
+|---|---|
+| `fetch_min_bytes` | `fetch.min.bytes` |
+| `fetch_max_wait_ms` | `fetch.wait.max.ms` |
+| `batch_size` | `batch.num.messages` |
+| `linger_ms` | `linger.ms` |
+| `queue_buffering_max_ms` | `queue.buffering.max.ms` |
+
+`batch_size` is a message count. Configure librdkafka `batch.size` through
+`producer_properties` when a byte limit is needed.
+
+`linger.ms` and `queue.buffering.max.ms` are aliases. If both performance fields
+are set, `linger_ms` wins. Explicit `consumer_properties` and
+`producer_properties` override generated performance properties.
+
+```yaml
+performance:
+  fetch_min_bytes: 65536
+  batch_size: 1000
+
+consumer_properties:
+  fetch.min.bytes: "1"
+
+producer_properties:
+  batch.num.messages: "500"
+  batch.size: "65536"
+```
+
+## Tuning procedure
+
+1. Define the correctness and delivery profile.
+2. Fix the source and destination topology, topic partitions, replication,
+   acknowledgements, and security settings.
+3. Use representative payload sizes, keys, headers, filters, transforms, and
+   fan-out.
+4. Warm the runtime and brokers before measurement.
+5. Record broker-acknowledged completions, end-to-end latency, lag, errors, CPU,
+   memory, network, and destination offsets.
+6. Run multiple trials and report variance.
+7. Change one control at a time.
+8. Retain a change only if it improves the target without violating reliability,
+   latency, error, or resource objectives.
+
+Useful experiments:
+
+- increase application batch size for steady traffic, then check latency and
+  memory;
+- reduce the batch timeout for low-volume latency;
+- increase processing concurrency only while work is I/O-bound and bounded
+  queues remain healthy;
+- compare the legacy batch scheduler with partition-ordered lanes using a
+  workload whose delivery constraints permit auto commit;
+- sweep producer linger and queued depth only with the queued-mode reliability
+  limitations explicitly accepted;
+- use simple comparisons instead of regex when they express the same rule;
+- avoid transforms on passthrough destinations;
+- inspect key distribution before adding partitions or replicas.
+
+## Partitioning
+
+- A present key, including explicit JSON `null`, is hashed to an explicit target
+  partition.
+- An absent key delegates partition choice to librdkafka.
+- Field partitioning selects an explicit partition from the configured JSON
+  field.
+
+Low-cardinality or skewed keys can create hot partitions. Measure per-partition
+lag and delivery rate rather than relying only on totals.
 
 ## Benchmarks
 
-### Throughput Tests
-
-**Configuration:**
-- Message size: 1KB
-- Partitions: 10
-- Replicas: 3
-- Hardware: 4 CPU cores, 8GB RAM
-
-**Results:**
-
-| Scenario | Throughput | CPU | Memory |
-|----------|------------|-----|--------|
-| Simple mirroring (no filter) | 45K msg/s | 150% | 45MB |
-| With simple filter | 42K msg/s | 180% | 48MB |
-| With boolean logic (3 conditions) | 38K msg/s | 200% | 50MB |
-| With regex filter | 35K msg/s | 220% | 52MB |
-| With array operations | 30K msg/s | 250% | 60MB |
-| Multi-destination (5 topics) | 40K msg/s | 300% | 65MB |
-
-### Latency Tests
-
-**Configuration:**
-- Message size: 1KB
-- Batch size: 100
-- Linger: 10ms
-
-**Results:**
-
-| Percentile | Simple | With Filter | Multi-Dest |
-|------------|--------|-------------|------------|
-| p50 | 3ms | 4ms | 5ms |
-| p95 | 8ms | 10ms | 12ms |
-| p99 | 12ms | 15ms | 20ms |
-| p99.9 | 25ms | 30ms | 40ms |
-
-### Performance Characteristics
-
-**Streamforge performance at 10K msg/s baseline workload (1KB messages):**
-
-| Metric | Performance | Capability |
-|--------|-------------|------------|
-| **Throughput** | 25,000 msg/s | High-volume sustained processing |
-| **CPU Usage** | 120% (4 cores) | Efficient multi-core utilization |
-| **Memory** | 50MB | Minimal memory footprint |
-| **Latency (p99)** | 15ms | Consistent low latency |
-| **Startup** | 0.1s | Rapid deployment and recovery |
-| **Scalability** | Linear | Predictable resource growth |
-
-## Configuration Tuning
-
-### Basic Configuration
-
-**Minimal (Low Throughput):**
-```json
-{
-  "threads": 2,
-  "consumer_properties": {
-    "fetch.min.bytes": "1",
-    "fetch.wait.max.ms": "100"
-  },
-  "producer_properties": {
-    "batch.size": "16384",
-    "linger.ms": "0"
-  }
-}
-```
-
-**Balanced (Recommended):**
-```json
-{
-  "threads": 4,
-  "consumer_properties": {
-    "fetch.min.bytes": "1048576",
-    "fetch.wait.max.ms": "500",
-    "max.poll.records": "500"
-  },
-  "producer_properties": {
-    "batch.size": "65536",
-    "linger.ms": "10",
-    "compression.type": "gzip"
-  }
-}
-```
-
-**High Throughput:**
-```json
-{
-  "threads": 8,
-  "consumer_properties": {
-    "fetch.min.bytes": "1048576",
-    "fetch.wait.max.ms": "500",
-    "max.poll.records": "1000",
-    "max.partition.fetch.bytes": "1048576"
-  },
-  "producer_properties": {
-    "batch.size": "131072",
-    "linger.ms": "10",
-    "buffer.memory": "67108864",
-    "compression.type": "snappy",
-    "max.in.flight.requests.per.connection": "5"
-  }
-}
-```
-
-**Low Latency:**
-```json
-{
-  "threads": 4,
-  "consumer_properties": {
-    "fetch.min.bytes": "1",
-    "fetch.wait.max.ms": "0",
-    "max.poll.records": "100"
-  },
-  "producer_properties": {
-    "batch.size": "16384",
-    "linger.ms": "0",
-    "acks": "1"
-  }
-}
-```
-
-### Thread Configuration
-
-**Rule of thumb:**
-- Start with: `threads = CPU cores`
-- Low throughput: `threads = 2-4`
-- High throughput: `threads = CPU cores * 2`
-- Very high throughput: `threads = CPU cores * 2-4`
-
-**Testing:**
-```bash
-# Measure with different thread counts
-for threads in 2 4 8 16; do
-  echo "Testing with $threads threads..."
-  # Update config and run
-  # Monitor throughput
-done
-```
-
-### Consumer Tuning
-
-**fetch.min.bytes:**
-- Low latency: `1` (don't wait for data)
-- Balanced: `1048576` (1MB)
-- High throughput: `2097152` (2MB)
-
-**fetch.wait.max.ms:**
-- Low latency: `0-100`
-- Balanced: `500`
-- High throughput: `1000`
-
-**max.poll.records:**
-- Low memory: `100-200`
-- Balanced: `500`
-- High throughput: `1000-2000`
-
-**session.timeout.ms:**
-- Stable network: `10000` (10s)
-- Unreliable network: `30000` (30s)
-- Very unreliable: `60000` (60s)
-
-### Producer Tuning
-
-**batch.size:**
-- Low latency: `16384` (16KB)
-- Balanced: `65536` (64KB)
-- High throughput: `131072` (128KB)
-
-**linger.ms:**
-- Low latency: `0-1`
-- Balanced: `10`
-- High throughput: `20-50`
-
-**compression.type:**
-- Fastest: `snappy`
-- Balanced: `gzip`
-- Best compression: `zstd`
-- None: `none`
-
-**acks:**
-- Fastest: `0` (no acknowledgment)
-- Balanced: `1` (leader acknowledgment)
-- Most durable: `all` (all replicas)
-
-### Compression Selection
-
-**Benchmarks (1KB messages):**
-
-| Type | Compression Ratio | CPU Usage | Throughput |
-|------|-------------------|-----------|------------|
-| None | 1.0x | Low | 50K msg/s |
-| Snappy | 2.5x | Medium | 45K msg/s |
-| Gzip | 4.0x | High | 35K msg/s |
-| Zstd | 4.5x | Medium-High | 40K msg/s |
-
-**Recommendations:**
-- Network bandwidth limited → Use `zstd` or `gzip`
-- CPU limited → Use `snappy` or `none`
-- Balanced → Use `snappy`
-- Storage limited → Use `zstd`
-
-## Best Practices
-
-### 1. Filter Optimization
-
-**❌ Inefficient:**
-```json
-{
-  "filter": "REGEX:/message,.*complex.*pattern.*with.*many.*terms.*"
-}
-```
-
-**✅ Efficient:**
-```json
-{
-  "filter": "AND:/message/type,==,complex:/message/hasPattern,==,true"
-}
-```
-
-**Guidelines:**
-- Use simple comparisons when possible
-- Avoid complex regex patterns
-- Put cheaper filters first in AND logic
-- Use NOT sparingly (still evaluates inner filter)
-
-### 2. Transform Optimization
-
-**❌ Inefficient:**
-```json
-{
-  "transform": "CONSTRUCT:f1=/a/b/c/d/e:f2=/a/b/c/d/f:f3=/a/b/c/d/g"
-}
-```
-
-**✅ Efficient:**
-```json
-{
-  "transform": "/a/b/c/d"
-}
-```
-
-**Guidelines:**
-- Extract parent object when possible
-- Avoid redundant field extraction
-- Use array operations efficiently
-- Minimize arithmetic operations
-
-### 3. Partitioning Strategy
-
-**Hash Partitioning (Default):**
-```json
-{
-  "partition": null
-}
-```
-- Pros: Even distribution
-- Cons: No ordering guarantees
-- Use: When order doesn't matter
-
-**Field Partitioning:**
-```json
-{
-  "partition": "/userId"
-}
-```
-- Pros: Maintains ordering per key
-- Cons: Potential hotspots
-- Use: When ordering important
-
-**Hotspot Prevention:**
-```json
-{
-  "filter": "NOT:/userId,==,very-active-user"
-}
-```
-- Filter out high-volume keys
-- Use separate topics for hot keys
-- Monitor partition distribution
-
-### 4. Multi-Destination Efficiency
-
-**❌ Inefficient:**
-```json
-{
-  "destinations": [
-    {"filter": "REGEX:/type,.*"},
-    {"filter": "REGEX:/type,.*"},
-    {"filter": "REGEX:/type,.*"}
-  ]
-}
-```
-
-**✅ Efficient:**
-```json
-{
-  "destinations": [
-    {"filter": "/type,==,a"},
-    {"filter": "/type,==,b"},
-    {"filter": "/type,==,c"}
-  ]
-}
-```
-
-**Guidelines:**
-- Limit destinations to <10 for best performance
-- Use mutually exclusive filters when possible
-- Order by match probability (most likely first)
-- Combine related destinations
-
-### 5. Resource Management
-
-**Memory:**
-```json
-{
-  "consumer_properties": {
-    "max.poll.records": "500",
-    "fetch.max.bytes": "52428800"
-  },
-  "producer_properties": {
-    "buffer.memory": "33554432"
-  }
-}
-```
-
-**CPU:**
-- Match threads to available cores
-- Leave 1-2 cores for OS
-- Monitor CPU saturation
-- Use CPU affinity in containers
-
-**Network:**
-- Compression for bandwidth-limited networks
-- Increase batch sizes for high-latency networks
-- Use local Kafka clusters when possible
-- Monitor network saturation
-
-### 6. Container Deployment
-
-**Docker Resource Limits:**
-```bash
-docker run -d \
-  --cpus="4" \
-  --memory="512m" \
-  --memory-reservation="256m" \
-  streamforge:latest
-```
-
-**Kubernetes Resource Limits:**
-```yaml
-resources:
-  requests:
-    memory: "256Mi"
-    cpu: "1000m"
-  limits:
-    memory: "512Mi"
-    cpu: "4000m"
-```
-
-## Monitoring
-
-### Built-in Metrics
-
-The application reports metrics every 10 seconds:
-
-```
-Stats: processed=10000 (1000.0/s), filtered=100 (10.0/s),
-       completed=9900 (990.0/s), errors=0 (0.0/s)
-```
-
-**Key Metrics:**
-- `processed`: Total messages read
-- `filtered`: Messages rejected by filters
-- `completed`: Messages successfully sent
-- `errors`: Failed sends
-
-**Rates:**
-- Monitor `completed/s` for throughput
-- Watch `errors/s` for issues
-- Check `filtered/s` for filter effectiveness
-
-### System Metrics
-
-**CPU:**
-```bash
-# Overall CPU
-top -p $(pgrep streamforge)
-
-# Per-thread CPU
-ps -eLo pid,tid,pcpu,comm | grep streamforge
-```
-
-**Memory:**
-```bash
-# Memory usage
-ps aux | grep streamforge
-
-# Detailed memory
-pmap $(pgrep streamforge)
-```
-
-**Network:**
-```bash
-# Network traffic
-iftop -f "port 9092"
-
-# Per-process
-nethogs
-```
-
-### Kafka Metrics
-
-**Consumer Lag:**
-```bash
-kafka-consumer-groups.sh \
-  --bootstrap-server kafka:9092 \
-  --group streamforge \
-  --describe
-```
-
-**Topic Metrics:**
-```bash
-kafka-run-class.sh kafka.tools.JmxTool \
-  --object-name kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec
-```
-
-### Alerting
-
-**Key Alerts:**
-1. Consumer lag > 10000 messages
-2. Error rate > 1%
-3. Throughput dropped > 50%
-4. CPU usage > 90%
-5. Memory usage > 80%
-
-## Troubleshooting
-
-### Low Throughput
-
-**Symptoms:**
-- Throughput < expected
-- CPU usage < 50%
-
-**Diagnosis:**
-```bash
-# Check consumer lag
-kafka-consumer-groups.sh --describe
-
-# Check producer metrics
-# Enable debug logging
-RUST_LOG=debug
-```
-
-**Solutions:**
-1. Increase thread count
-2. Increase batch size
-3. Increase linger.ms
-4. Check network latency
-5. Verify partition count
-
-### High CPU Usage
-
-**Symptoms:**
-- CPU usage > 90%
-- Throughput plateaued
-
-**Diagnosis:**
-```bash
-# CPU profiling
-perf record -p $(pgrep streamforge)
-perf report
-
-# Check filter complexity
-# Review regex patterns
-```
-
-**Solutions:**
-1. Reduce thread count
-2. Simplify filters
-3. Optimize regex patterns
-4. Reduce destinations
-5. Scale horizontally
-
-### High Memory Usage
-
-**Symptoms:**
-- Memory usage > expected
-- OOM errors
-
-**Diagnosis:**
-```bash
-# Memory profiling
-valgrind --tool=massif ./streamforge
-
-# Check message sizes
-# Review batch sizes
-```
-
-**Solutions:**
-1. Reduce max.poll.records
-2. Reduce buffer.memory
-3. Reduce fetch.max.bytes
-4. Check for memory leaks
-5. Increase container limits
-
-### High Latency
-
-**Symptoms:**
-- p99 latency > 50ms
-- Slow message delivery
-
-**Diagnosis:**
-```bash
-# Network latency
-ping kafka-broker
-
-# Kafka latency
-kafka-run-class.sh kafka.tools.JmxTool
-```
-
-**Solutions:**
-1. Reduce linger.ms
-2. Reduce batch.size
-3. Set fetch.wait.max.ms=0
-4. Use acks=1
-5. Optimize network path
-
-## Advanced Optimization
-
-### CPU Pinning
+Focused Criterion suites are available:
 
 ```bash
-# Pin to specific CPUs
-taskset -c 0-3 ./streamforge
-
-# Docker with CPU affinity
-docker run --cpuset-cpus="0-3" streamforge:latest
+cargo bench --bench filter_benchmarks
+cargo bench --bench transform_benchmarks
+cargo bench --bench end_to_end_benchmark
 ```
 
-### Huge Pages
+Microbenchmarks isolate code paths. They do not include Kafka brokers, network,
+consumer commits, scheduling, or destination acknowledgement and must not be
+presented as end-to-end message throughput.
 
-```bash
-# Enable huge pages
-echo 512 > /proc/sys/vm/nr_hugepages
+An end-to-end result record should include:
 
-# Run with huge pages
-MALLOC_MMAP_THRESHOLD_=131072 ./streamforge
-```
+- source revision and clean/dirty worktree state;
+- instance or host type, CPU architecture, core allocation, and memory;
+- Kafka versions, broker topology, storage, and network placement;
+- topic partitions, replication, and retention;
+- payload distribution and total records;
+- complete StreamForge configuration with secrets redacted;
+- warm-up, run duration, repetitions, and aggregation method;
+- source-produced count, source-consumed count, destination-acknowledged count,
+  and independently observed destination count;
+- latency percentiles, lag, errors, CPU, memory, and network;
+- setup, runtime, and teardown cost;
+- confirmation that no benchmark service was exposed publicly.
 
-### Network Optimization
+Reject a run if counters are inconsistent, the destination count is incomplete,
+the comparison uses different delivery semantics, or any resource remains after
+the teardown audit.
 
-```bash
-# Increase socket buffers
-sysctl -w net.core.rmem_max=16777216
-sysctl -w net.core.wmem_max=16777216
+## Optimization priorities
 
-# TCP tuning
-sysctl -w net.ipv4.tcp_window_scaling=1
-sysctl -w net.ipv4.tcp_rmem="4096 87380 16777216"
-sysctl -w net.ipv4.tcp_wmem="4096 65536 16777216"
-```
+The current JSON pipeline parses payloads into `serde_json::Value`, walks the
+tree for filters and transforms, and serializes destination values. SIMD by
+itself is unlikely to improve pointer-heavy tree traversal.
 
-### Profiling
+Profile before changing the representation. Candidate work should be evaluated
+in this order:
 
-**CPU Profiling:**
-```bash
-# Install perf
-# Start profiling
-perf record -g -p $(pgrep streamforge)
+1. preserve raw Kafka bytes for routes that do not need JSON;
+2. parse lazily according to selected operations;
+3. reduce array-element and destination serialization copies;
+4. isolate vectorizable byte scanning, hashing, or numeric kernels;
+5. measure the full pipeline again after each change.
 
-# Generate flamegraph
-perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
-```
+## Production checklist
 
-**Memory Profiling:**
-```bash
-# Using valgrind
-valgrind --tool=massif --massif-out-file=massif.out ./streamforge
-
-# Analyze
-ms_print massif.out
-```
-
-### Load Testing
-
-**Generate Load:**
-```bash
-# Using kafka-producer-perf-test
-kafka-producer-perf-test.sh \
-  --topic test \
-  --num-records 1000000 \
-  --record-size 1024 \
-  --throughput 10000 \
-  --producer-props bootstrap.servers=kafka:9092
-```
-
-**Measure Performance:**
-```bash
-# Monitor throughput
-watch -n 1 'docker logs mirrormaker 2>&1 | tail -1'
-
-# Measure latency
-kafka-consumer-perf-test.sh \
-  --topic output \
-  --bootstrap-server kafka:9092 \
-  --messages 100000
-```
-
-## Performance Checklist
-
-### Pre-Production
-
-- [ ] Benchmark with production-like data
-- [ ] Load test at 2x expected throughput
-- [ ] Verify latency under load
-- [ ] Test failure scenarios
-- [ ] Profile CPU and memory usage
-- [ ] Validate filter performance
-- [ ] Check network bandwidth
-- [ ] Monitor consumer lag
-- [ ] Test with different thread counts
-- [ ] Verify compression benefits
-
-### Production
-
-- [ ] Set up monitoring
-- [ ] Configure alerting
-- [ ] Tune based on metrics
-- [ ] Monitor consumer lag
-- [ ] Track error rates
-- [ ] Review logs regularly
-- [ ] Plan for scaling
-- [ ] Document configuration
-- [ ] Set resource limits
-- [ ] Regular performance reviews
-
-## Summary
-
-### Quick Wins
-
-1. **Enable compression** → 2-4x bandwidth reduction
-2. **Tune thread count** → Match CPU cores
-3. **Optimize batch size** → Balance latency/throughput
-4. **Simplify filters** → Use simple comparisons
-5. **Monitor metrics** → Identify bottlenecks
-
-### Performance Targets
-
-| Environment | Throughput | Latency p99 | CPU | Memory |
-|-------------|------------|-------------|-----|--------|
-| Development | 5K msg/s | 50ms | <100% | <100MB |
-| Staging | 15K msg/s | 30ms | <200% | <150MB |
-| Production | 25K+ msg/s | 15ms | <400% | <200MB |
-
-### Next Steps
-
-- Test with your specific workload
-- Measure before optimizing
-- Optimize bottlenecks first
-- Monitor continuously
-- Iterate and improve
-
-For more information:
-- [USAGE.md](USAGE.md) - Use cases and patterns
-- [CONTRIBUTING.md](CONTRIBUTING.md) - Development setup
-- [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) - Filter optimization
+- Benchmark the exact delivery profile used in production.
+- Verify destination records independently of application counters.
+- Monitor lag, delivery errors, CPU, memory, and partition balance.
+- Establish resource limits from measured use.
+- Repeat the workload after any broker, instance, partition, filter, transform,
+  fan-out, security, or version change.
+- Publish numerical comparisons only after the result contract is satisfied.
