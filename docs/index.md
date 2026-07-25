@@ -61,6 +61,19 @@ description: Selective replication for Kafka—filter, transform, redact, and ro
     </div>
   </header>
 
+  <section class="sf-proof" aria-label="Validated AWS sustained benchmark">
+    <a class="sf-proof__intro" href="PERFORMANCE.html">
+      <span>Validated AWS baseline</span>
+      <strong>Method, environment, and limits <i aria-hidden="true">→</i></strong>
+    </a>
+    <dl>
+      <div><dt>Median delivery</dt><dd>106,693 <small>msg/s</small></dd></div>
+      <div><dt>Timed runs</dt><dd>3 × 120 <small>sec</small></dd></div>
+      <div><dt>Validation</dt><dd>16.2M <small>exact/run</small></dd></div>
+      <div><dt>Errors / CV</dt><dd>0 <small>/ 0.058%</small></dd></div>
+    </dl>
+  </section>
+
   <section class="sf-section sf-section--intro" aria-labelledby="control-heading">
     <div class="sf-section__heading">
       <p class="sf-kicker">Control the record, not just the topic</p>

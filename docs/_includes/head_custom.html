@@ -1,7 +1,19 @@
 <link rel="icon" href="{{ '/assets/images/streamforge-mark.svg' | relative_url }}" type="image/svg+xml">
+<script>
+  (function () {
+    var savedTheme = null;
+    try {
+      savedTheme = window.localStorage.getItem("streamforge-theme");
+    } catch (error) {
+      savedTheme = null;
+    }
+    document.documentElement.dataset.theme =
+      savedTheme === "dark" || savedTheme === "light" ? savedTheme : "light";
+  })();
+</script>
 <link rel="stylesheet" href="{{ '/assets/css/streamforge-site.css' | relative_url }}">
 {% if page.permalink == '/404.html' %}<base href="{{ '/' | relative_url }}">{% endif %}
-<meta name="theme-color" content="#0b1117">
+<meta name="theme-color" content="#f6f9fb">
 <meta property="og:type" content="website">
 <meta property="og:title" content="{{ page.title | default: site.title | escape }}">
 <meta property="og:description" content="{{ page.description | default: site.description | escape }}">
@@ -14,3 +26,39 @@
 <meta name="twitter:title" content="{{ page.title | default: site.title | escape }}">
 <meta name="twitter:description" content="{{ page.description | default: site.description | escape }}">
 <meta name="twitter:image" content="{{ '/assets/images/streamforge-social-card.png' | absolute_url }}">
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var themeButton = document.createElement("button");
+    var themeColor = document.querySelector('meta[name="theme-color"]');
+
+    themeButton.type = "button";
+    themeButton.className = "sf-theme-toggle";
+
+    function renderThemeButton() {
+      var isDark = document.documentElement.dataset.theme === "dark";
+      themeButton.setAttribute("aria-label", isDark ? "Use light theme" : "Use dark theme");
+      themeButton.setAttribute("title", isDark ? "Use light theme" : "Use dark theme");
+      themeButton.innerHTML =
+        '<span aria-hidden="true">' + (isDark ? "☀" : "☾") + "</span>" +
+        "<b>" + (isDark ? "Light" : "Dark") + "</b>";
+      if (themeColor) {
+        themeColor.setAttribute("content", isDark ? "#0b131a" : "#f6f9fb");
+      }
+    }
+
+    themeButton.addEventListener("click", function () {
+      var nextTheme =
+        document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = nextTheme;
+      try {
+        window.localStorage.setItem("streamforge-theme", nextTheme);
+      } catch (error) {
+        /* Theme selection remains active for the current page. */
+      }
+      renderThemeButton();
+    });
+
+    renderThemeButton();
+    document.body.appendChild(themeButton);
+  });
+</script>
