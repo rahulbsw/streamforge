@@ -3,17 +3,45 @@
 
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 import benchmark_job_common
+import benchmark_ingress_job
 import benchmark_output_job
 import throughput_results
 
 
 class MetricParsingTests(unittest.TestCase):
+    def test_execution_command_supports_direct_and_container_modes(self) -> None:
+        command = ["kafka-topics", "--list"]
+        self.assertEqual(
+            benchmark_job_common.execution_command(
+                "podman", "benchmark-kafka", command, direct=True
+            ),
+            command,
+        )
+        self.assertEqual(
+            benchmark_job_common.execution_command(
+                "podman",
+                "benchmark-kafka",
+                command,
+                direct=False,
+                interactive=True,
+            ),
+            [
+                "podman",
+                "exec",
+                "-i",
+                "benchmark-kafka",
+                "kafka-topics",
+                "--list",
+            ],
+        )
+
     def test_exact_destination_and_vector_sum(self) -> None:
         samples = benchmark_job_common.parse_metrics(
             "\n".join(
@@ -54,6 +82,24 @@ class MetricParsingTests(unittest.TestCase):
 
 
 class SustainedResultTests(unittest.TestCase):
+    def test_parallel_ingress_distributes_exact_record_count(self) -> None:
+        streams = [io.BytesIO(), io.BytesIO()]
+        written = benchmark_ingress_job.write_lines(
+            streams,
+            [b'{"id":1}\n', b'{"id":2}\n'],
+            count=5,
+            flush_every=2,
+        )
+        self.assertEqual(written, 5)
+        self.assertEqual(
+            sum(stream.getvalue().count(b"\n") for stream in streams),
+            5,
+        )
+        self.assertEqual(
+            [stream.getvalue().count(b"\n") for stream in streams],
+            [3, 2],
+        )
+
     def test_consumer_performance_count_parser(self) -> None:
         output = "\n".join(
             [

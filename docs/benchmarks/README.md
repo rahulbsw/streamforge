@@ -16,6 +16,8 @@ scripts/benchmarks/run_throughput_test.sh
 Criterion microbenchmarks remain under `benches/`.
 
 [`results/phase2-baseline-20260724.md`](results/phase2-baseline-20260724.md) is
-a historical coupled-harness record. No schema-version-3 sustained result is a
-public baseline yet; the first validated local run was intentionally withheld
-because its worktree and saturation gates were not publication-eligible.
+a historical coupled-harness record. The current publication-eligible
+schema-version-3 AWS sustained baseline is
+[`results/BENCHMARK_RESULTS.md`](results/BENCHMARK_RESULTS.md). The first
+corrected local run remains diagnostic because its worktree and saturation
+gates were not publication-eligible.

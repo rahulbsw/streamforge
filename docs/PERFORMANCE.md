@@ -10,10 +10,37 @@ StreamForge performance depends on payload size, partition count, broker and
 network latency, filter and transform complexity, destination fan-out, delivery
 semantics, and available CPU and memory.
 
-No headline throughput result is published here. A result belongs in public
-documentation only when it comes from a reproducible end-to-end comparison,
-uses the same workload and delivery guarantees as the comparison target, and
-improves the approved baseline without correctness regressions.
+A throughput result belongs in public documentation only when it comes from a
+reproducible end-to-end run and passes the count, error, warm-up, duration, and
+variance gates below. Comparisons with another implementation additionally
+require the same workload and delivery guarantees.
+
+## Validated sustained baseline
+
+On 2026-07-25, the private AWS harness measured a median output-delivery rate of
+**106,693 messages/second** across three 120-second repetitions. The range was
+106,652–106,799 messages/second with 0.058% coefficient of variation.
+
+| Workload property | Value |
+|---|---|
+| Mode | `partition_ordered` processing with queued delivery |
+| Host | AWS `c7i.2xlarge`, Intel Xeon Platinum 8488C |
+| Parallelism | 8 Kafka partitions, 8 StreamForge threads |
+| Ingress target | 135,000 messages/second |
+| Warm-up | 1,000,000 untimed records per repetition |
+| Timed validation | 16,200,000 records per repetition |
+| Correctness | Exact input, consumed, produced, delivered, and output counts; zero errors |
+| Resource use | 1.124 median mean CPU cores; 137.1 MiB median peak RSS |
+
+The workload was a deterministic passthrough test on commit
+`d848f118e62b41c7605250c69c9da087af688d0c`. It ran in a private subnet with no
+public IP, internet gateway, NAT gateway, load balancer, SSH access, or public
+security-group rule. Terraform destroyed all 45 resources after collection.
+
+This is a StreamForge baseline, not a Java comparison. A matched Java/Rust run
+remains required before making a relative implementation claim. The
+[full result and validation contract](https://github.com/rahulbsw/streamforge/blob/main/docs/benchmarks/results/BENCHMARK_RESULTS.md)
+are retained with the repository evidence.
 
 ## Runtime controls
 

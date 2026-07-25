@@ -17,6 +17,12 @@
 #   BENCHMARK_PROCESSING_MODE        legacy_batch or partition_ordered
 #   BENCHMARK_DELIVERY_MODE          acknowledged or queued
 #   BENCHMARK_MAX_IN_FLIGHT          Queued-delivery bound (default: 10000)
+#   BENCHMARK_EXECUTION_MODE         container or direct (default: container)
+#   BENCHMARK_INGRESS_WORKERS        Parallel producer processes (default: 1)
+#   BENCHMARK_KAFKA_BOOTSTRAP        Broker address for direct execution
+#   BENCHMARK_KAFKA_DATA_DIR         Shared broker data directory in direct mode
+#   BENCHMARK_KAFKA_IMAGE            Pinned image reference in direct mode
+#   BENCHMARK_RUST_VERSION           Build toolchain string when rustc is absent
 #   BENCHMARK_GIT_SHA                Source revision when .git is unavailable
 #   BENCHMARK_GIT_DIRTY              true or false; required with GIT_SHA
 #   CONTAINER_RUNTIME                Container CLI (default: podman)
@@ -39,10 +45,17 @@ METRICS_PORT=${BENCHMARK_METRICS_PORT:-19090}
 PROCESSING_MODE=${BENCHMARK_PROCESSING_MODE:-partition_ordered}
 DELIVERY_MODE=${BENCHMARK_DELIVERY_MODE:-queued}
 MAX_IN_FLIGHT=${BENCHMARK_MAX_IN_FLIGHT:-10000}
+EXECUTION_MODE=${BENCHMARK_EXECUTION_MODE:-container}
+INGRESS_WORKERS=${BENCHMARK_INGRESS_WORKERS:-1}
 CONTAINER_RUNTIME=${CONTAINER_RUNTIME:-podman}
 KAFKA_CONTAINER=${KAFKA_CONTAINER:-benchmark-kafka}
 INGRESS_CONTAINER=${INGRESS_CONTAINER:-benchmark-ingress}
 OUTPUT_CONTAINER=${OUTPUT_CONTAINER:-benchmark-output}
+KAFKA_BOOTSTRAP=${BENCHMARK_KAFKA_BOOTSTRAP:-}
+KAFKA_DATA_DIR=${BENCHMARK_KAFKA_DATA_DIR:-}
+KAFKA_IMAGE_OVERRIDE=${BENCHMARK_KAFKA_IMAGE:-}
+KAFKA_IMAGE_ID_OVERRIDE=${BENCHMARK_KAFKA_IMAGE_ID:-}
+RUST_VERSION_OVERRIDE=${BENCHMARK_RUST_VERSION:-}
 BENCHMARK_GIT_SHA=${BENCHMARK_GIT_SHA:-}
 BENCHMARK_GIT_DIRTY=${BENCHMARK_GIT_DIRTY:-}
 
@@ -57,7 +70,8 @@ for argument in \
     "drain_timeout:$DRAIN_TIMEOUT" \
     "poll_interval_ms:$POLL_INTERVAL_MS" \
     "metrics_port:$METRICS_PORT" \
-    "max_in_flight:$MAX_IN_FLIGHT"; do
+    "max_in_flight:$MAX_IN_FLIGHT" \
+    "ingress_workers:$INGRESS_WORKERS"; do
     name=${argument%%:*}
     value=${argument#*:}
     if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
@@ -65,6 +79,11 @@ for argument in \
         exit 2
     fi
 done
+if [[ "$EXECUTION_MODE" != "container" &&
+      "$EXECUTION_MODE" != "direct" ]]; then
+    echo "error: BENCHMARK_EXECUTION_MODE must be container or direct" >&2
+    exit 2
+fi
 if [[ "$PROCESSING_MODE" != "legacy_batch" &&
       "$PROCESSING_MODE" != "partition_ordered" ]]; then
     echo "error: BENCHMARK_PROCESSING_MODE must be legacy_batch or partition_ordered" >&2
@@ -125,17 +144,39 @@ require_command() {
     fi
 }
 kafka_topics() {
-    "$CONTAINER_RUNTIME" exec "$KAFKA_CONTAINER" \
-        kafka-topics --bootstrap-server localhost:9092 "$@"
+    if [[ "$EXECUTION_MODE" == "direct" ]]; then
+        kafka-topics --bootstrap-server "$KAFKA_BOOTSTRAP" "$@"
+    else
+        "$CONTAINER_RUNTIME" exec "$KAFKA_CONTAINER" \
+            kafka-topics --bootstrap-server localhost:9092 "$@"
+    fi
 }
 topic_end_offset_sum() {
     local topic=$1
-    "$CONTAINER_RUNTIME" exec "$KAFKA_CONTAINER" \
+    if [[ "$EXECUTION_MODE" == "direct" ]]; then
         kafka-get-offsets \
-        --bootstrap-server localhost:9092 \
-        --topic "$topic" \
-        --time -1 2>/dev/null |
-        awk -F: '{ total += $3 } END { printf "%.0f", total + 0 }'
+            --bootstrap-server "$KAFKA_BOOTSTRAP" \
+            --topic "$topic" \
+            --time -1 2>/dev/null |
+            awk -F: '{ total += $3 } END { printf "%.0f", total + 0 }'
+    else
+        "$CONTAINER_RUNTIME" exec "$KAFKA_CONTAINER" \
+            kafka-get-offsets \
+            --bootstrap-server localhost:9092 \
+            --topic "$topic" \
+            --time -1 2>/dev/null |
+            awk -F: '{ total += $3 } END { printf "%.0f", total + 0 }'
+    fi
+}
+topic_data_removed() {
+    local topic=$1
+    if [[ "$EXECUTION_MODE" == "direct" ]]; then
+        ! compgen -G "${KAFKA_DATA_DIR}/${topic}-*" >/dev/null
+    else
+        "$CONTAINER_RUNTIME" exec "$KAFKA_CONTAINER" bash -lc \
+            'shopt -s nullglob; paths=(/var/lib/kafka/data/"$1"-*); ((${#paths[@]} == 0))' \
+            benchmark-delete "$topic"
+    fi
 }
 delete_topics_and_wait() {
     local topics=("$@")
@@ -158,16 +199,12 @@ delete_topics_and_wait() {
     done
     for topic in "${topics[@]}"; do
         while [[ "$SECONDS" -le "$deadline" ]]; do
-            if "$CONTAINER_RUNTIME" exec "$KAFKA_CONTAINER" bash -lc \
-                'shopt -s nullglob; paths=(/var/lib/kafka/data/"$1"-*); ((${#paths[@]} == 0))' \
-                benchmark-delete "$topic"; then
+            if topic_data_removed "$topic"; then
                 break
             fi
             sleep 0.5
         done
-        if ! "$CONTAINER_RUNTIME" exec "$KAFKA_CONTAINER" bash -lc \
-            'shopt -s nullglob; paths=(/var/lib/kafka/data/"$1"-*); ((${#paths[@]} == 0))' \
-            benchmark-delete "$topic"; then
+        if ! topic_data_removed "$topic"; then
             echo "error: timed out reclaiming benchmark topic files: $topic" >&2
             return 1
         fi
@@ -185,11 +222,17 @@ cleanup() {
             wait "$pid" 2>/dev/null || true
         fi
     done
-    "$CONTAINER_RUNTIME" exec "$INGRESS_CONTAINER" \
+    if [[ "$EXECUTION_MODE" == "direct" ]]; then
         pkill -f kafka-console-producer >/dev/null 2>&1 || true
-    "$CONTAINER_RUNTIME" exec "$OUTPUT_CONTAINER" \
         pkill -f 'kafka-consumer-perf-test|kafka-console-consumer' \
-        >/dev/null 2>&1 || true
+            >/dev/null 2>&1 || true
+    else
+        "$CONTAINER_RUNTIME" exec "$INGRESS_CONTAINER" \
+            pkill -f kafka-console-producer >/dev/null 2>&1 || true
+        "$CONTAINER_RUNTIME" exec "$OUTPUT_CONTAINER" \
+            pkill -f 'kafka-consumer-perf-test|kafka-console-consumer' \
+            >/dev/null 2>&1 || true
+    fi
     if [[ -n "$CURRENT_STREAMFORGE_PID" ]] &&
        kill -0 "$CURRENT_STREAMFORGE_PID" 2>/dev/null; then
         kill "$CURRENT_STREAMFORGE_PID" 2>/dev/null || true
@@ -269,7 +312,25 @@ wait_for_warmup() {
     return 1
 }
 
-for command in "$CONTAINER_RUNTIME" curl python3 git rustc awk; do
+REQUIRED_COMMANDS=(curl python3 awk ps)
+if [[ "$EXECUTION_MODE" == "container" ]]; then
+    REQUIRED_COMMANDS+=("$CONTAINER_RUNTIME")
+else
+    REQUIRED_COMMANDS+=(
+        kafka-topics
+        kafka-get-offsets
+        kafka-broker-api-versions
+        kafka-console-producer
+        kafka-consumer-perf-test
+    )
+fi
+if [[ -z "$BENCHMARK_GIT_SHA" ]]; then
+    REQUIRED_COMMANDS+=(git)
+fi
+if [[ -z "$RUST_VERSION_OVERRIDE" ]]; then
+    REQUIRED_COMMANDS+=(rustc)
+fi
+for command in "${REQUIRED_COMMANDS[@]}"; do
     require_command "$command"
 done
 if [[ ! -x "$BINARY" ]]; then
@@ -277,22 +338,41 @@ if [[ ! -x "$BINARY" ]]; then
     echo "build it with: cargo build --release --bin streamforge" >&2
     exit 1
 fi
-for container in "$KAFKA_CONTAINER" "$INGRESS_CONTAINER" "$OUTPUT_CONTAINER"; do
-    if [[ "$("$CONTAINER_RUNTIME" inspect --format '{{.State.Running}}' "$container" 2>/dev/null)" != "true" ]]; then
-        echo "error: required benchmark container is not running: $container" >&2
-        echo "start with: $CONTAINER_RUNTIME compose -f docker-compose.benchmark.yml up -d" >&2
+if [[ "$EXECUTION_MODE" == "container" ]]; then
+    for container in \
+        "$KAFKA_CONTAINER" "$INGRESS_CONTAINER" "$OUTPUT_CONTAINER"; do
+        if [[ "$("$CONTAINER_RUNTIME" inspect --format '{{.State.Running}}' "$container" 2>/dev/null)" != "true" ]]; then
+            echo "error: required benchmark container is not running: $container" >&2
+            echo "start with: $CONTAINER_RUNTIME compose -f docker-compose.benchmark.yml up -d" >&2
+            exit 1
+        fi
+    done
+    if ! "$CONTAINER_RUNTIME" exec "$INGRESS_CONTAINER" \
+        kafka-broker-api-versions --bootstrap-server kafka:29092 \
+        >/dev/null 2>&1; then
+        echo "error: ingress container cannot reach the internal Kafka listener" >&2
         exit 1
     fi
-done
-if ! "$CONTAINER_RUNTIME" exec "$INGRESS_CONTAINER" \
-    kafka-broker-api-versions --bootstrap-server kafka:29092 \
-    >/dev/null 2>&1; then
-    echo "error: ingress container cannot reach the internal Kafka listener" >&2
-    exit 1
-fi
-if [[ "$("$CONTAINER_RUNTIME" port "$KAFKA_CONTAINER" 9092/tcp)" != "127.0.0.1:9092" ]]; then
-    echo "error: Kafka must be published only on 127.0.0.1:9092" >&2
-    exit 1
+    if [[ "$("$CONTAINER_RUNTIME" port "$KAFKA_CONTAINER" 9092/tcp)" != "127.0.0.1:9092" ]]; then
+        echo "error: Kafka must be published only on 127.0.0.1:9092" >&2
+        exit 1
+    fi
+    KAFKA_BOOTSTRAP="kafka:29092"
+else
+    : "${KAFKA_BOOTSTRAP:=127.0.0.1:9092}"
+    if [[ -z "$KAFKA_DATA_DIR" || ! -d "$KAFKA_DATA_DIR" ]]; then
+        echo "error: direct mode requires an existing BENCHMARK_KAFKA_DATA_DIR" >&2
+        exit 1
+    fi
+    if [[ -z "$KAFKA_IMAGE_OVERRIDE" ]]; then
+        echo "error: direct mode requires BENCHMARK_KAFKA_IMAGE" >&2
+        exit 1
+    fi
+    if ! kafka-broker-api-versions \
+        --bootstrap-server "$KAFKA_BOOTSTRAP" >/dev/null 2>&1; then
+        echo "error: direct benchmark runner cannot reach Kafka" >&2
+        exit 1
+    fi
 fi
 if curl --silent --fail --max-time 1 "$METRICS_URL" >/dev/null 2>&1; then
     echo "error: metrics port $METRICS_PORT is already in use" >&2
@@ -324,13 +404,24 @@ elif [[ -r /proc/cpuinfo ]]; then
 else
     CPU_DESCRIPTION=$(uname -m)
 fi
-RUST_VERSION=$(rustc --version)
-KAFKA_IMAGE=$("$CONTAINER_RUNTIME" inspect --format '{{.Config.Image}}' "$KAFKA_CONTAINER")
-KAFKA_IMAGE_ID=$("$CONTAINER_RUNTIME" inspect --format '{{.Image}}' "$KAFKA_CONTAINER")
-CONTAINER_RUNTIME_VERSION=$("$CONTAINER_RUNTIME" --version)
+if [[ -n "$RUST_VERSION_OVERRIDE" ]]; then
+    RUST_VERSION=$RUST_VERSION_OVERRIDE
+else
+    RUST_VERSION=$(rustc --version)
+fi
+if [[ "$EXECUTION_MODE" == "direct" ]]; then
+    KAFKA_IMAGE=$KAFKA_IMAGE_OVERRIDE
+    KAFKA_IMAGE_ID=${KAFKA_IMAGE_ID_OVERRIDE:-$KAFKA_IMAGE_OVERRIDE}
+    CONTAINER_RUNTIME_VERSION="ecs-direct"
+else
+    KAFKA_IMAGE=$("$CONTAINER_RUNTIME" inspect --format '{{.Config.Image}}' "$KAFKA_CONTAINER")
+    KAFKA_IMAGE_ID=$("$CONTAINER_RUNTIME" inspect --format '{{.Image}}' "$KAFKA_CONTAINER")
+    CONTAINER_RUNTIME_VERSION=$("$CONTAINER_RUNTIME" --version)
+fi
 CONTAINER_VM_CPUS=0
 CONTAINER_VM_MEMORY_MIB=0
-if [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
+if [[ "$EXECUTION_MODE" == "container" &&
+      "$CONTAINER_RUNTIME" == "podman" ]]; then
     CONTAINER_VM_CPUS=$(
         "$CONTAINER_RUNTIME" machine inspect --format '{{.Resources.CPUs}}'
     )
@@ -343,6 +434,11 @@ log "results: $RESULTS_DIR"
 log "measurement: ${DURATION_SECONDS}s x ${REPETITIONS} repetition(s)"
 log "ingress target: ${INGRESS_TARGET_RATE} msg/s (0 means unbounded)"
 log "startup and warm-up are outside the shared measurement barrier"
+
+JOB_MODE_ARGS=()
+if [[ "$EXECUTION_MODE" == "direct" ]]; then
+    JOB_MODE_ARGS+=(--direct)
+fi
 
 repetition=1
 while [[ "$repetition" -le "$REPETITIONS" ]]; do
@@ -403,7 +499,8 @@ while [[ "$repetition" -le "$REPETITIONS" ]]; do
 
     python3 "$OUTPUT_JOB" \
         --runtime "$CONTAINER_RUNTIME" --container "$OUTPUT_CONTAINER" \
-        --bootstrap kafka:29092 --topic "$OUTPUT_TOPIC" \
+        "${JOB_MODE_ARGS[@]}" \
+        --bootstrap "$KAFKA_BOOTSTRAP" --topic "$OUTPUT_TOPIC" \
         --group "$OBSERVER_GROUP" --warmup-messages "$WARMUP_MESSAGES" \
         --ready "$OBSERVER_READY" \
         --start-signal "$START_SIGNAL" --ingress-result "$INGRESS_RESULT" \
@@ -425,7 +522,9 @@ while [[ "$repetition" -le "$REPETITIONS" ]]; do
 
     python3 "$INGRESS_JOB" \
         --runtime "$CONTAINER_RUNTIME" --container "$INGRESS_CONTAINER" \
-        --bootstrap kafka:29092 --topic "$INPUT_TOPIC" --payload "$DATA_FILE" \
+        "${JOB_MODE_ARGS[@]}" \
+        --bootstrap "$KAFKA_BOOTSTRAP" --topic "$INPUT_TOPIC" \
+        --payload "$DATA_FILE" --workers "$INGRESS_WORKERS" \
         --warmup-messages "$WARMUP_MESSAGES" --ready "$INGRESS_READY" \
         --warmup-signal "$WARMUP_SIGNAL" --warmup-result "$INGRESS_WARMUP" \
         --start-signal "$START_SIGNAL" --result "$INGRESS_RESULT" \
