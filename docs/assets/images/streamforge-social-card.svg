@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">StreamForge</title>
+  <desc id="desc">Selective replication for Kafka. Shape the stream before it lands.</desc>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#54d9ee" stroke-opacity=".055"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" x2="1">
+      <stop offset="0" stop-color="#54d9ee"/>
+      <stop offset="1" stop-color="#54d9ee" stop-opacity=".22"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="#0b1117"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect x="74" y="68" width="58" height="58" rx="13" fill="#111b24" stroke="#273843"/>
+  <path d="M86 84h13c5 0 7 4 7 9v8c0 5 3 9 8 9h8M86 97h10M86 112h13c5 0 7-4 7-9v-8c0-5 3-9 8-9h8" fill="none" stroke="#54d9ee" stroke-width="3.5" stroke-linecap="round"/>
+  <rect x="102" y="92" width="9" height="11" rx="2.5" fill="#ff7456"/>
+  <text x="153" y="108" fill="#e8f0f5" font-family="Arial, Helvetica, sans-serif" font-size="33" font-weight="700">StreamForge</text>
+  <text x="74" y="260" fill="#e8f0f5" font-family="Arial, Helvetica, sans-serif" font-size="77" font-weight="750" letter-spacing="-3">Shape the stream</text>
+  <text x="74" y="340" fill="#ffad99" font-family="Arial, Helvetica, sans-serif" font-size="77" font-weight="750" letter-spacing="-3">before it lands.</text>
+  <text x="76" y="407" fill="#91a4b1" font-family="Arial, Helvetica, sans-serif" font-size="25">Selective replication for Kafka</text>
+  <g transform="translate(742 131)">
+    <rect width="390" height="355" rx="13" fill="#111b24" stroke="#273843"/>
+    <text x="28" y="42" fill="#91a4b1" font-family="monospace" font-size="12" letter-spacing="1">PIPELINE / ORDERS</text>
+    <rect x="28" y="75" width="132" height="48" rx="6" fill="#0b1117" stroke="#314653"/>
+    <text x="42" y="94" fill="#54d9ee" font-family="monospace" font-size="9">SOURCE</text>
+    <text x="42" y="111" fill="#e8f0f5" font-family="monospace" font-size="12">raw-orders</text>
+    <path d="M94 123v42h101" fill="none" stroke="url(#fade)" stroke-width="2"/>
+    <rect x="150" y="164" width="210" height="58" rx="6" fill="#0b1117" stroke="#ff7456"/>
+    <text x="165" y="185" fill="#ffad99" font-family="monospace" font-size="9">TRANSFORM</text>
+    <text x="165" y="207" fill="#e8f0f5" font-family="monospace" font-size="11">construct(order_id=$order_id)</text>
+    <path d="M255 222v43M255 265H91v32M255 265h88v32" fill="none" stroke="url(#fade)" stroke-width="2"/>
+    <rect x="28" y="296" width="166" height="36" rx="6" fill="#0b1117" stroke="#314653"/>
+    <rect x="221" y="296" width="139" height="36" rx="6" fill="#0b1117" stroke="#314653"/>
+    <text x="40" y="319" fill="#e8f0f5" font-family="monospace" font-size="10">analytics-orders</text>
+    <text x="233" y="319" fill="#e8f0f5" font-family="monospace" font-size="10">pii-safe</text>
+  </g>
+  <rect x="74" y="542" width="1058" height="1" fill="#273843"/>
+  <text x="74" y="580" fill="#54d9ee" font-family="monospace" font-size="13" letter-spacing="2">RUST-NATIVE · KAFKA-FIRST · APACHE 2.0</text>
+</svg>

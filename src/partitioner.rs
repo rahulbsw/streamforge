@@ -2,17 +2,34 @@ use serde_json::Value;
 
 /// Partitioning strategy for Kafka messages
 pub trait Partitioner: Send + Sync {
-    /// Determine partition for a message
-    fn partition(&self, topic: &str, key: &Value, value: &Value, num_partitions: i32) -> i32;
+    /// Determine an explicit partition for a message.
+    ///
+    /// Returning `None` delegates partition selection to librdkafka.
+    fn partition(
+        &self,
+        topic: &str,
+        key: Option<&Value>,
+        value: &Value,
+        num_partitions: i32,
+    ) -> Option<i32>;
 }
 
 /// Default partitioner - uses hash of key
 pub struct DefaultPartitioner;
 
 impl Partitioner for DefaultPartitioner {
-    fn partition(&self, _topic: &str, key: &Value, _value: &Value, num_partitions: i32) -> i32 {
+    fn partition(
+        &self,
+        _topic: &str,
+        key: Option<&Value>,
+        _value: &Value,
+        num_partitions: i32,
+    ) -> Option<i32> {
+        // Let librdkafka's sticky/default partitioner distribute keyless records.
+        let key = key?;
+
         if num_partitions <= 0 {
-            return 0;
+            return Some(0);
         }
 
         let hash = if let Some(key_str) = key.as_str() {
@@ -21,7 +38,7 @@ impl Partitioner for DefaultPartitioner {
             Self::hash_string(&key.to_string())
         };
 
-        (hash % num_partitions as u64) as i32
+        Some((hash % num_partitions as u64) as i32)
     }
 }
 
@@ -61,15 +78,21 @@ impl FieldPartitioner {
 }
 
 impl Partitioner for FieldPartitioner {
-    fn partition(&self, _topic: &str, _key: &Value, value: &Value, num_partitions: i32) -> i32 {
+    fn partition(
+        &self,
+        _topic: &str,
+        _key: Option<&Value>,
+        value: &Value,
+        num_partitions: i32,
+    ) -> Option<i32> {
         if num_partitions <= 0 {
-            return 0;
+            return Some(0);
         }
 
         if let Some(field_value) = self.extract_value(value) {
-            (field_value.abs() % num_partitions as i64) as i32
+            Some((field_value.abs() % num_partitions as i64) as i32)
         } else {
-            0 // Default partition if extraction fails
+            Some(0) // Default partition if extraction fails
         }
     }
 }
@@ -85,8 +108,28 @@ mod tests {
         let key = json!("test-key");
         let value = json!({"message": "test"});
 
-        let partition = partitioner.partition("test-topic", &key, &value, 10);
+        let partition = partitioner
+            .partition("test-topic", Some(&key), &value, 10)
+            .unwrap();
         assert!((0..10).contains(&partition));
+    }
+
+    #[test]
+    fn test_default_partitioner_delegates_keyless_messages() {
+        let partitioner = DefaultPartitioner;
+        let value = json!({"message": "test"});
+
+        assert_eq!(partitioner.partition("test-topic", None, &value, 10), None);
+    }
+
+    #[test]
+    fn test_default_partitioner_preserves_explicit_null_key_hashing() {
+        let partitioner = DefaultPartitioner;
+        let key = Value::Null;
+        let value = json!({"message": "test"});
+
+        let partition = partitioner.partition("test-topic", Some(&key), &value, 10);
+        assert!(matches!(partition, Some(0..=9)));
     }
 
     #[test]
@@ -95,8 +138,8 @@ mod tests {
         let key = json!("test-key");
         let value = json!({"message": {"confId": 12345}});
 
-        let partition = partitioner.partition("test-topic", &key, &value, 10);
-        assert_eq!(partition, 5); // 12345 % 10 = 5
+        let partition = partitioner.partition("test-topic", Some(&key), &value, 10);
+        assert_eq!(partition, Some(5)); // 12345 % 10 = 5
     }
 
     #[test]
@@ -104,7 +147,15 @@ mod tests {
         let partitioner = FieldPartitioner::new("/data/user/id".to_string());
         let value = json!({"data": {"user": {"id": 789}}});
 
-        let partition = partitioner.partition("test", &json!(null), &value, 10);
-        assert_eq!(partition, 9); // 789 % 10 = 9
+        let partition = partitioner.partition("test", None, &value, 10);
+        assert_eq!(partition, Some(9)); // 789 % 10 = 9
+    }
+
+    #[test]
+    fn test_field_partitioner_remains_explicit_when_field_is_missing() {
+        let partitioner = FieldPartitioner::new("/data/user/id".to_string());
+        let value = json!({"data": {}});
+
+        assert_eq!(partitioner.partition("test", None, &value, 10), Some(0));
     }
 }

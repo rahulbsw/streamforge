@@ -122,6 +122,7 @@ Useful metrics:
 
 - `streamforge_messages_consumed_total`
 - `streamforge_messages_produced_total`
+- `streamforge_messages_delivered_total`
 - `streamforge_messages_filtered_total`
 - `streamforge_consumer_lag`
 - `streamforge_processing_duration_seconds`

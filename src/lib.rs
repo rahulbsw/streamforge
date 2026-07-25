@@ -14,6 +14,7 @@ pub mod jsonpath;
 pub mod kafka;
 pub mod metrics;
 pub mod observability;
+pub mod partition_pipeline;
 pub mod partitioner;
 pub mod processor;
 pub mod processor_with_retry;
@@ -28,7 +29,8 @@ pub use config::{
     AggregationConfig, AggregationGroupBy, AggregationMetricConfig, AggregationOp,
     AggregationWindowConfig, AggregationWindowType, CacheBackendConfig, CacheBackendType,
     CommitMode, CommitStrategyConfig, DestinationConfig, HeaderTransformConfig, KafkaCacheConfig,
-    LocalCacheConfig, MirrorMakerConfig, RedisCacheConfig, RoutingConfig,
+    LocalCacheConfig, MirrorMakerConfig, PerformanceConfig, ProcessingMode, ProducerDeliveryMode,
+    RedisCacheConfig, RoutingConfig,
 };
 pub use dlq::{DeadLetterQueue, DlqConfig, DlqMessage};
 pub use envelope::MessageEnvelope;

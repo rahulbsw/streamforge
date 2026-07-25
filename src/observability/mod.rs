@@ -4,4 +4,4 @@ pub mod server;
 
 pub use lag_monitor::start_lag_monitor;
 pub use metrics::{labels, register_metrics, METRICS};
-pub use server::start_metrics_server;
+pub use server::{start_metrics_server, start_metrics_server_on};

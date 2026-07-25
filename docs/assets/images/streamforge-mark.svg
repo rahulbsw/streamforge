@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">StreamForge mark</title>
+  <desc id="desc">Three stream paths pass through a coral transform node and become one output path.</desc>
+  <rect width="64" height="64" rx="14" fill="#0b1117"/>
+  <path d="M9 18h15c6 0 8 5 8 10v8c0 6 3 10 9 10h14" fill="none" stroke="#54d9ee" stroke-width="4" stroke-linecap="round"/>
+  <path d="M9 32h12" fill="none" stroke="#54d9ee" stroke-width="4" stroke-linecap="round"/>
+  <path d="M9 46h15c6 0 8-5 8-10v-8c0-6 3-10 9-10h14" fill="none" stroke="#54d9ee" stroke-width="4" stroke-linecap="round" opacity=".65"/>
+  <rect x="27" y="26" width="10" height="12" rx="3" fill="#ff7456"/>
+  <circle cx="55" cy="46" r="3" fill="#a3eff8"/>
+</svg>

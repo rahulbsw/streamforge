@@ -1,563 +1,201 @@
 ---
 title: Security
-nav_order: 10
-parent: Deployment
+nav_order: 2
+parent: Operations
 ---
 
-# Security Configuration Guide
+# Security
 
-Complete guide for securing Kafka connections with SSL/TLS encryption and SASL authentication.
+StreamForge maps its top-level `security` configuration to librdkafka for both
+the source consumer and destination producer. Secure the configuration file,
+Kafka authorization, network path, container, and observability endpoint as one
+system.
 
-## Table of Contents
+## Supported configuration
 
-- [Overview](#overview)
-- [Security Protocols](#security-protocols)
-- [SSL/TLS Encryption](#ssltls-encryption)
-- [SASL Authentication](#sasl-authentication)
-- [Cloud Provider Examples](#cloud-provider-examples)
-- [Troubleshooting](#troubleshooting)
-- [Best Practices](#best-practices)
+The runtime schema accepts:
 
----
+- `PLAINTEXT`
+- `SSL`
+- `SASL_PLAINTEXT`
+- `SASL_SSL`
+- SASL mechanisms `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, `GSSAPI`, and
+  `OAUTHBEARER`
 
-## Overview
+Actual availability also depends on the linked librdkafka build and broker
+configuration. Validate the mechanism in the target environment before
+production use.
 
-StreamForge supports all standard Kafka security features:
+Use `SSL` or `SASL_SSL` on untrusted networks. `PLAINTEXT` and
+`SASL_PLAINTEXT` do not protect message data in transit.
 
-| Feature | Support | Use Case |
-|---------|---------|----------|
-| **SSL/TLS** | ✅ Full | Encrypted connections |
-| **Mutual TLS** | ✅ Full | Certificate-based authentication |
-| **SASL/PLAIN** | ✅ Full | Username/password (simple) |
-| **SASL/SCRAM-SHA-256** | ✅ Full | Username/password (secure) |
-| **SASL/SCRAM-SHA-512** | ✅ Full | Username/password (more secure) |
-| **SASL/GSSAPI** | ✅ Full | Kerberos authentication |
-| **SASL/OAUTHBEARER** | ✅ Full | OAuth 2.0 token authentication |
+## TLS
 
----
-
-## Security Protocols
-
-Kafka supports four security protocols:
-
-### 1. PLAINTEXT (Default)
-No encryption, no authentication. **Not recommended for production.**
-
-```yaml
-# No security configuration needed
-appid: mirrormaker
-bootstrap: kafka:9092
-```
-
-### 2. SSL
-Encryption only, optional certificate-based authentication (mutual TLS).
+Broker verification:
 
 ```yaml
 security:
   protocol: SSL
   ssl:
-    ca_location: /path/to/ca-cert.pem
-```
-
-### 3. SASL_PLAINTEXT
-Authentication without encryption. **Not recommended for production.**
-
-```yaml
-security:
-  protocol: SASL_PLAINTEXT
-  sasl:
-    mechanism: PLAIN
-    username: user
-    password: pass
-```
-
-### 4. SASL_SSL (Recommended)
-Both encryption (SSL) and authentication (SASL).
-
-```yaml
-security:
-  protocol: SASL_SSL
-  ssl:
-    ca_location: /path/to/ca-cert.pem
-  sasl:
-    mechanism: SCRAM-SHA-256
-    username: user
-    password: pass
-```
-
----
-
-## SSL/TLS Encryption
-
-### Simple SSL (One-Way TLS)
-
-Client verifies broker's certificate:
-
-```yaml
-security:
-  protocol: SSL
-  ssl:
-    # CA certificate to verify broker
-    ca_location: /path/to/ca-cert.pem
-
-    # Verify broker hostname (recommended)
+    ca_location: /run/streamforge/tls/ca.pem
     endpoint_identification_algorithm: https
 ```
 
-**Use Case:** Basic encryption for data in transit.
-
-### Mutual TLS (mTLS)
-
-Both client and broker verify each other:
+Mutual TLS:
 
 ```yaml
 security:
   protocol: SSL
   ssl:
-    # CA certificate to verify broker
-    ca_location: /path/to/ca-cert.pem
-
-    # Client certificate for authentication
-    certificate_location: /path/to/client-cert.pem
-    key_location: /path/to/client-key.pem
-    key_password: optional-key-password
-
-    # Verify broker hostname
+    ca_location: /run/streamforge/tls/ca.pem
+    certificate_location: /run/streamforge/tls/client.pem
+    key_location: /run/streamforge/tls/client-key.pem
     endpoint_identification_algorithm: https
 ```
 
-**Use Case:** Certificate-based authentication, high security environments.
+Mount CA, certificate, and private-key files read-only. Restrict the private key
+to the StreamForge runtime identity. Do not disable hostname verification as a
+production workaround.
 
-### Generating SSL Certificates
+## SASL over TLS
 
-```bash
-# Generate CA certificate
-openssl req -new -x509 -keyout ca-key.pem -out ca-cert.pem -days 365
-
-# Generate client key and certificate
-openssl req -new -keyout client-key.pem -out client-cert-req.pem -days 365
-openssl x509 -req -in client-cert-req.pem -CA ca-cert.pem -CAkey ca-key.pem \
-  -CAcreateserial -out client-cert.pem -days 365
-```
-
----
-
-## SASL Authentication
-
-### SASL/PLAIN
-
-Simple username/password authentication:
-
-```yaml
-security:
-  protocol: SASL_SSL  # Always use SSL with PLAIN
-  ssl:
-    ca_location: /path/to/ca-cert.pem
-  sasl:
-    mechanism: PLAIN
-    username: your-username
-    password: your-password
-```
-
-**Pros:**
-- ✅ Simple to configure
-- ✅ Works with most Kafka brokers
-
-**Cons:**
-- ⚠️ Password transmitted in plain text (must use SSL!)
-- ⚠️ Less secure than SCRAM
-
-**Use Case:** Development, testing, Confluent Cloud.
-
-### SASL/SCRAM-SHA-256
-
-Secure Challenge-Response Authentication Mechanism:
+SCRAM example:
 
 ```yaml
 security:
   protocol: SASL_SSL
   ssl:
-    ca_location: /path/to/ca-cert.pem
-  sasl:
-    mechanism: SCRAM-SHA-256
-    username: your-username
-    password: your-password
-```
-
-**Pros:**
-- ✅ Password never transmitted over network
-- ✅ Mutual authentication
-- ✅ Replay attack protection
-
-**Use Case:** Modern Kafka clusters, AWS MSK, production environments.
-
-### SASL/SCRAM-SHA-512
-
-More secure variant of SCRAM:
-
-```yaml
-security:
-  protocol: SASL_SSL
-  ssl:
-    ca_location: /path/to/ca-cert.pem
-  sasl:
-    mechanism: SCRAM-SHA-512  # Changed from SHA-256
-    username: your-username
-    password: your-password
-```
-
-**Use Case:** High-security environments requiring stronger hashing.
-
-### SASL/GSSAPI (Kerberos)
-
-Enterprise authentication with Kerberos:
-
-```yaml
-security:
-  protocol: SASL_SSL
-  ssl:
-    ca_location: /path/to/ca-cert.pem
-  sasl:
-    mechanism: GSSAPI
-    kerberos_service_name: kafka
-    kerberos_principal: client@EXAMPLE.COM
-    kerberos_keytab: /path/to/client.keytab
-```
-
-**Prerequisites:**
-1. Install Kerberos libraries:
-   ```bash
-   # Ubuntu/Debian
-   apt-get install libkrb5-dev
-
-   # RHEL/CentOS
-   yum install krb5-devel
-   ```
-
-2. Configure `/etc/krb5.conf`:
-   ```ini
-   [libdefaults]
-     default_realm = EXAMPLE.COM
-
-   [realms]
-     EXAMPLE.COM = {
-       kdc = kdc.example.com
-       admin_server = admin.example.com
-     }
-   ```
-
-3. Test Kerberos:
-   ```bash
-   kinit -kt /path/to/client.keytab client@EXAMPLE.COM
-   klist  # Verify ticket
-   ```
-
-**Use Case:** Enterprise Hadoop/Kafka clusters, legacy systems.
-
----
-
-## Cloud Provider Examples
-
-### Confluent Cloud
-
-```yaml
-appid: mirrormaker-confluent
-bootstrap: pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
-input: source-topic
-output: destination-topic
-
-security:
-  protocol: SASL_SSL
-  sasl:
-    mechanism: PLAIN
-    username: <API_KEY>
-    password: <API_SECRET>
-```
-
-**How to get credentials:**
-1. Go to Confluent Cloud Console
-2. Select your cluster
-3. API Keys → Create Key
-4. Copy API Key (username) and Secret (password)
-
-### AWS MSK (Managed Streaming for Kafka)
-
-#### Option 1: SASL/SCRAM
-
-```yaml
-appid: mirrormaker-msk
-bootstrap: b-1.msk-cluster.xxxxx.kafka.us-east-1.amazonaws.com:9096
-input: source-topic
-output: destination-topic
-
-security:
-  protocol: SASL_SSL
+    ca_location: /run/streamforge/tls/ca.pem
+    endpoint_identification_algorithm: https
   sasl:
     mechanism: SCRAM-SHA-512
-    username: <SECRET_USERNAME>
-    password: <SECRET_PASSWORD>
+    username: rendered-at-runtime
+    password: rendered-at-runtime
 ```
 
-**How to set up:**
-1. Create secret in AWS Secrets Manager
-2. Associate secret with MSK cluster
-3. Use secret values as username/password
+PLAIN transmits credentials inside the TLS session and must not be used without
+TLS. GSSAPI requires a compatible librdkafka build and Kerberos environment.
+OAUTHBEARER token lifecycle must be tested for the exact client and broker; a
+static token in a long-running file is not a rotation strategy.
 
-#### Option 2: IAM Authentication
+## Secret injection
+
+StreamForge does not interpolate `${ENVIRONMENT_VARIABLE}` placeholders in
+configuration values. A secret manager or entrypoint must render a protected
+configuration file before StreamForge starts.
+
+Safe patterns include:
+
+- mounting a complete secret-bearing configuration from a Kubernetes `Secret`;
+- rendering into a memory-backed volume from an approved secret sidecar;
+- mounting a protected host file into a container read-only;
+- rotating the rendered file and performing a controlled restart.
+
+Do not:
+
+- commit credentials, tokens, private keys, or a rendered configuration;
+- put a secret-bearing configuration in a Kubernetes `ConfigMap`;
+- print the configuration in CI logs or diagnostics;
+- pass passwords on a shell command line;
+- use example or default credentials.
+
+Ensure temporary rendered files are excluded from backups and removed according
+to the platform secret-handling policy.
+
+## Different source and destination credentials
+
+The top-level `security` block is applied to both Kafka clients. When the source
+and destination require different settings, explicit `consumer_properties` and
+`producer_properties` can override the generated librdkafka properties:
 
 ```yaml
-appid: mirrormaker-msk-iam
-bootstrap: b-1.msk-cluster.xxxxx.kafka.us-east-1.amazonaws.com:9098
-input: source-topic
-output: destination-topic
+security:
+  protocol: SASL_SSL
+  ssl:
+    ca_location: /run/streamforge/tls/ca.pem
+    endpoint_identification_algorithm: https
 
-# For IAM auth, use custom properties
 consumer_properties:
-  security.protocol: SASL_SSL
-  sasl.mechanism: AWS_MSK_IAM
-  sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
-  sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+  sasl.mechanism: SCRAM-SHA-512
+  sasl.username: rendered-source-user
+  sasl.password: rendered-source-password
 
 producer_properties:
-  security.protocol: SASL_SSL
-  sasl.mechanism: AWS_MSK_IAM
-  sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
-  sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+  sasl.mechanism: SCRAM-SHA-512
+  sasl.username: rendered-destination-user
+  sasl.password: rendered-destination-password
 ```
 
-### Azure Event Hubs (Kafka Protocol)
+These values are still secrets and require the same protected rendering process.
+Validate the full configuration without exposing it in logs.
 
-```yaml
-appid: mirrormaker-eventhubs
-bootstrap: <NAMESPACE>.servicebus.windows.net:9093
-input: source-topic
-output: destination-topic
+Do not copy Java callback-handler or JAAS properties into this Rust client.
+Provider-specific authentication is supported only when the linked librdkafka
+client and StreamForge configuration have been explicitly tested for that
+provider.
 
-security:
-  protocol: SASL_SSL
-  sasl:
-    mechanism: PLAIN
-    username: $ConnectionString
-    password: Endpoint=sb://<NAMESPACE>.servicebus.windows.net/;SharedAccessKeyName=<KEY_NAME>;SharedAccessKey=<KEY>
-```
+## Kafka authorization
 
----
+Grant only the resources used by a pipeline:
 
-## Troubleshooting
+- source topic `READ` and metadata access;
+- consumer group access for the configured `appid`;
+- destination topic `WRITE` and metadata access;
+- DLQ topic `WRITE` when enabled;
+- any additional permissions required by the broker's authorization model.
 
-### SSL Certificate Issues
+Use a separate principal per environment and, where practical, per pipeline.
+Avoid wildcard topic and consumer-group grants.
 
-**Problem:** `SSL handshake failed`
+## Network controls
 
-**Solutions:**
-1. Verify CA certificate path:
-   ```bash
-   openssl verify -CAfile ca-cert.pem broker-cert.pem
-   ```
+- Keep Kafka listeners on private subnets or cluster networks.
+- Restrict StreamForge egress to Kafka, DNS, secret services, and required
+  telemetry.
+- Do not create public broker listeners for troubleshooting.
+- Keep `/metrics` and `/health` private; they have no authentication or TLS.
+- Prefer loopback port forwarding or a private monitoring network for
+  diagnostics.
 
-2. Check certificate expiration:
-   ```bash
-   openssl x509 -in ca-cert.pem -noout -dates
-   ```
+If temporary remote access is unavoidable, allow only the operator's verified
+IP at the network boundary and remove the rule immediately after use.
 
-3. Disable hostname verification (testing only):
-   ```yaml
-   ssl:
-     endpoint_identification_algorithm: ""
-   ```
+## Containers and Kubernetes
 
-### SASL Authentication Issues
+- Run as a non-root identity.
+- Drop Linux capabilities and disable privilege escalation.
+- Use a read-only root filesystem with an explicit temporary filesystem.
+- Mount configuration and key material read-only.
+- Use `ClusterIP` services and restrictive `NetworkPolicy`.
+- Avoid `NodePort`, public `LoadBalancer`, and internet-facing `Ingress`.
+- Review service-account and operator RBAC from rendered manifests.
 
-**Problem:** `Authentication failed`
+The current Kubernetes operator mounts referenced secrets but does not emit CR
+security fields into its generated runtime configuration. Use a directly
+managed Deployment for secured Kafka connections until that path is implemented
+and verified. See [Kubernetes](KUBERNETES.md).
 
-**Solutions:**
-1. Verify credentials are correct
-2. Check SASL mechanism matches broker configuration
-3. For SCRAM, ensure user exists on broker:
-   ```bash
-   kafka-configs.sh --bootstrap-server kafka:9092 \
-     --describe --entity-type users
-   ```
+## Verification
 
-### Kerberos Issues
+Before production:
 
-**Problem:** `GSSAPI authentication failed`
+1. validate the rendered configuration without printing it;
+2. confirm the process identity can read only the required files;
+3. verify broker hostname validation and certificate chain;
+4. verify source read, group, destination write, and DLQ permissions separately;
+5. confirm an unauthorized topic access is denied;
+6. test credential and certificate rotation;
+7. confirm metrics and health are unreachable from outside the private network;
+8. inspect logs and diagnostic bundles for secret leakage.
 
-**Solutions:**
-1. Verify Kerberos ticket:
-   ```bash
-   klist -e
-   ```
-
-2. Check keytab:
-   ```bash
-   klist -kt client.keytab
-   ```
-
-3. Test kinit:
-   ```bash
-   kinit -kt client.keytab client@EXAMPLE.COM
-   ```
-
-4. Check service name matches broker configuration
-
-### Connection Timeout
-
-**Problem:** Connection times out
-
-**Solutions:**
-1. Verify broker hostname/port
-2. Check firewall rules allow port (9093, 9094, etc.)
-3. Verify security group rules (cloud providers)
-4. Test with openssl:
-   ```bash
-   openssl s_client -connect kafka:9093
-   ```
-
----
-
-## Best Practices
-
-### 1. Always Use Encryption
-
-✅ **Do:**
-```yaml
-security:
-  protocol: SASL_SSL  # SSL encryption enabled
-```
-
-❌ **Don't:**
-```yaml
-security:
-  protocol: SASL_PLAINTEXT  # No encryption!
-```
-
-### 2. Secure Credential Storage
-
-✅ **Do:** Use environment variables or secret management
-```bash
-export KAFKA_USERNAME="myuser"
-export KAFKA_PASSWORD="mypass"
-```
-
-❌ **Don't:** Store passwords in configuration files
-```yaml
-sasl:
-  password: "plaintext-password-in-git"  # Bad!
-```
-
-### 3. Use Strong Authentication
-
-**Security Ranking:**
-1. 🥇 Mutual TLS (mTLS) - Best
-2. 🥈 SASL/SCRAM-SHA-512 - Very Good
-3. 🥉 SASL/SCRAM-SHA-256 - Good
-4. ⚠️ SASL/PLAIN - Acceptable with SSL
-5. ❌ PLAINTEXT - Never use in production
-
-### 4. Certificate Management
-
-- ✅ Rotate certificates regularly (90 days recommended)
-- ✅ Use separate certificates for each service
-- ✅ Monitor certificate expiration
-- ✅ Keep private keys secure (chmod 600)
-
-### 5. Network Security
-
-- ✅ Use VPN or private networks for Kafka traffic
-- ✅ Restrict broker access with firewall rules
-- ✅ Use separate security groups for Kafka
-- ✅ Enable VPC peering for cross-account access (AWS)
-
-### 6. Monitoring
-
-Monitor these metrics:
-- Authentication failures
-- SSL handshake errors
-- Certificate expiration warnings
-- Connection timeouts
-
-### 7. Testing
-
-Test security configuration before production:
+Useful certificate checks:
 
 ```bash
-# Test SSL connection
-openssl s_client -connect kafka:9093 -CAfile ca-cert.pem
-
-# Test with kafkacat
-kafkacat -b kafka:9093 -L \
-  -X security.protocol=SASL_SSL \
-  -X sasl.mechanism=SCRAM-SHA-256 \
-  -X sasl.username=user \
-  -X sasl.password=pass
-
-# Test with MirrorMaker
-CONFIG_FILE=examples/config.security-sasl-scram.yaml cargo run
+openssl x509 -in /run/streamforge/tls/ca.pem -noout -subject -issuer -dates
+openssl verify \
+  -CAfile /run/streamforge/tls/ca.pem \
+  /run/streamforge/tls/client.pem
 ```
 
----
-
-## Configuration Examples
-
-All security examples are in the `examples/` folder:
-
-- **[config.security-ssl.yaml](../examples/configs/config.security-ssl.yaml)** - SSL/TLS encryption
-- **[config.security-sasl-plain.yaml](../examples/configs/config.security-sasl-plain.yaml)** - SASL/PLAIN authentication
-- **[config.security-sasl-scram.yaml](../examples/configs/config.security-sasl-scram.yaml)** - SASL/SCRAM authentication
-- **[config.security-kerberos.yaml](../examples/configs/config.security-kerberos.yaml)** - Kerberos authentication
-
----
-
-## References
-
-### Official Documentation
-- [Kafka Security](https://kafka.apache.org/documentation/#security)
-- [librdkafka Configuration](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md)
-- [Confluent Security](https://docs.confluent.io/platform/current/security/index.html)
-
-### Cloud Provider Guides
-- [AWS MSK Security](https://docs.aws.amazon.com/msk/latest/developerguide/security.html)
-- [Azure Event Hubs Kafka](https://docs.microsoft.com/en-us/azure/event-hubs/event-hubs-for-kafka-ecosystem-overview)
-- [Confluent Cloud](https://docs.confluent.io/cloud/current/security/index.html)
-
----
-
-## Quick Reference
-
-### Security Configuration Template
-
-```yaml
-security:
-  # Protocol: PLAINTEXT | SSL | SASL_PLAINTEXT | SASL_SSL
-  protocol: SASL_SSL
-
-  # SSL Configuration (for SSL or SASL_SSL)
-  ssl:
-    ca_location: /path/to/ca-cert.pem
-    certificate_location: /path/to/client-cert.pem  # Optional (mTLS)
-    key_location: /path/to/client-key.pem          # Optional (mTLS)
-    key_password: key-password                      # Optional
-    endpoint_identification_algorithm: https        # Optional
-
-  # SASL Configuration (for SASL_PLAINTEXT or SASL_SSL)
-  sasl:
-    # Mechanism: PLAIN | SCRAM-SHA-256 | SCRAM-SHA-512 | GSSAPI | OAUTHBEARER
-    mechanism: SCRAM-SHA-256
-
-    # For PLAIN/SCRAM
-    username: your-username
-    password: your-password
-
-    # For GSSAPI (Kerberos)
-    kerberos_service_name: kafka
-    kerberos_principal: client@REALM
-    kerberos_keytab: /path/to/keytab
-
-    # For OAUTHBEARER
-    oauthbearer_token: your-token
-```
-
----
-
-**Need Help?** Open an issue on GitHub.
+Continue with [Docker](DOCKER.md), [Kubernetes](KUBERNETES.md), and
+[Deployment](DEPLOYMENT.md).

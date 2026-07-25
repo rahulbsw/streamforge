@@ -12,3 +12,19 @@ operator/target
 benchmarks/*.jsonl
 benchmarks/results/live_test_*/
 benchmarks/test_data_*.jsonl
+
+# Codex local configuration
+.codex/
+
+# Claude Flow runtime data
+.claude-flow/data/
+.claude-flow/logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Python caches
+__pycache__/
+*.py[cod]

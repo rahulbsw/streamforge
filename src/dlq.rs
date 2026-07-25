@@ -28,6 +28,7 @@ fn serialize_to_vec<T: serde::Serialize>(value: &T) -> Result<Vec<u8>> {
 
 /// DLQ configuration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct DlqConfig {
     /// Enable DLQ (if false, errors will cause pipeline to halt)
     pub enabled: bool,

@@ -1,20 +1,31 @@
-title: StreamForge Documentation
-description: Selective replication for Kafka, with Redpanda as a compatibility target
-remote_theme: just-the-docs/just-the-docs
-url: "https://github.datasierra.com"
+---
+title: StreamForge
+description: >-
+  Selective Kafka replication with destination-specific filtering,
+  transformation, and redaction.
+remote_theme: just-the-docs/just-the-docs@v0.12.0
+plugins:
+  - jekyll-remote-theme
+  - jekyll-relative-links
+url: "https://rahulbsw.github.io"
 baseurl: "/streamforge"
 
-# Disable Liquid rendering in Markdown to avoid conflicts with
-# Prometheus query syntax {{ $value }}, Go template {{ .Field }},
-# and Helm/Kubernetes template syntax.
+# Prometheus, Go templates, and Helm examples contain Liquid-like braces.
 render_with_liquid: false
 
-# Exclude non-documentation files
+relative_links:
+  enabled: true
+  collections: true
+
+# The Pages source also contains engineering records. Only the curated product
+# documents remain publishable; design history, benchmark evidence, and launch
+# production material stay in the repository but outside the generated site.
 exclude:
   - "*.sh"
   - "archive"
   - "benchmarks"
   - "development"
+  - "marketing"
   - "superpowers"
   - "CONFIG_SCHEMA.json"
   - Gemfile
@@ -37,65 +48,66 @@ exclude:
   - "OBSERVABILITY_METRICS_DESIGN.md"
   - "PARSER_REFACTOR_PLAN.md"
   - "PERFORMANCE_TESTING.md"
+  - "PERFORMANCE_TUNING_RESULTS.md"
   - "PROJECT_SUMMARY.md"
   - "QUICK_REFERENCE.md"
+  - "SCALING.md"
   - "TEST_COVERAGE.md"
   - "TYPED_ENVELOPE_DESIGN.md"
 
-# just-the-docs configuration
 color_scheme: streamforge
+logo: "/assets/images/streamforge-mark.svg"
+favicon_ico: "/assets/images/streamforge-favicon.png"
 
-# Navigation
 nav_sort: case_insensitive
 
 defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
   - scope:
       path: "USAGE.md"
     values:
       has_children: true
   - scope:
-      path: "AGGREGATIONS.md"
+      path: "EXAMPLES.md"
     values:
       parent: "Usage Guide"
-      nav_order: 2
+      nav_order: 1
   - scope:
       path: "ADVANCED_DSL_GUIDE.md"
     values:
       parent: "Usage Guide"
+      nav_order: 2
   - scope:
       path: "YAML_CONFIGURATION.md"
     values:
       parent: "Usage Guide"
+      nav_order: 3
   - scope:
-      path: "DEPLOYMENT.md"
+      path: "AGGREGATIONS.md"
     values:
-      title: Deployment
-      nav_order: 7
-      has_children: true
+      parent: "Usage Guide"
+      nav_order: 4
   - scope:
       path: "DELIVERY_GUARANTEES.md"
     values:
-      title: Delivery Guarantees
-      nav_order: 8
+      parent: "Usage Guide"
+      nav_order: 5
+  - scope:
+      path: "DEPLOYMENT.md"
+    values:
+      has_children: true
   - scope:
       path: "OPERATIONS.md"
     values:
-      title: Operations Runbook
-      parent: "Deployment"
-  - scope:
-      path: "TROUBLESHOOTING.md"
-    values:
-      title: Troubleshooting
-      parent: "Deployment"
+      has_children: true
 
-# Search
 search_enabled: true
 search_tokenizer_separator: /[\s/]+/
+heading_anchors: true
 
-# Footer
-footer_content: "StreamForge — selective replication for Kafka, with Redpanda as a compatibility target. Apache 2.0 Licensed."
-
-# Callouts (for notes/warnings in docs)
 callouts_level: quiet
 callouts:
   highlight:
@@ -111,19 +123,21 @@ callouts:
     title: Warning
     color: red
 
-# Aux nav links
 aux_links:
   "GitHub":
     - "https://github.com/rahulbsw/streamforge"
-  "Quickstart":
-    - "https://github.datasierra.com/streamforge/QUICKSTART"
-  "Compatibility":
-    - "https://github.datasierra.com/streamforge/COMPATIBILITY"
+  "Releases":
+    - "https://github.com/rahulbsw/streamforge/releases"
 aux_links_new_tab: true
 
-# Back to top
+gh_edit_link: true
+gh_edit_link_text: "Edit this page on GitHub"
+gh_edit_repository: "https://github.com/rahulbsw/streamforge"
+gh_edit_branch: "main"
+gh_edit_source: "docs"
+gh_edit_view_mode: "edit"
+
 back_to_top: true
 back_to_top_text: "Back to top"
-
-# Last edit timestamp
-last_edit_time_format: "%b %e %Y at %I:%M %p"
+last_edit_timestamp: true
+last_edit_time_format: "%b %e, %Y"
