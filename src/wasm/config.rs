@@ -130,7 +130,7 @@ impl WasmRuntimeConfig {
             64 * 1024,
             512 * 1024 * 1024,
         )?;
-        if self.max_memory_bytes % (64 * 1024) != 0 {
+        if !self.max_memory_bytes.is_multiple_of(64 * 1024) {
             return Err(
                 "wasm.runtime.max_memory_bytes must be a multiple of the WebAssembly page size (65536)"
                     .into(),
