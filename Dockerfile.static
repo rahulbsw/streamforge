@@ -33,6 +33,7 @@ RUN mkdir -p src && \
 
 # Copy source
 COPY --chown=nonroot src ./src
+COPY --chown=nonroot wit ./wit
 
 # Build static binary
 # Force static linking with RUSTFLAGS

@@ -3,6 +3,8 @@
 //! Wraps any MessageProcessor to add retry logic and dead letter queue
 //! handling according to the error recovery actions defined in error.rs.
 
+use crate::dlq::DlqWriter;
+use crate::error::{DestinationFailure, DestinationFailureDisposition};
 use crate::processor::MessageProcessor;
 use crate::{
     DeadLetterQueue, DlqMessage, MessageEnvelope, MirrorMakerError, RecoveryAction, Result,
@@ -20,7 +22,7 @@ pub struct ProcessorWithRetry {
     retry_policy: RetryPolicy,
 
     /// Dead letter queue handler
-    dlq: Option<Arc<DeadLetterQueue>>,
+    dlq: Option<Arc<dyn DlqWriter>>,
 
     /// Pipeline name (for DLQ metadata)
     pipeline_name: String,
@@ -32,6 +34,20 @@ impl ProcessorWithRetry {
         processor: Arc<dyn MessageProcessor>,
         retry_policy: RetryPolicy,
         dlq: Option<Arc<DeadLetterQueue>>,
+        pipeline_name: String,
+    ) -> Self {
+        let dlq = dlq.map(|writer| writer as Arc<dyn DlqWriter>);
+        Self::new_with_dlq_writer(processor, retry_policy, dlq, pipeline_name)
+    }
+
+    /// Create a processor with an abstract DLQ writer.
+    ///
+    /// This keeps production construction backward compatible while allowing
+    /// policy behavior to be tested without a Kafka broker.
+    pub fn new_with_dlq_writer(
+        processor: Arc<dyn MessageProcessor>,
+        retry_policy: RetryPolicy,
+        dlq: Option<Arc<dyn DlqWriter>>,
         pipeline_name: String,
     ) -> Self {
         Self {
@@ -59,12 +75,19 @@ impl ProcessorWithRetry {
 
         match result {
             Ok(_) => Ok(()),
+            Err(MirrorMakerError::DestinationFailure { failure }) => {
+                self.handle_destination_failures(envelope, vec![*failure])
+                    .await
+            }
+            Err(MirrorMakerError::DestinationFailures { failures }) => {
+                self.handle_destination_failures(envelope, failures).await
+            }
             Err(err) => {
                 // Check recovery action
                 match err.recovery_action() {
                     RecoveryAction::SendToDlq => {
                         // Send to DLQ
-                        self.send_to_dlq(envelope, err).await
+                        self.send_to_dlq(envelope, err, None).await
                     }
                     RecoveryAction::SkipAndLog => {
                         // Log and skip
@@ -98,15 +121,53 @@ impl ProcessorWithRetry {
                             error = %err,
                             "Retry exhausted, sending to DLQ"
                         );
-                        self.send_to_dlq(envelope, err).await
+                        self.send_to_dlq(envelope, err, None).await
                     }
                 }
             }
         }
     }
 
+    async fn handle_destination_failures(
+        &self,
+        envelope: MessageEnvelope,
+        failures: Vec<DestinationFailure>,
+    ) -> Result<()> {
+        let mut fail_fast_failures = Vec::new();
+        for failure in failures {
+            match failure.disposition {
+                DestinationFailureDisposition::DeadLetter => {
+                    let error = MirrorMakerError::DestinationFailure {
+                        failure: Box::new(failure.clone()),
+                    };
+                    self.send_to_dlq(envelope.clone(), error, Some(&failure))
+                        .await?;
+                }
+                DestinationFailureDisposition::FailFast => {
+                    fail_fast_failures.push(failure);
+                }
+            }
+        }
+
+        if !fail_fast_failures.is_empty() {
+            error!(
+                failure_count = fail_fast_failures.len(),
+                "Fatal destination failure after required dead-letter delivery"
+            );
+            return Err(MirrorMakerError::DestinationFailures {
+                failures: fail_fast_failures,
+            });
+        }
+        Ok(())
+    }
+
     /// Send message to dead letter queue
-    async fn send_to_dlq(&self, envelope: MessageEnvelope, error: MirrorMakerError) -> Result<()> {
+    async fn send_to_dlq(
+        &self,
+        envelope: MessageEnvelope,
+        error: MirrorMakerError,
+        failure: Option<&DestinationFailure>,
+    ) -> Result<()> {
         match &self.dlq {
             Some(dlq) => {
                 debug!(
@@ -117,13 +178,17 @@ impl ProcessorWithRetry {
                     "Sending message to DLQ"
                 );
 
+                let (filter, transform) = failure
+                    .map(destination_expression_context)
+                    .unwrap_or((None, None));
                 let dlq_msg = DlqMessage {
                     envelope,
                     error,
                     pipeline: self.pipeline_name.clone(),
-                    destination: None,
-                    filter: None,
-                    transform: None,
+                    destination: failure.map(|failure| failure.destination.clone()),
+                    filter,
+                    transform,
+                    stage: failure.map(|failure| failure.stage),
                 };
 
                 dlq.send(dlq_msg).await?;
@@ -141,6 +206,16 @@ impl ProcessorWithRetry {
                 Err(error)
             }
         }
+    }
+}
+
+fn destination_expression_context(
+    failure: &DestinationFailure,
+) -> (Option<String>, Option<String>) {
+    match failure.source.as_ref() {
+        MirrorMakerError::FilterEvaluation { filter, .. } => (Some(filter.clone()), None),
+        MirrorMakerError::TransformEvaluation { transform, .. } => (None, Some(transform.clone())),
+        _ => (None, None),
     }
 }
 

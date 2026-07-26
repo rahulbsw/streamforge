@@ -1,6 +1,11 @@
+use crate::error::{DestinationFailureDisposition, DestinationStage};
 use crate::filter::{EnvelopeTransform, Filter, PassThroughFilter, Transform};
 use crate::kafka::sink::KafkaSink;
 use crate::observability::{labels, METRICS};
+use crate::processor_policy::{
+    collect_destination_failures, destination_failure, handle_filter_error, handle_transform_error,
+    TransformErrorAction,
+};
 use crate::{
     AggregateEmission, AggregationConfig, AggregationEngine, MessageEnvelope, MirrorMakerError,
     Result,
@@ -258,7 +263,7 @@ impl DestinationRuntime {
         let filter_passed = match self.filter.evaluate_envelope(envelope) {
             Ok(passed) => passed,
             Err(e) => {
-                return self.handle_error(e, "filter evaluation");
+                return self.handle_filter_error(e);
             }
         };
 
@@ -273,9 +278,12 @@ impl DestinationRuntime {
         Ok(filter_passed)
     }
 
-    fn apply_value_transform(&self, envelope: &mut MessageEnvelope) -> Result<bool> {
+    fn apply_value_transform(
+        &self,
+        envelope: &mut MessageEnvelope,
+    ) -> Result<Option<TransformErrorAction>> {
         let Some(transform) = &self.transform else {
-            return Ok(true);
+            return Ok(None);
         };
 
         self.metrics.transform_value_counter.inc();
@@ -288,58 +296,34 @@ impl DestinationRuntime {
         let transformed_value = match transform.transform(value_owned) {
             Ok(val) => val,
             Err(e) => {
-                return self.handle_error(e, "value transform");
+                return self
+                    .handle_transform_error(e, DestinationStage::ValueTransform)
+                    .map(Some);
             }
         };
 
         *Arc::make_mut(&mut envelope.value) = transformed_value;
-        Ok(true)
+        Ok(None)
     }
 
-    fn handle_error(&self, error: MirrorMakerError, operation: &str) -> Result<bool> {
-        use crate::config::ErrorPolicy;
-        use tracing::warn;
-
-        match self.error_policy {
-            ErrorPolicy::Fail => {
-                error!(
-                    destination = %self.name,
-                    operation = %operation,
-                    error = %error,
-                    "Pipeline halted due to error (error_policy: fail)"
-                );
-                Err(error)
-            }
-            ErrorPolicy::Dlq => {
-                warn!(
-                    destination = %self.name,
-                    operation = %operation,
-                    error = %error,
-                    "Error will be sent to DLQ (error_policy: dlq)"
-                );
-                Err(error)
-            }
-            ErrorPolicy::SkipAndLog => {
-                warn!(
-                    destination = %self.name,
-                    operation = %operation,
-                    error = %error,
-                    "Skipping message due to error (error_policy: skip_and_log)"
-                );
-                self.metrics.messages_filtered_error_counter.inc();
-                Ok(false)
-            }
-            ErrorPolicy::Continue => {
-                warn!(
-                    destination = %self.name,
-                    operation = %operation,
-                    error = %error,
-                    "Continuing despite error (error_policy: continue)"
-                );
-                self.metrics.messages_filtered_error_counter.inc();
-                Ok(false)
-            }
+    fn handle_filter_error(&self, error: MirrorMakerError) -> Result<bool> {
+        let result = handle_filter_error(self.error_policy, &self.name, error);
+        if result.is_ok() {
+            self.metrics.messages_filtered_error_counter.inc();
         }
+        result
+    }
+
+    fn handle_transform_error(
+        &self,
+        error: MirrorMakerError,
+        stage: DestinationStage,
+    ) -> Result<TransformErrorAction> {
+        let result = handle_transform_error(self.error_policy, &self.name, stage, error);
+        if result.is_ok() {
+            self.metrics.messages_filtered_error_counter.inc();
+        }
+        result
     }
 }
 
@@ -372,23 +356,62 @@ impl ImmediateDestinationProcessor {
             return Ok(false);
         }
 
+        // `continue` is the only policy that needs a fallback copy. Arc-backed
+        // values and headers keep this cheap while leaving every other hot path
+        // unchanged.
+        let original_envelope = (self.runtime.error_policy == crate::config::ErrorPolicy::Continue)
+            .then(|| envelope.clone());
         let mut envelope = envelope;
-        for transform in &self.envelope_transforms {
-            self.runtime.metrics.transform_envelope_counter.inc();
+        let mut send_original = false;
+        match self.runtime.apply_value_transform(&mut envelope)? {
+            None => {}
+            Some(TransformErrorAction::SkipDestination) => return Ok(false),
+            Some(TransformErrorAction::SendOriginal) => {
+                send_original = true;
+                envelope = original_envelope
+                    .as_ref()
+                    .expect("continue policy always retains the original envelope")
+                    .clone();
+            }
+        }
 
-            envelope = match transform.transform_envelope(envelope) {
-                Ok(env) => env,
-                Err(e) => {
-                    return self.runtime.handle_error(e, "envelope transform");
+        if !send_original {
+            for transform in &self.envelope_transforms {
+                self.runtime.metrics.transform_envelope_counter.inc();
+
+                envelope = match transform.transform_envelope(envelope) {
+                    Ok(env) => env,
+                    Err(e) => {
+                        match self
+                            .runtime
+                            .handle_transform_error(e, DestinationStage::EnvelopeTransform)?
+                        {
+                            TransformErrorAction::SkipDestination => return Ok(false),
+                            TransformErrorAction::SendOriginal => {
+                                send_original = true;
+                                original_envelope
+                                    .as_ref()
+                                    .expect("continue policy always retains the original envelope")
+                                    .clone()
+                            }
+                        }
+                    }
+                };
+
+                if send_original {
+                    break;
                 }
-            };
+            }
         }
 
-        if !self.runtime.apply_value_transform(&mut envelope)? {
-            return Ok(false);
-        }
-
-        self.sink.send(envelope).await?;
+        self.sink.send(envelope).await.map_err(|source| {
+            destination_failure(
+                &self.runtime.name,
+                DestinationStage::Sink,
+                DestinationFailureDisposition::FailFast,
+                source,
+            )
+        })?;
         self.runtime.metrics.messages_produced_counter.inc();
 
         timer.observe_duration();
@@ -438,9 +461,16 @@ impl AggregatingDestinationProcessor {
             return Ok(false);
         }
 
+        let original_envelope = (self.runtime.error_policy == crate::config::ErrorPolicy::Continue)
+            .then(|| envelope.clone());
         let mut envelope = envelope;
-        if !self.runtime.apply_value_transform(&mut envelope)? {
-            return Ok(false);
+        match self.runtime.apply_value_transform(&mut envelope)? {
+            None => {}
+            Some(TransformErrorAction::SkipDestination) => return Ok(false),
+            Some(TransformErrorAction::SendOriginal) => {
+                envelope = original_envelope
+                    .expect("continue policy always retains the original envelope");
+            }
         }
 
         let timestamp_ms = observation_timestamp_ms()?;
@@ -461,7 +491,15 @@ impl AggregatingDestinationProcessor {
             }
             Err(e) => {
                 self.aggregation_metrics.inc_rejected_updates();
-                self.runtime.handle_error(e, "aggregation observe")
+                match self
+                    .runtime
+                    .handle_transform_error(e, DestinationStage::Aggregation)?
+                {
+                    TransformErrorAction::SkipDestination => Ok(false),
+                    // Aggregation has already rejected the record, so there is
+                    // no unchanged envelope that can be emitted on this path.
+                    TransformErrorAction::SendOriginal => Ok(false),
+                }
             }
         }
     }
@@ -660,7 +698,7 @@ impl MessageProcessor for MultiDestinationProcessor {
         let results = futures::future::join_all(futures).await;
 
         let mut processed = false;
-        let mut errors = Vec::new();
+        let mut failures = Vec::new();
 
         for (dest_name, result) in results {
             match result {
@@ -668,17 +706,18 @@ impl MessageProcessor for MultiDestinationProcessor {
                 Ok(false) => {}
                 Err(e) => {
                     error!("Error processing destination {}: {}", dest_name, e);
-                    errors.push(format!("{}: {}", dest_name, e));
+                    collect_destination_failures(
+                        &mut failures,
+                        dest_name,
+                        DestinationStage::Sink,
+                        e,
+                    );
                 }
             }
         }
 
-        if !errors.is_empty() {
-            return Err(MirrorMakerError::Processing(format!(
-                "Failed to process {} destination(s): {}",
-                errors.len(),
-                errors.join("; ")
-            )));
+        if !failures.is_empty() {
+            return Err(MirrorMakerError::DestinationFailures { failures });
         }
 
         if !processed {
@@ -696,23 +735,19 @@ impl MessageProcessor for MultiDestinationProcessor {
             .collect();
 
         let results = futures::future::join_all(futures).await;
-        let mut errors = Vec::new();
+        let mut failures = Vec::new();
 
         for (dest_name, result) in results {
             if let Err(e) = result {
                 error!("Error flushing destination {}: {}", dest_name, e);
-                errors.push(format!("{}: {}", dest_name, e));
+                collect_destination_failures(&mut failures, dest_name, DestinationStage::Flush, e);
             }
         }
 
-        if errors.is_empty() {
+        if failures.is_empty() {
             Ok(())
         } else {
-            Err(MirrorMakerError::Processing(format!(
-                "Failed to flush {} destination(s): {}",
-                errors.len(),
-                errors.join("; ")
-            )))
+            Err(MirrorMakerError::DestinationFailures { failures })
         }
     }
 }
@@ -1184,7 +1219,14 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, MirrorMakerError::JsonPathNotFound { .. }));
+        assert!(matches!(
+            err,
+            MirrorMakerError::DestinationFailure { failure }
+                if failure.destination == destination_name
+                    && failure.stage == DestinationStage::Aggregation
+                    && failure.disposition == DestinationFailureDisposition::FailFast
+                    && matches!(*failure.source, MirrorMakerError::JsonPathNotFound { .. })
+        ));
         assert_eq!(
             aggregation_update_metric_value(
                 destination_name,

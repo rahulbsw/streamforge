@@ -86,6 +86,15 @@ pub struct DlqMessage {
 
     /// Transform expression (if applicable)
     pub transform: Option<String>,
+
+    /// Typed processing stage that failed (if applicable)
+    pub stage: Option<crate::error::DestinationStage>,
+}
+
+/// Testable abstraction for dead-letter delivery.
+#[async_trait::async_trait]
+pub trait DlqWriter: Send + Sync {
+    async fn send(&self, dlq_msg: DlqMessage) -> Result<()>;
 }
 
 /// Dead Letter Queue handler
@@ -306,6 +315,13 @@ impl DeadLetterQueue {
             );
         }
 
+        if let Some(stage) = dlq_msg.stage {
+            headers.insert(
+                "x-streamforge-stage".to_string(),
+                stage.to_string().into_bytes(),
+            );
+        }
+
         // Stack trace (optional)
         if self.config.include_stack_trace {
             headers.insert(
@@ -313,6 +329,13 @@ impl DeadLetterQueue {
                 format!("{:?}", dlq_msg.error).into_bytes(),
             );
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl DlqWriter for DeadLetterQueue {
+    async fn send(&self, dlq_msg: DlqMessage) -> Result<()> {
+        DeadLetterQueue::send(self, dlq_msg).await
     }
 }
 
@@ -337,6 +360,8 @@ fn error_type_name(error: &MirrorMakerError) -> &'static str {
         MirrorMakerError::FilterEvaluation { .. } => "FilterEvaluation",
         MirrorMakerError::TransformEvaluation { .. } => "TransformEvaluation",
         MirrorMakerError::JsonPathNotFound { .. } => "JsonPathNotFound",
+        MirrorMakerError::DestinationFailure { .. } => "DestinationFailure",
+        MirrorMakerError::DestinationFailures { .. } => "DestinationFailures",
         MirrorMakerError::Compression(_) => "Compression",
         MirrorMakerError::CompressionWithCodec { .. } => "CompressionWithCodec",
         MirrorMakerError::Decompression { .. } => "Decompression",
@@ -394,9 +419,11 @@ mod tests {
             destination: Some("output-topic".into()),
             filter: Some("/status,==,active".into()),
             transform: None,
+            stage: Some(crate::error::DestinationStage::Filter),
         };
 
         assert_eq!(dlq_msg.pipeline, "test-pipeline");
         assert_eq!(dlq_msg.destination, Some("output-topic".into()));
+        assert_eq!(dlq_msg.stage, Some(crate::error::DestinationStage::Filter));
     }
 }

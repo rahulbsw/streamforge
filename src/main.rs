@@ -24,8 +24,9 @@ use streamforge::processor::{
 };
 use streamforge::processor_with_retry::ProcessorWithRetry;
 use streamforge::{
-    DeadLetterQueue, MessageEnvelope, MirrorMakerConfig, MirrorMakerError, Result, RetryPolicy,
-    SyncCacheManager,
+    compose_filter, compose_value_transform, DeadLetterQueue, MessageEnvelope, MirrorMakerConfig,
+    MirrorMakerError, Result, RetryPolicy, SyncCacheManager, WasmEnvelopeTransform, WasmFilter,
+    WasmRegistry, WasmValueTransform,
 };
 use tokio::time::interval;
 use tracing::{error, info, warn};
@@ -79,6 +80,26 @@ async fn main() -> Result<()> {
     // Shared sync cache manager — used by CACHE_LOOKUP / CACHE_PUT transforms
     let cache_manager = Arc::new(SyncCacheManager::new());
 
+    // Verify and compile all digest-pinned components before constructing any
+    // Kafka client. Native-only configurations do not initialize Wasmtime.
+    let wasm_registry = config
+        .wasm
+        .as_ref()
+        .map(WasmRegistry::load)
+        .transpose()
+        .map_err(|error| {
+            MirrorMakerError::Config(format!(
+                "WebAssembly UDF startup validation failed: {error}"
+            ))
+        })?
+        .map(Arc::new);
+    if let Some(registry) = &wasm_registry {
+        info!(
+            module_count = registry.module_names().count(),
+            "WebAssembly UDF registry verified and compiled"
+        );
+    }
+
     // Warn when both routing and transform are set — routing wins, transform is ignored.
     if config.routing.is_some() && config.transform.is_some() {
         warn!(
@@ -91,45 +112,60 @@ async fn main() -> Result<()> {
     // Build processor based on configuration
     let base_processor: Arc<dyn MessageProcessor> = if let Some(routing) = &config.routing {
         info!("Multi-destination routing enabled");
-        build_multi_destination_processor(&config, routing, stats.clone(), cache_manager.clone())
-            .await?
+        build_multi_destination_processor(
+            &config,
+            routing,
+            stats.clone(),
+            cache_manager.clone(),
+            wasm_registry.clone(),
+        )
+        .await?
     } else {
         info!("Single-destination mode");
-        build_single_destination_processor(&config, stats.clone(), cache_manager.clone()).await?
+        build_single_destination_processor(
+            &config,
+            stats.clone(),
+            cache_manager.clone(),
+            wasm_registry.clone(),
+        )
+        .await?
     };
 
-    // Wrap processor with retry and DLQ support (skip wrapper if max_attempts=1 for performance)
-    let processor: Arc<dyn MessageProcessor> = if config.retry.max_attempts == 1 {
-        info!("Retry disabled (max_attempts=1) - using base processor directly");
-        base_processor
-    } else {
-        let retry_policy = RetryPolicy::new(config.retry.clone());
-        let dlq = if config.dlq.enabled {
-            info!(
-                "DLQ enabled: topic={}, max_retries={}",
-                config.dlq.topic, config.dlq.max_dlq_retries
-            );
-            Some(Arc::new(DeadLetterQueue::new(
-                config.dlq.clone(),
-                &config.bootstrap,
-            )?))
-        } else {
-            info!("DLQ disabled - errors will halt pipeline");
-            None
-        };
-
+    let retry_policy = RetryPolicy::new(config.retry.clone());
+    let dlq = if config.dlq.enabled {
         info!(
-            "Retry policy: max_attempts={}, initial_delay={}ms, max_delay={}ms",
-            config.retry.max_attempts, config.retry.initial_delay_ms, config.retry.max_delay_ms
+            "DLQ enabled: topic={}, max_retries={}",
+            config.dlq.topic, config.dlq.max_dlq_retries
         );
-
-        Arc::new(ProcessorWithRetry::new(
-            base_processor,
-            retry_policy,
-            dlq,
-            config.appid.clone(),
-        )) as Arc<dyn MessageProcessor>
+        Some(Arc::new(DeadLetterQueue::new(
+            config.dlq.clone(),
+            &config.bootstrap,
+        )?))
+    } else {
+        info!("DLQ disabled - terminal failures will halt the pipeline");
+        None
     };
+
+    info!(
+        "Retry policy: max_attempts={}, initial_delay={}ms, max_delay={}ms",
+        config.retry.max_attempts, config.retry.initial_delay_ms, config.retry.max_delay_ms
+    );
+
+    // Preserve the zero-wrapper compatibility path only when neither retries
+    // nor DLQ delivery can occur. A one-attempt policy still needs the wrapper
+    // when DLQ is enabled so terminal destination failures are delivered once.
+    let processor: Arc<dyn MessageProcessor> =
+        if config.retry.max_attempts == 1 && !config.dlq.enabled {
+            info!("Retry and DLQ disabled - using base processor directly");
+            base_processor
+        } else {
+            Arc::new(ProcessorWithRetry::new(
+                base_processor,
+                retry_policy,
+                dlq,
+                config.appid.clone(),
+            ))
+        };
 
     if let Some(interval_seconds) = aggregation_flush_interval_seconds(&config) {
         info!(
@@ -538,6 +574,8 @@ fn create_default_config() -> MirrorMakerConfig {
         observability: Default::default(),
         retry: Default::default(),
         dlq: Default::default(),
+        wasm: None,
+        udfs: None,
     }
 }
 
@@ -668,6 +706,7 @@ async fn build_single_destination_processor(
     config: &MirrorMakerConfig,
     _stats: Arc<Stats>,
     cache_manager: Arc<SyncCacheManager>,
+    wasm_registry: Option<Arc<WasmRegistry>>,
 ) -> Result<Arc<dyn MessageProcessor>> {
     let output_topic = config
         .output
@@ -676,23 +715,71 @@ async fn build_single_destination_processor(
 
     let sink = Arc::new(KafkaSink::new(config, output_topic.clone(), None).await?);
 
-    // Parse optional top-level transform (supports CACHE_LOOKUP, CACHE_PUT, STRING:, etc.)
-    if let Some(ref transform_expr) = config.transform {
-        info!("Value transform: {}", transform_expr);
-        let transform = parse_transform_with_cache(transform_expr, Some(cache_manager))?;
-        Ok(Arc::new(
-            SingleDestinationProcessor::with_transform_for_destination(
-                sink,
-                transform,
-                output_topic.as_str(),
-            ),
-        ))
-    } else {
-        Ok(Arc::new(SingleDestinationProcessor::for_destination(
+    // Preserve the native-only construction path exactly when no UDF is bound.
+    if config.udfs.is_none() {
+        if let Some(ref transform_expr) = config.transform {
+            info!("Value transform: {}", transform_expr);
+            let transform = parse_transform_with_cache(transform_expr, Some(cache_manager))?;
+            return Ok(Arc::new(
+                SingleDestinationProcessor::with_transform_for_destination(
+                    sink,
+                    transform,
+                    output_topic.as_str(),
+                ),
+            ));
+        }
+        return Ok(Arc::new(SingleDestinationProcessor::for_destination(
             sink,
             output_topic.as_str(),
-        )))
+        )));
     }
+
+    let udfs = config
+        .udfs
+        .as_ref()
+        .expect("validated UDF branch requires top-level udfs");
+    let native_transform: Option<Arc<dyn Transform>> =
+        if let Some(ref transform_expr) = config.transform {
+            info!("Value transform: {}", transform_expr);
+            Some(parse_transform_with_cache(
+                transform_expr,
+                Some(cache_manager),
+            )?)
+        } else {
+            None
+        };
+    let filter = compose_filter(
+        None,
+        build_wasm_filter(&wasm_registry, udfs.filter.as_deref())?,
+    );
+    let transform = compose_value_transform(
+        native_transform,
+        build_wasm_value_transform(&wasm_registry, udfs.value_transform.as_deref())?,
+    );
+    let mut envelope_transforms: Vec<Arc<dyn EnvelopeTransform>> = Vec::new();
+    if let Some(transform) =
+        build_wasm_envelope_transform(&wasm_registry, udfs.envelope_transform.as_deref())?
+    {
+        envelope_transforms.push(transform);
+    }
+
+    let error_policy = if config.dlq.enabled {
+        streamforge::config::ErrorPolicy::Dlq
+    } else {
+        streamforge::config::ErrorPolicy::Fail
+    };
+    let destination = DestinationProcessor::new(
+        sink,
+        filter,
+        envelope_transforms,
+        transform,
+        output_topic,
+        error_policy,
+    );
+    Ok(Arc::new(MultiDestinationProcessor::new(
+        vec![destination],
+        None,
+    )))
 }
 
 async fn build_multi_destination_processor(
@@ -700,6 +787,7 @@ async fn build_multi_destination_processor(
     routing: &streamforge::RoutingConfig,
     _stats: Arc<Stats>,
     cache_manager: Arc<SyncCacheManager>,
+    wasm_registry: Option<Arc<WasmRegistry>>,
 ) -> Result<Arc<dyn MessageProcessor>> {
     let mut destinations = Vec::new();
 
@@ -712,25 +800,41 @@ async fn build_multi_destination_processor(
             Arc::new(KafkaSink::new(config, dest.output.clone(), dest.partition.clone()).await?);
 
         // Create filter if specified
-        let filter: Option<Arc<dyn Filter>> = if let Some(ref filter_expr) = dest.filter {
+        let native_filter: Option<Arc<dyn Filter>> = if let Some(ref filter_expr) = dest.filter {
             info!("  Filter: {}", filter_expr);
             Some(parse_filter(filter_expr)?)
         } else {
             None
         };
+        let filter = compose_filter(
+            native_filter,
+            build_wasm_filter(
+                &wasm_registry,
+                dest.udfs.as_ref().and_then(|udfs| udfs.filter.as_deref()),
+            )?,
+        );
 
         // Create value transform — cache_manager is threaded through so
         // CACHE_LOOKUP / CACHE_PUT expressions resolve named stores
-        let transform: Option<Arc<dyn Transform>> = if let Some(ref transform_expr) = dest.transform
-        {
-            info!("  Value transform: {}", transform_expr);
-            Some(parse_transform_with_cache(
-                transform_expr,
-                Some(cache_manager.clone()),
-            )?)
-        } else {
-            None
-        };
+        let native_transform: Option<Arc<dyn Transform>> =
+            if let Some(ref transform_expr) = dest.transform {
+                info!("  Value transform: {}", transform_expr);
+                Some(parse_transform_with_cache(
+                    transform_expr,
+                    Some(cache_manager.clone()),
+                )?)
+            } else {
+                None
+            };
+        let transform = compose_value_transform(
+            native_transform,
+            build_wasm_value_transform(
+                &wasm_registry,
+                dest.udfs
+                    .as_ref()
+                    .and_then(|udfs| udfs.value_transform.as_deref()),
+            )?,
+        );
 
         let dest_processor = if let Some(aggregation) = dest.aggregation.clone() {
             info!(
@@ -776,6 +880,14 @@ async fn build_multi_destination_processor(
                 info!("  Timestamp transform: {}", timestamp_expr);
                 envelope_transforms.push(parse_timestamp_transform(timestamp_expr)?);
             }
+            if let Some(transform) = build_wasm_envelope_transform(
+                &wasm_registry,
+                dest.udfs
+                    .as_ref()
+                    .and_then(|udfs| udfs.envelope_transform.as_deref()),
+            )? {
+                envelope_transforms.push(transform);
+            }
 
             DestinationProcessor::new(
                 sink,
@@ -794,6 +906,63 @@ async fn build_multi_destination_processor(
         destinations,
         routing.path.clone(),
     )))
+}
+
+fn build_wasm_filter(
+    registry: &Option<Arc<WasmRegistry>>,
+    module: Option<&str>,
+) -> Result<Option<Arc<dyn Filter>>> {
+    let Some(module) = module else {
+        return Ok(None);
+    };
+    let registry = required_wasm_registry(registry, module)?;
+    info!(module, "  WebAssembly filter");
+    WasmFilter::new(registry, module)
+        .map(|filter| Some(Arc::new(filter) as Arc<dyn Filter>))
+        .map_err(wasm_binding_error)
+}
+
+fn build_wasm_value_transform(
+    registry: &Option<Arc<WasmRegistry>>,
+    module: Option<&str>,
+) -> Result<Option<Arc<dyn Transform>>> {
+    let Some(module) = module else {
+        return Ok(None);
+    };
+    let registry = required_wasm_registry(registry, module)?;
+    info!(module, "  WebAssembly value transform");
+    WasmValueTransform::new(registry, module)
+        .map(|transform| Some(Arc::new(transform) as Arc<dyn Transform>))
+        .map_err(wasm_binding_error)
+}
+
+fn build_wasm_envelope_transform(
+    registry: &Option<Arc<WasmRegistry>>,
+    module: Option<&str>,
+) -> Result<Option<Arc<dyn EnvelopeTransform>>> {
+    let Some(module) = module else {
+        return Ok(None);
+    };
+    let registry = required_wasm_registry(registry, module)?;
+    info!(module, "  WebAssembly envelope transform");
+    WasmEnvelopeTransform::new(registry, module)
+        .map(|transform| Some(Arc::new(transform) as Arc<dyn EnvelopeTransform>))
+        .map_err(wasm_binding_error)
+}
+
+fn required_wasm_registry(
+    registry: &Option<Arc<WasmRegistry>>,
+    module: &str,
+) -> Result<Arc<WasmRegistry>> {
+    registry.clone().ok_or_else(|| {
+        MirrorMakerError::Config(format!(
+            "WebAssembly module {module:?} is bound without a loaded wasm registry"
+        ))
+    })
+}
+
+fn wasm_binding_error(error: streamforge::WasmError) -> MirrorMakerError {
+    MirrorMakerError::Config(format!("WebAssembly UDF binding failed: {error}"))
 }
 
 fn validate_aggregation_destination(dest: &streamforge::DestinationConfig) -> Result<()> {
@@ -1060,6 +1229,7 @@ mod tests {
                     partition: None,
                     broadcast: false,
                     description: None,
+                    udfs: None,
                 }],
             });
 
@@ -1087,6 +1257,7 @@ mod tests {
                         partition: None,
                         broadcast: false,
                         description: None,
+                        udfs: None,
                     },
                     streamforge::DestinationConfig {
                         output: "aggregate-slow.topic".to_string(),
@@ -1118,6 +1289,7 @@ mod tests {
                         partition: None,
                         broadcast: false,
                         description: None,
+                        udfs: None,
                     },
                     streamforge::DestinationConfig {
                         output: "aggregate-fast.topic".to_string(),
@@ -1149,6 +1321,7 @@ mod tests {
                         partition: None,
                         broadcast: false,
                         description: None,
+                        udfs: None,
                     },
                 ],
             });
@@ -1188,6 +1361,7 @@ mod tests {
                 partition: None,
                 broadcast: false,
                 description: None,
+                udfs: None,
             };
 
             let result = validate_aggregation_destination(&destination);
@@ -1232,6 +1406,7 @@ mod tests {
                 partition: None,
                 broadcast: false,
                 description: None,
+                udfs: None,
             };
 
             assert!(validate_aggregation_destination(&destination).is_ok());

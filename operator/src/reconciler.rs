@@ -2,8 +2,10 @@ use anyhow::Result;
 use k8s_openapi::api::{
     apps::v1::{Deployment, DeploymentSpec},
     core::v1::{
-        ConfigMap, Container, EnvVar, PodSpec, PodTemplateSpec,
-        ResourceRequirements as K8sResourceRequirements, SecretVolumeSource, Volume, VolumeMount,
+        Capabilities, ConfigMap, ConfigMapVolumeSource, Container, EnvVar, KeyToPath,
+        PersistentVolumeClaimVolumeSource, PodSpec, PodTemplateSpec,
+        ResourceRequirements as K8sResourceRequirements, SeccompProfile, SecretVolumeSource,
+        SecurityContext, Volume, VolumeMount,
     },
 };
 use k8s_openapi::apimachinery::pkg::{api::resource::Quantity, apis::meta::v1::LabelSelector};
@@ -12,12 +14,17 @@ use kube::{
     runtime::controller::Action,
     Client, ResourceExt,
 };
-use std::collections::BTreeMap;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info};
 
-use crate::crd::StreamforgePipeline;
+use crate::crd::{StreamforgePipeline, UdfArtifactRef};
+use crate::render::{self, UDF_MODULE_ROOT};
+
+const UDF_DIGEST_ANNOTATION: &str = "streamforge.io/udf-digests";
+const CONFIG_DIGEST_ANNOTATION: &str = "streamforge.io/config-sha256";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -45,6 +52,8 @@ impl PipelineReconciler {
         let name = pipeline.name_any();
 
         info!("Reconciling pipeline: {}/{}", namespace, name);
+
+        render::validate_pipeline_spec(&pipeline)?;
 
         // Generate labels
         let labels = self.get_labels(&pipeline);
@@ -96,7 +105,7 @@ impl PipelineReconciler {
         let config_name = format!("{}-config", name);
 
         // Generate YAML config
-        let config_yaml = self.generate_config_yaml(pipeline)?;
+        let config_yaml = render::generate_config_yaml(pipeline)?;
 
         let mut data = BTreeMap::new();
         data.insert("config.yaml".to_string(), config_yaml);
@@ -129,6 +138,24 @@ impl PipelineReconciler {
         name: &str,
         labels: &BTreeMap<String, String>,
     ) -> Result<(), Error> {
+        let deployment = Self::build_deployment(pipeline, namespace, name, labels)?;
+
+        let deploy_api: Api<Deployment> = Api::namespaced(self.client.clone(), namespace);
+        let patch_params = PatchParams::apply("streamforge-operator");
+        deploy_api
+            .patch(name, &patch_params, &Patch::Apply(&deployment))
+            .await?;
+
+        debug!("Deployment reconciled: {}", name);
+        Ok(())
+    }
+
+    pub(crate) fn build_deployment(
+        pipeline: &StreamforgePipeline,
+        namespace: &str,
+        name: &str,
+        labels: &BTreeMap<String, String>,
+    ) -> Result<Deployment, Error> {
         let spec = &pipeline.spec;
         let image = format!("{}:{}", spec.image.repository, spec.image.tag);
         let config_name = format!("{}-config", name);
@@ -168,7 +195,8 @@ impl PipelineReconciler {
         }];
 
         // Add secret volumes and mounts
-        self.add_secret_volumes(pipeline, &mut volumes, &mut volume_mounts);
+        Self::add_secret_volumes(pipeline, &mut volumes, &mut volume_mounts);
+        Self::add_udf_volumes(pipeline, &mut volumes, &mut volume_mounts)?;
 
         // Container
         let container = Container {
@@ -177,20 +205,39 @@ impl PipelineReconciler {
             image_pull_policy: Some(spec.image.pull_policy.clone()),
             env: Some(env_vars),
             volume_mounts: Some(volume_mounts),
-            resources: Some(self.get_resources(&spec.resources)),
+            resources: Some(Self::get_resources(&spec.resources)),
+            security_context: Some(SecurityContext {
+                allow_privilege_escalation: Some(false),
+                capabilities: Some(Capabilities {
+                    add: None,
+                    drop: Some(vec!["ALL".to_string()]),
+                }),
+                privileged: Some(false),
+                read_only_root_filesystem: Some(true),
+                run_as_non_root: Some(true),
+                seccomp_profile: Some(SeccompProfile {
+                    localhost_profile: None,
+                    type_: "RuntimeDefault".to_string(),
+                }),
+                ..Default::default()
+            }),
             ..Default::default()
         };
+
+        let annotations = Some(Self::rollout_annotations(pipeline)?);
 
         // Pod template
         let pod_template = PodTemplateSpec {
             metadata: Some(ObjectMeta {
                 labels: Some(labels.clone()),
+                annotations,
                 ..Default::default()
             }),
             spec: Some(PodSpec {
                 containers: vec![container],
                 volumes: Some(volumes),
-                service_account: spec.service_account.clone(),
+                automount_service_account_token: Some(false),
+                service_account_name: spec.service_account.clone(),
                 node_selector: if spec.node_selector.is_empty() {
                     None
                 } else {
@@ -220,20 +267,10 @@ impl PipelineReconciler {
             ..Default::default()
         };
 
-        let deploy_api: Api<Deployment> = Api::namespaced(self.client.clone(), namespace);
-        let patch_params = PatchParams::apply("streamforge-operator");
-        deploy_api
-            .patch(name, &patch_params, &Patch::Apply(&deployment))
-            .await?;
-
-        debug!("Deployment reconciled: {}", name);
-        Ok(())
+        Ok(deployment)
     }
 
-    fn get_resources(
-        &self,
-        resources: &crate::crd::ResourceRequirements,
-    ) -> K8sResourceRequirements {
+    fn get_resources(resources: &crate::crd::ResourceRequirements) -> K8sResourceRequirements {
         K8sResourceRequirements {
             requests: resources.requests.as_ref().map(|r| {
                 r.iter()
@@ -252,20 +289,19 @@ impl PipelineReconciler {
     /// Add secret volumes and mounts for SSL/SASL credentials
     /// Secrets are mounted with source/destination prefixes to avoid conflicts
     fn add_secret_volumes(
-        &self,
         pipeline: &StreamforgePipeline,
         volumes: &mut Vec<Volume>,
         volume_mounts: &mut Vec<VolumeMount>,
     ) {
-        let mut secret_names = std::collections::HashSet::new();
+        let mut secret_names = BTreeSet::new();
 
         // Collect secrets from source security config
         if let Some(security) = &pipeline.spec.source.security {
             if let Some(ssl) = &security.ssl {
-                self.collect_ssl_secrets(ssl, &mut secret_names, "source");
+                Self::collect_ssl_secrets(ssl, &mut secret_names, "source");
             }
             if let Some(sasl) = &security.sasl {
-                self.collect_sasl_secrets(sasl, &mut secret_names, "source");
+                Self::collect_sasl_secrets(sasl, &mut secret_names, "source");
             }
         }
 
@@ -274,10 +310,10 @@ impl PipelineReconciler {
             let prefix = format!("destination-{}", idx);
             if let Some(security) = &dest.security {
                 if let Some(ssl) = &security.ssl {
-                    self.collect_ssl_secrets(ssl, &mut secret_names, &prefix);
+                    Self::collect_ssl_secrets(ssl, &mut secret_names, &prefix);
                 }
                 if let Some(sasl) = &security.sasl {
-                    self.collect_sasl_secrets(sasl, &mut secret_names, &prefix);
+                    Self::collect_sasl_secrets(sasl, &mut secret_names, &prefix);
                 }
             }
         }
@@ -308,9 +344,8 @@ impl PipelineReconciler {
     }
 
     fn collect_ssl_secrets(
-        &self,
         ssl: &crate::crd::SslConfig,
-        secrets: &mut std::collections::HashSet<(String, String)>,
+        secrets: &mut BTreeSet<(String, String)>,
         role: &str,
     ) {
         if let Some(ref secret_ref) = ssl.ca_secret {
@@ -328,9 +363,8 @@ impl PipelineReconciler {
     }
 
     fn collect_sasl_secrets(
-        &self,
         sasl: &crate::crd::SaslConfig,
-        secrets: &mut std::collections::HashSet<(String, String)>,
+        secrets: &mut BTreeSet<(String, String)>,
         role: &str,
     ) {
         if let Some(ref secret_ref) = sasl.username_secret {
@@ -344,41 +378,82 @@ impl PipelineReconciler {
         }
     }
 
-    fn generate_config_yaml(&self, pipeline: &StreamforgePipeline) -> Result<String, Error> {
-        let spec = &pipeline.spec;
+    fn add_udf_volumes(
+        pipeline: &StreamforgePipeline,
+        volumes: &mut Vec<Volume>,
+        volume_mounts: &mut Vec<VolumeMount>,
+    ) -> Result<(), Error> {
+        let Some(udfs) = &pipeline.spec.udfs else {
+            return Ok(());
+        };
 
-        // For now, support single destination only (future: multi-destination)
-        if spec.destinations.is_empty() {
-            return Err(Error::InvalidSpec("No destinations specified".to_string()));
-        }
-        let dest = &spec.destinations[0];
+        let mut modules = udfs.modules.iter().collect::<Vec<_>>();
+        modules.sort_by(|left, right| left.name.cmp(&right.name));
 
-        // Build config structure matching streamforge's config format
-        let mut config = serde_json::json!({
-            "appid": spec.appid.clone().unwrap_or_else(|| pipeline.name_any()),
-            "bootstrap": spec.source.brokers.clone(),
-            "target_broker": dest.brokers.clone(),
-            "input": spec.source.topic.clone(),
-            "output": dest.topic.clone(),
-            "offset": spec.source.offset.clone(),
-            "threads": spec.threads,
-        });
+        for module in modules {
+            let volume_name = format!("udf-{}", module.name);
+            let mount_path = format!("{UDF_MODULE_ROOT}/{}", module.name);
+            let volume = match &module.artifact {
+                UdfArtifactRef::ConfigMap { name, key } => Volume {
+                    name: volume_name.clone(),
+                    config_map: Some(ConfigMapVolumeSource {
+                        default_mode: Some(0o444),
+                        items: Some(vec![KeyToPath {
+                            key: key.clone(),
+                            mode: Some(0o444),
+                            path: "module.wasm".to_string(),
+                        }]),
+                        name: name.clone(),
+                        optional: Some(false),
+                    }),
+                    ..Default::default()
+                },
+                UdfArtifactRef::PersistentVolumeClaim { claim_name, .. } => Volume {
+                    name: volume_name.clone(),
+                    persistent_volume_claim: Some(PersistentVolumeClaimVolumeSource {
+                        claim_name: claim_name.clone(),
+                        read_only: Some(true),
+                    }),
+                    ..Default::default()
+                },
+            };
 
-        // Add optional fields
-        if let Some(group_id) = &spec.source.group_id {
-            config["group_id"] = serde_json::json!(group_id);
+            volumes.push(volume);
+            volume_mounts.push(VolumeMount {
+                name: volume_name,
+                mount_path,
+                read_only: Some(true),
+                ..Default::default()
+            });
         }
-        if let Some(filter) = &dest.filter {
-            config["filter"] = serde_json::json!(filter);
-        }
-        if let Some(transform) = &dest.transform {
-            config["transform"] = serde_json::json!(transform);
-        }
-        // Note: Compression is configured via producer_properties in streamforge config
-        // The simple compression field in CRD is not used for now
 
-        serde_yaml::to_string(&config)
-            .map_err(|e| Error::InvalidSpec(format!("Failed to serialize config: {}", e)))
+        Ok(())
+    }
+
+    fn udf_digest_annotation(pipeline: &StreamforgePipeline) -> Option<BTreeMap<String, String>> {
+        let udfs = pipeline.spec.udfs.as_ref()?;
+        let mut modules = udfs.modules.iter().collect::<Vec<_>>();
+        modules.sort_by(|left, right| left.name.cmp(&right.name));
+        let digest_set = modules
+            .iter()
+            .map(|module| format!("{}={}", module.name, module.sha256))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut annotations = BTreeMap::new();
+        annotations.insert(UDF_DIGEST_ANNOTATION.to_string(), digest_set);
+        Some(annotations)
+    }
+
+    fn rollout_annotations(
+        pipeline: &StreamforgePipeline,
+    ) -> Result<BTreeMap<String, String>, Error> {
+        let mut annotations = Self::udf_digest_annotation(pipeline).unwrap_or_default();
+        let config = render::generate_config_yaml(pipeline)?;
+        annotations.insert(
+            CONFIG_DIGEST_ANNOTATION.to_string(),
+            format!("{:x}", Sha256::digest(config.as_bytes())),
+        );
+        Ok(annotations)
     }
 
     async fn update_status(

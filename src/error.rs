@@ -1,5 +1,84 @@
 use thiserror::Error;
 
+/// The stage within a destination that failed.
+///
+/// This is deliberately typed so callers do not need to recover routing
+/// context by parsing an error string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestinationStage {
+    Filter,
+    EnvelopeTransform,
+    ValueTransform,
+    Aggregation,
+    Sink,
+    Flush,
+}
+
+impl std::fmt::Display for DestinationStage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Filter => "filter",
+            Self::EnvelopeTransform => "envelope_transform",
+            Self::ValueTransform => "value_transform",
+            Self::Aggregation => "aggregation",
+            Self::Sink => "sink",
+            Self::Flush => "flush",
+        })
+    }
+}
+
+/// Recovery disposition selected by a destination's error policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestinationFailureDisposition {
+    FailFast,
+    DeadLetter,
+}
+
+impl std::fmt::Display for DestinationFailureDisposition {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::FailFast => "fail_fast",
+            Self::DeadLetter => "dead_letter",
+        })
+    }
+}
+
+/// A processing failure retaining the destination, stage, disposition, and
+/// original typed cause.
+#[derive(Debug, Clone)]
+pub struct DestinationFailure {
+    pub destination: String,
+    pub stage: DestinationStage,
+    pub disposition: DestinationFailureDisposition,
+    pub source: Box<MirrorMakerError>,
+}
+
+impl DestinationFailure {
+    pub fn new(
+        destination: impl Into<String>,
+        stage: DestinationStage,
+        disposition: DestinationFailureDisposition,
+        source: MirrorMakerError,
+    ) -> Self {
+        Self {
+            destination: destination.into(),
+            stage,
+            disposition,
+            source: Box::new(source),
+        }
+    }
+}
+
+impl std::fmt::Display for DestinationFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "destination '{}' {} failed ({}): {}",
+            self.destination, self.stage, self.disposition, self.source
+        )
+    }
+}
+
 /// StreamForge error types with context and recovery actions
 #[derive(Error, Debug, Clone)]
 #[allow(clippy::enum_variant_names)]
@@ -105,6 +184,17 @@ pub enum MirrorMakerError {
     #[error("JSON path not found: {path}")]
     JsonPathNotFound { path: String, value: Option<String> },
 
+    /// A single destination failure with its configured recovery disposition.
+    #[error("{failure}")]
+    DestinationFailure { failure: Box<DestinationFailure> },
+
+    /// Multiple destinations failed while processing the same input envelope.
+    ///
+    /// The individual failures remain typed; successful destinations must not
+    /// be re-run by an outer retry layer.
+    #[error("Multiple destination failures: {failures:?}")]
+    DestinationFailures { failures: Vec<DestinationFailure> },
+
     // ========== Compression Errors ==========
     #[error("Compression error: {0}")]
     Compression(String),
@@ -196,6 +286,8 @@ impl MirrorMakerError {
             MirrorMakerError::FilterEvaluation { .. } => false,
             MirrorMakerError::TransformEvaluation { .. } => false,
             MirrorMakerError::JsonPathNotFound { .. } => false,
+            MirrorMakerError::DestinationFailure { .. }
+            | MirrorMakerError::DestinationFailures { .. } => false,
 
             _ => false,
         }
@@ -217,6 +309,22 @@ impl MirrorMakerError {
             MirrorMakerError::DslParse { .. }
             | MirrorMakerError::InvalidFilter { .. }
             | MirrorMakerError::InvalidTransform { .. } => RecoveryAction::FailFast,
+
+            MirrorMakerError::DestinationFailure { failure } => match failure.disposition {
+                DestinationFailureDisposition::FailFast => RecoveryAction::FailFast,
+                DestinationFailureDisposition::DeadLetter => RecoveryAction::SendToDlq,
+            },
+
+            MirrorMakerError::DestinationFailures { failures } => {
+                if failures
+                    .iter()
+                    .any(|failure| failure.disposition == DestinationFailureDisposition::FailFast)
+                {
+                    RecoveryAction::FailFast
+                } else {
+                    RecoveryAction::SendToDlq
+                }
+            }
 
             // Message-level errors: send to DLQ
             MirrorMakerError::Processing(_)

@@ -29,6 +29,7 @@ RUN mkdir -p src && \
 
 # Copy source and build
 COPY src ./src
+COPY wit ./wit
 RUN touch src/main.rs && \
     cargo build --release --locked --bin streamforge
 

@@ -134,6 +134,8 @@ Deliver a **production-ready v1** for Kafka selective replication with stable se
 * filter, transform, route
 * key/header/timestamp operations
 * cache lookup / put
+* optional stateless WebAssembly UDFs for filters, JSON value transforms, and
+  bounded mutable-envelope transforms
 * retry / DLQ / commit policy
 * metrics / health / readiness
 * config validation
@@ -147,6 +149,8 @@ Deliver a **production-ready v1** for Kafka selective replication with stable se
 * ACL/config mirroring
 * schema registry orchestration as a core requirement
 * broad scripting language support as the default DSL
+* stateful UDFs, ambient WASI access, network-loaded modules, and UDFs as a
+  replacement for the native DSL
 
 ---
 
@@ -180,6 +184,8 @@ For each consumed record:
 * no panics in steady-state processing
 * explicit failure classes
 * explicit handling of partial success across multiple destinations
+* digest-pinned, startup-validated UDF artifacts with no ambient host
+  capabilities and explicit CPU, memory, input, and output bounds
 
 ---
 

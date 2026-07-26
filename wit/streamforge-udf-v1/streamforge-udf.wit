@@ -1,0 +1,70 @@
+package streamforge:udf@1.0.0;
+
+interface types {
+    record header {
+        name: string,
+        value: list<u8>,
+    }
+
+    /// The immutable source coordinates and mutable Kafka envelope fields
+    /// visible to a UDF. Key and value bytes must contain canonical JSON.
+    record envelope-input {
+        key: option<list<u8>>,
+        value: list<u8>,
+        headers: list<header>,
+        timestamp: option<s64>,
+        source-topic: option<string>,
+        source-partition: option<s32>,
+        source-offset: option<s64>,
+    }
+
+    /// A full-envelope UDF may replace only mutable Kafka envelope fields.
+    /// Source coordinates are deliberately absent and remain host-owned.
+    record envelope-output {
+        key: option<list<u8>>,
+        value: list<u8>,
+        headers: list<header>,
+        timestamp: option<s64>,
+    }
+
+    enum error-code {
+        invalid-input,
+        rejected,
+        internal,
+    }
+
+    record udf-error {
+        code: error-code,
+        message: string,
+    }
+}
+
+interface filter-api {
+    use types.{envelope-input, udf-error};
+    filter: func(input: envelope-input) -> result<bool, udf-error>;
+}
+
+interface value-transform-api {
+    use types.{udf-error};
+    transform: func(value-json: list<u8>) -> result<list<u8>, udf-error>;
+}
+
+interface envelope-transform-api {
+    use types.{envelope-input, envelope-output, udf-error};
+    transform: func(input: envelope-input) -> result<envelope-output, udf-error>;
+}
+
+world filter-v1 {
+    export types;
+    export filter-api;
+}
+
+world value-transform-v1 {
+    export types;
+    export value-transform-api;
+}
+
+world envelope-transform-v1 {
+    export types;
+    export envelope-transform-api;
+}

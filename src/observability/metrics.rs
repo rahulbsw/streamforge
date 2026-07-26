@@ -21,6 +21,17 @@ pub mod labels {
     pub const TRANSFORM_TYPE_ENVELOPE: &str = "envelope";
     pub const TRANSFORM_TYPE_VALUE: &str = "value";
 
+    pub const WASM_KIND_FILTER: &str = "filter";
+    pub const WASM_KIND_VALUE_TRANSFORM: &str = "value_transform";
+    pub const WASM_KIND_ENVELOPE_TRANSFORM: &str = "envelope_transform";
+
+    pub const WASM_STATUS_OK: &str = "ok";
+    pub const WASM_STATUS_GUEST_ERROR: &str = "guest_error";
+    pub const WASM_STATUS_TRAP: &str = "trap";
+    pub const WASM_STATUS_TIMEOUT: &str = "timeout";
+    pub const WASM_STATUS_RESOURCE_LIMIT: &str = "resource_limit";
+    pub const WASM_STATUS_INVALID_OUTPUT: &str = "invalid_output";
+
     pub const AGGREGATION_UPDATE_STATUS_ACCEPTED: &str = "accepted";
     pub const AGGREGATION_UPDATE_STATUS_REJECTED: &str = "rejected";
 
@@ -60,6 +71,16 @@ pub struct Metrics {
     pub transform_operations: CounterVec,
     pub transform_duration: HistogramVec,
     pub transform_errors: CounterVec,
+
+    // WebAssembly UDF metrics. Module and kind labels are configuration-time
+    // values; status is restricted to the constants above.
+    pub wasm_invocations: CounterVec,
+    pub wasm_duration: HistogramVec,
+    pub wasm_input_bytes: HistogramVec,
+    pub wasm_output_bytes: HistogramVec,
+    pub wasm_active_invocations: GaugeVec,
+    pub wasm_compilations: CounterVec,
+    pub wasm_compilation_duration: HistogramVec,
 
     // Envelope operation metrics
     pub key_transforms: CounterVec,
@@ -228,6 +249,94 @@ impl Metrics {
             )
             .unwrap(),
 
+            wasm_invocations: CounterVec::new(
+                Opts::new(
+                    "streamforge_wasm_invocations_total",
+                    "WebAssembly UDF invocations by configured module, kind, and bounded status",
+                ),
+                &["module", "kind", "status"],
+            )
+            .unwrap(),
+
+            wasm_duration: HistogramVec::new(
+                HistogramOpts::new(
+                    "streamforge_wasm_duration_seconds",
+                    "WebAssembly UDF invocation duration",
+                )
+                .buckets(vec![
+                    0.000_001, 0.000_005, 0.000_01, 0.000_05, 0.000_1, 0.000_5, 0.001, 0.0025,
+                    0.005, 0.01, 0.025, 0.05,
+                ]),
+                &["module", "kind"],
+            )
+            .unwrap(),
+
+            wasm_input_bytes: HistogramVec::new(
+                HistogramOpts::new(
+                    "streamforge_wasm_input_bytes",
+                    "Serialized input bytes passed to WebAssembly UDFs",
+                )
+                .buckets(vec![
+                    256.0,
+                    1_024.0,
+                    4_096.0,
+                    16_384.0,
+                    65_536.0,
+                    262_144.0,
+                    1_048_576.0,
+                ]),
+                &["module", "kind"],
+            )
+            .unwrap(),
+
+            wasm_output_bytes: HistogramVec::new(
+                HistogramOpts::new(
+                    "streamforge_wasm_output_bytes",
+                    "Serialized output bytes returned by WebAssembly UDFs",
+                )
+                .buckets(vec![
+                    256.0,
+                    1_024.0,
+                    4_096.0,
+                    16_384.0,
+                    65_536.0,
+                    262_144.0,
+                    1_048_576.0,
+                ]),
+                &["module", "kind"],
+            )
+            .unwrap(),
+
+            wasm_active_invocations: GaugeVec::new(
+                Opts::new(
+                    "streamforge_wasm_active_invocations",
+                    "WebAssembly UDF invocations currently executing",
+                ),
+                &["module", "kind"],
+            )
+            .unwrap(),
+
+            wasm_compilations: CounterVec::new(
+                Opts::new(
+                    "streamforge_wasm_compilations_total",
+                    "WebAssembly component startup compilation attempts",
+                ),
+                &["module", "status"],
+            )
+            .unwrap(),
+
+            wasm_compilation_duration: HistogramVec::new(
+                HistogramOpts::new(
+                    "streamforge_wasm_compilation_duration_seconds",
+                    "WebAssembly component verification and compilation duration at startup",
+                )
+                .buckets(vec![
+                    0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
+                ]),
+                &["module"],
+            )
+            .unwrap(),
+
             key_transforms: CounterVec::new(
                 Opts::new(
                     "streamforge_key_transforms_total",
@@ -350,6 +459,13 @@ pub fn register_metrics() -> Result<(), Box<dyn std::error::Error>> {
     REGISTRY.register(Box::new(METRICS.transform_operations.clone()))?;
     REGISTRY.register(Box::new(METRICS.transform_duration.clone()))?;
     REGISTRY.register(Box::new(METRICS.transform_errors.clone()))?;
+    REGISTRY.register(Box::new(METRICS.wasm_invocations.clone()))?;
+    REGISTRY.register(Box::new(METRICS.wasm_duration.clone()))?;
+    REGISTRY.register(Box::new(METRICS.wasm_input_bytes.clone()))?;
+    REGISTRY.register(Box::new(METRICS.wasm_output_bytes.clone()))?;
+    REGISTRY.register(Box::new(METRICS.wasm_active_invocations.clone()))?;
+    REGISTRY.register(Box::new(METRICS.wasm_compilations.clone()))?;
+    REGISTRY.register(Box::new(METRICS.wasm_compilation_duration.clone()))?;
     REGISTRY.register(Box::new(METRICS.key_transforms.clone()))?;
     REGISTRY.register(Box::new(METRICS.header_operations.clone()))?;
     REGISTRY.register(Box::new(METRICS.timestamp_operations.clone()))?;
@@ -435,5 +551,26 @@ mod tests {
             .aggregation_records_emitted
             .with_label_values(&["orders-metrics-1m"])
             .inc_by(3.0);
+    }
+
+    #[test]
+    fn test_wasm_metrics_use_bounded_configuration_labels() {
+        let metrics = Metrics::new();
+        metrics
+            .wasm_invocations
+            .with_label_values(&[
+                "redact",
+                labels::WASM_KIND_VALUE_TRANSFORM,
+                labels::WASM_STATUS_OK,
+            ])
+            .inc();
+        metrics
+            .wasm_duration
+            .with_label_values(&["redact", labels::WASM_KIND_VALUE_TRANSFORM])
+            .observe(0.000_1);
+        metrics
+            .wasm_active_invocations
+            .with_label_values(&["redact", labels::WASM_KIND_VALUE_TRANSFORM])
+            .set(1.0);
     }
 }

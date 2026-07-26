@@ -60,17 +60,24 @@ jobs:
       - name: Prepare structured result directories
         run: mkdir -p target/performance-results/criterion
 
+      - name: Verify checked-in WASM benchmark fixtures
+        working-directory: tests/fixtures/wasm/generated
+        run: shasum -a 256 -c SHA256SUMS
+
       - name: Run all Criterion targets
         run: |
           FILTER_LOG=target/performance-results/criterion/filter_benchmarks.log
           TRANSFORM_LOG=target/performance-results/criterion/transform_benchmarks.log
           PIPELINE_LOG=target/performance-results/criterion/end_to_end_benchmark.log
+          WASM_LOG=target/performance-results/criterion/wasm_udf_benchmarks.log
           cargo bench --bench filter_benchmarks -- --noplot \
             2>&1 | tee "$FILTER_LOG"
           cargo bench --bench transform_benchmarks -- --noplot \
             2>&1 | tee "$TRANSFORM_LOG"
           cargo bench --bench end_to_end_benchmark -- --noplot \
             2>&1 | tee "$PIPELINE_LOG"
+          cargo bench --bench wasm_udf_benchmarks -- --noplot \
+            2>&1 | tee "$WASM_LOG"
 
       - name: Explain evidence scope
         if: always()
@@ -78,10 +85,16 @@ jobs:
           {
             echo "## Criterion smoke evidence"
             echo
-            echo "All three repository Criterion targets were executed" \
+            echo "All four repository Criterion targets were executed" \
               "on a shared GitHub-hosted runner."
             echo "Results are diagnostic smoke evidence only;" \
               "this workflow applies no regression threshold."
+            echo
+            echo "The stable wasm_udf/native_no_udf control preserves the" \
+              "JSON-bytes-to-one-destination-envelope workload."
+            echo "The <=3% native no-UDF release budget requires statistically" \
+              "significant matched A/B runs on controlled native hardware;" \
+              "shared-runner results must not be used as that gate."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Criterion reports and logs
@@ -94,6 +107,7 @@ jobs:
           path: |
             target/criterion/
             target/performance-results/criterion/
+            tests/fixtures/wasm/generated/SHA256SUMS
 
   throughput-smoke:
     name: Throughput smoke evidence

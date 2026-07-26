@@ -176,6 +176,8 @@ pub fn test_config_base(bootstrap: &str, input: &str, output: &str) -> MirrorMak
             enabled: false,
             ..Default::default()
         },
+        wasm: None,
+        udfs: None,
     }
 }
 

@@ -112,6 +112,11 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      - name: Smoke-test WebAssembly UDF startup
+        run: >-
+          target/${{ matrix.target }}/release/streamforge-validate
+          tests/fixtures/wasm/release-smoke.yaml
+
       - name: Strip binary (Linux only)
         if: runner.os == 'Linux'
         run: strip target/${{ matrix.target }}/release/streamforge

@@ -14,6 +14,7 @@ The Streamforge Operator watches for StreamforgePipeline custom resources and au
 - ⚙️ **Dynamic Configuration** - Generates ConfigMaps from StreamforgePipeline specs
 - 🚀 **Auto-scaling** - Supports horizontal scaling via replica count
 - 🔧 **Flexible Defaults** - Cluster-wide defaults configurable via Helm values
+- 🧩 **WebAssembly UDFs** - Mounts digest-pinned ConfigMap or PVC artifacts read-only and rolls pods when artifacts or rendered configuration change
 
 ## Architecture
 
@@ -182,7 +183,6 @@ spec:
     brokers: "kafka.kafka.svc.cluster.local:9092"
     topic: "input-topic"
     offset: "latest"
-    groupId: "my-pipeline-group"
 
   # Destination Kafka cluster(s)
   destinations:
@@ -245,10 +245,12 @@ appid: "my-pipeline"
 bootstrap: "kafka.kafka.svc.cluster.local:9092"
 target_broker: "kafka.kafka.svc.cluster.local:9092"
 input: "input-topic"
-output: "output-topic"
 offset: "latest"
-group_id: "my-pipeline-group"
 threads: 4
+routing:
+  routing_type: "filter"
+  destinations:
+    - output: "output-topic"
 ```
 
 #### Deployment
@@ -261,6 +263,7 @@ threads: 4
   - `streamforge.io/pipeline: {pipeline-name}`
 - **Volume Mounts**:
   - ConfigMap mounted at `/etc/streamforge/config.yaml`
+  - UDF artifacts mounted read-only below `/var/run/streamforge/udfs/{module-name}/`
   - Secrets mounted at `/etc/streamforge/secrets/{role}/{secret-name}/`
     - `role` = `source`, `destination-0`, `destination-1`, etc.
     - Organized by cluster to avoid conflicts
@@ -270,7 +273,8 @@ threads: 4
 
 ### Multiple Destinations
 
-Fan-out to multiple Kafka clusters or topics:
+Fan-out to multiple topics on one destination Kafka cluster. All destination
+`brokers` values must currently be identical.
 
 ```yaml
 spec:
@@ -279,9 +283,9 @@ spec:
     topic: "input"
 
   destinations:
-    - brokers: "dest-kafka-1:9092"
+    - brokers: "dest-kafka:9092"
       topic: "output-1"
-    - brokers: "dest-kafka-2:9092"
+    - brokers: "dest-kafka:9092"
       topic: "output-2"
 ```
 
