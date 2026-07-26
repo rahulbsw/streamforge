@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "examples/envelope-transform",
+    "examples/filter",
+    "examples/value-transform",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+version = "0.1.0"
+
+[workspace.dependencies]
+wit-bindgen = { version = "=0.41.0", default-features = false, features = ["macros", "realloc"] }

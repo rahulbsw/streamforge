@@ -11,6 +11,11 @@ use tracing::{error, info, warn};
 
 mod crd;
 mod reconciler;
+#[cfg(test)]
+mod reconciler_tests;
+mod render;
+#[cfg(test)]
+mod render_tests;
 
 use crd::StreamforgePipeline;
 use reconciler::PipelineReconciler;

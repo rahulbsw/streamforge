@@ -73,6 +73,17 @@ axum = "0.7"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["trace"] }
 
+# Sandboxed WebAssembly UDF runtime. WASI and async support are intentionally
+# omitted: UDF components receive only their typed arguments and export values.
+wasmtime = { version = "=36.0.10", default-features = false, features = [
+    "component-model",
+    "cranelift",
+    "parallel-compilation",
+    "pooling-allocator",
+    "runtime",
+    "std",
+] }
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 testcontainers = "0.15"
@@ -97,6 +108,10 @@ harness = false
 
 [[bench]]
 name = "end_to_end_benchmark"
+harness = false
+
+[[bench]]
+name = "wasm_udf_benchmarks"
 harness = false
 
 [features]

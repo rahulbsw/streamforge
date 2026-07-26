@@ -119,6 +119,43 @@ Function-style array `any` and `all` evaluation still clone each visited array
 element into a temporary envelope. That boundary is intentionally left for a
 later measured refactor.
 
+### Optional WebAssembly UDF runtime
+
+`src/wasm/` implements the opt-in, stateless UDF extension point. It does not
+replace the native DSL and is not initialized when the top-level `wasm`
+registry is absent.
+
+Startup canonicalizes the configured artifact root, reads each component once
+through bounded I/O, verifies its pinned SHA-256 digest, compiles it with
+Wasmtime, links it against an empty host linker, checks its declared WIT world,
+and probes instantiation before any Kafka client is created. No WASI or other
+ambient host interface is linked.
+
+The versioned `streamforge:udf@1.0.0` WIT package defines separate filter,
+JSON-value-transform, and mutable-envelope-transform worlds. Source
+topic/partition/offset are input-only. Native and UDF stages compose in this
+order:
+
+1. native filter, then UDF filter;
+2. native value transform, then UDF value transform;
+3. native key/header/timestamp envelope mutations, then UDF envelope mutation.
+
+This ordering implements the `PROJECT_SPEC.md` contract: envelope mutations
+observe the final destination payload. It changes the earlier runtime behavior,
+which applied native envelope mutations before the value transform. Pipelines
+that derive envelope fields from values removed by their value transform must
+retain those inputs in the transformed payload or update the envelope rule.
+
+Each invocation uses a fresh store and component instance backed by Wasmtime's
+pooling allocator. A dedicated epoch thread enforces execution deadlines.
+Configured bounds cover artifact, input, output, linear memory, tables, stack,
+and concurrent instances. Guest state is never a persistence contract.
+
+UDF failures are deterministic destination-stage failures and are not retried.
+The destination `error_policy` selects fail-fast, one contextual DLQ record,
+destination skip, or unchanged-envelope continuation. See `docs/WASM_UDFS.md`
+for the ABI, deployment, security, and performance contract.
+
 ### Destination processing
 
 `src/processor.rs` builds a runtime for each configured destination.
@@ -301,4 +338,4 @@ and are not inferred from unit or microbenchmark success.
 - `docs/PERFORMANCE.md` — tuning and benchmark method
 - `docs/DELIVERY_GUARANTEES.md` — commit and failure semantics
 
-**Last updated:** 2026-07-24
+**Last updated:** 2026-07-25

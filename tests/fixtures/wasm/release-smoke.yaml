@@ -1,0 +1,14 @@
+appid: wasm-release-smoke
+bootstrap: localhost:9092
+input: smoke-input
+output: smoke-output
+wasm:
+  module_root: tests/fixtures/wasm/generated
+  modules:
+    - name: smoke-filter
+      path: filter-v1.wasm
+      sha256: a7816141d01935a8aa5f65ab6f13d4ed7c12a5cee9dfba061efa3af1b11e7517
+      world: filter
+      abi: v1
+udfs:
+  filter: smoke-filter

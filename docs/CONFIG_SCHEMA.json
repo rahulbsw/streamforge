@@ -4,7 +4,11 @@
   "title": "StreamForge Configuration",
   "description": "Configuration schema for StreamForge Kafka streaming pipelines",
   "type": "object",
-  "required": ["appid", "bootstrap", "input", "routing"],
+  "required": ["appid", "bootstrap", "input"],
+  "anyOf": [
+    {"required": ["output"]},
+    {"required": ["routing"]}
+  ],
   "properties": {
     "appid": {
       "type": "string",
@@ -25,6 +29,74 @@
       "description": "Source Kafka topic to consume from",
       "minLength": 1,
       "examples": ["events", "users", "orders"]
+    },
+    "output": {
+      "type": "string",
+      "description": "Destination topic in single-destination mode",
+      "minLength": 1
+    },
+    "transform": {
+      "type": "string",
+      "description": "Native value-transform DSL expression in single-destination mode"
+    },
+    "wasm": {
+      "type": "object",
+      "description": "Digest-pinned stateless WebAssembly component registry",
+      "required": ["module_root", "modules"],
+      "properties": {
+        "module_root": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical trust root containing every configured component"
+        },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "max_module_bytes": {"type": "integer", "minimum": 1, "maximum": 268435456, "default": 16777216},
+            "max_input_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864, "default": 1048576},
+            "max_output_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864, "default": 1048576},
+            "max_memory_bytes": {"type": "integer", "minimum": 65536, "maximum": 536870912, "multipleOf": 65536, "default": 67108864},
+            "max_table_elements": {"type": "integer", "minimum": 1, "maximum": 1000000, "default": 10000},
+            "max_execution_ms": {"type": "integer", "minimum": 1, "maximum": 60000, "default": 5},
+            "epoch_tick_ms": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 1},
+            "max_wasm_stack_bytes": {"type": "integer", "minimum": 65536, "maximum": 16777216, "default": 2097152},
+            "max_concurrent_instances": {"type": "integer", "minimum": 1, "maximum": 1024, "default": 256}
+          },
+          "additionalProperties": false
+        },
+        "modules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": ["name", "path", "sha256", "world", "abi"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              },
+              "path": {"type": "string", "minLength": 1},
+              "sha256": {
+                "type": "string",
+                "pattern": "^[A-Fa-f0-9]{64}$"
+              },
+              "world": {
+                "type": "string",
+                "enum": ["filter", "value_transform", "envelope_transform"]
+              },
+              "abi": {"type": "string", "enum": ["v1"]}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "udfs": {
+      "$ref": "#/definitions/destinationUdfs"
     },
     "offset": {
       "type": "string",
@@ -316,6 +388,9 @@
                     "x-version": "1.0"
                   }
                 ]
+              },
+              "udfs": {
+                "$ref": "#/definitions/destinationUdfs"
               }
             }
           }
@@ -380,6 +455,19 @@
           "examples": ["redis://localhost:6379", "redis://:password@redis:6379/0"]
         }
       }
+    }
+  },
+  "definitions": {
+    "destinationUdfs": {
+      "type": "object",
+      "description": "Named WebAssembly modules bound to destination stages",
+      "minProperties": 1,
+      "properties": {
+        "filter": {"type": "string", "minLength": 1},
+        "value_transform": {"type": "string", "minLength": 1},
+        "envelope_transform": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
     }
   },
   "examples": [

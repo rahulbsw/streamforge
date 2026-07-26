@@ -22,6 +22,8 @@ fn create_test_config() -> MirrorMakerConfig {
         observability: Default::default(),
         retry: Default::default(),
         dlq: Default::default(),
+        wasm: None,
+        udfs: None,
     }
 }
 

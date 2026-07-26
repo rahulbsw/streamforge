@@ -19,7 +19,8 @@ Comprehensive GitHub Actions CI/CD updates to support the complete Streamforge p
 
 - **Build Matrix:**
   - Set `fail-fast: false` to allow other platforms to continue if one fails
-  - Made security audit `continue-on-error: true` (don't block on advisories)
+  - Security audit failures now block CI; the explicitly reviewed
+    `RUSTSEC-2024-0437` exception remains scoped in the audit command
 
 #### `.github/workflows/release.yml`
 - Updated all toolchain actions to `dtolnay/rust-toolchain`
@@ -31,9 +32,10 @@ Comprehensive GitHub Actions CI/CD updates to support the complete Streamforge p
 
 #### Rust Application (Main streamforge binary)
 ```yaml
-- rust-test: Full test suite, clippy, formatting
+- rust-test: Full test suite, Rust UDF guest compilation, fixture digest
+  verification, clippy, formatting
 - rust-build: Multi-platform builds (Linux, Windows, macOS)
-- rust-security: Security audit with cargo-audit
+- rust-security: Blocking security audit with cargo-audit
 - rust-benchmarks: Benchmark compilation
 ```
 
@@ -92,12 +94,14 @@ Comprehensive GitHub Actions CI/CD updates to support the complete Streamforge p
 
 ### 4. Test Results
 
-All local tests passing:
-- ✅ Rust app: 56 tests passed
-- ✅ Operator: Builds successfully
+Recorded local results; Rust, operator, UDF SDK, and Helm were refreshed on
+2026-07-25, while the UI entries retain the prior verified run:
+- ✅ Rust app: 525 tests passed, 30 ignored
+- ✅ Operator: 7 tests passed
+- ✅ Rust UDF SDK: all three examples compile for `wasm32-unknown-unknown`
 - ✅ UI: TypeScript check passes
 - ✅ UI: ESLint passes (2 warnings, intentional)
-- ✅ Helm: Lint and template validation passes
+- ✅ Helm: Lint and template validation pass
 
 ## CI Workflow Structure
 
@@ -144,7 +148,7 @@ on: [release, tag push]
 ## Next Steps
 
 1. Monitor first CI run on GitHub Actions
-2. Add unit tests to operator (currently 0 tests)
+2. Expand operator integration coverage beyond the current seven tests
 3. Consider adding integration tests with test Kafka cluster
 4. Add UI component tests (Jest/React Testing Library)
 5. Add E2E tests for full pipeline workflow
@@ -155,7 +159,11 @@ None - All changes are additive or fix existing issues.
 
 ## Security Notes
 
-- Security audit set to `continue-on-error: true` to prevent blocking on advisories
+- Security audit failures block CI. A newly introduced sandbox dependency may
+  not ship with an unreviewed RustSec vulnerability.
+- Rust WebAssembly UDF examples compile for `wasm32-unknown-unknown` in CI, and
+  checked-in component fixture digests are verified before host tests are
+  accepted.
 - All dependencies explicitly installed (no implicit dependencies)
 - Docker images built from source with buildx cache
 - No secrets or credentials in CI configuration

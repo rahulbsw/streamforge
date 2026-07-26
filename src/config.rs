@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 
+use crate::wasm::config::{DestinationUdfConfig, WasmConfig};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MirrorMakerConfig {
     /// Application ID
@@ -78,6 +80,18 @@ pub struct MirrorMakerConfig {
     /// Dead letter queue configuration for failed messages
     #[serde(default)]
     pub dlq: crate::dlq::DlqConfig,
+
+    /// Optional registry of stateless WebAssembly UDF components.
+    ///
+    /// Omitting this field preserves the native-only execution path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wasm: Option<WasmConfig>,
+
+    /// WebAssembly UDFs for single-destination mode.
+    ///
+    /// Ignored when `routing` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub udfs: Option<DestinationUdfConfig>,
 }
 
 /// Runtime batching and Kafka client performance tuning.
@@ -456,6 +470,10 @@ pub struct DestinationConfig {
 
     /// Description
     pub description: Option<String>,
+
+    /// Optional stateless WebAssembly UDFs for this destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub udfs: Option<DestinationUdfConfig>,
 }
 
 /// Header transformation configuration
@@ -782,6 +800,29 @@ impl MirrorMakerConfig {
 
         self.performance.validate()?;
 
+        if let Some(wasm) = &self.wasm {
+            wasm.validate().map_err(config_error)?;
+        }
+
+        if let Some(udfs) = &self.udfs {
+            if self.routing.is_some() {
+                return Err(config_error(
+                    "top-level udfs is only valid in single-destination mode",
+                ));
+            }
+            if udfs.is_empty() {
+                return Err(config_error(
+                    "top-level udfs must bind at least one WebAssembly stage",
+                ));
+            }
+            let wasm = self
+                .wasm
+                .as_ref()
+                .ok_or_else(|| config_error("top-level udfs requires a top-level wasm registry"))?;
+            wasm.validate_refs("single destination", udfs)
+                .map_err(config_error)?;
+        }
+
         if self.performance.producer_delivery_mode == ProducerDeliveryMode::Queued {
             if self.commit_strategy.manual_commit {
                 return Err(config_error(
@@ -817,6 +858,28 @@ impl MirrorMakerConfig {
 
         if let Some(routing) = &self.routing {
             for dest in &routing.destinations {
+                if let Some(udfs) = &dest.udfs {
+                    if udfs.is_empty() {
+                        return Err(config_error(format!(
+                            "destination {:?} udfs must bind at least one WebAssembly stage",
+                            dest.output
+                        )));
+                    }
+                    let wasm = self.wasm.as_ref().ok_or_else(|| {
+                        config_error(format!(
+                            "destination {:?} udfs requires a top-level wasm registry",
+                            dest.output
+                        ))
+                    })?;
+                    wasm.validate_refs(&format!("destination {:?}", dest.output), udfs)
+                        .map_err(config_error)?;
+                    if dest.aggregation.is_some() && udfs.envelope_transform.is_some() {
+                        return Err(config_error(
+                            "aggregation destinations cannot use a wasm envelope_transform",
+                        ));
+                    }
+                }
+
                 if let Some(aggregation) = &dest.aggregation {
                     if self.commit_strategy.manual_commit {
                         return Err(config_error(
@@ -1624,5 +1687,75 @@ operation: "FROM:/user/id"
         let config: HeaderTransformConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.header, "x-user-id");
         assert_eq!(config.operation, "FROM:/user/id");
+    }
+
+    #[test]
+    fn test_single_destination_wasm_bindings_validate_structurally() {
+        let yaml = r#"
+appid: test-app
+bootstrap: localhost:9092
+input: input-topic
+output: output-topic
+wasm:
+  module_root: /opt/streamforge/udfs
+  modules:
+    - name: redact
+      path: redact.wasm
+      sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      world: value_transform
+      abi: v1
+udfs:
+  value_transform: redact
+"#;
+
+        let config: MirrorMakerConfig = serde_yaml::from_str(yaml).unwrap();
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn test_empty_and_wrong_world_wasm_bindings_are_rejected() {
+        let empty: MirrorMakerConfig = serde_yaml::from_str(
+            r#"
+appid: test-app
+bootstrap: localhost:9092
+input: input-topic
+output: output-topic
+wasm:
+  module_root: /opt/streamforge/udfs
+  modules: []
+udfs: {}
+"#,
+        )
+        .unwrap();
+        assert!(empty
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("between 1 and 32"));
+
+        let wrong_world: MirrorMakerConfig = serde_yaml::from_str(
+            r#"
+appid: test-app
+bootstrap: localhost:9092
+input: input-topic
+output: output-topic
+wasm:
+  module_root: /opt/streamforge/udfs
+  modules:
+    - name: filter-only
+      path: filter.wasm
+      sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      world: filter
+      abi: v1
+udfs:
+  value_transform: filter-only
+"#,
+        )
+        .unwrap();
+        assert!(wrong_world
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("requires world ValueTransform"));
     }
 }

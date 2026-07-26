@@ -22,6 +22,8 @@ Kafka source ──► filter ──► transform ──┬──► analytics t
 - Route records by payload, key, headers, and timestamps.
 - Reshape events and remove or hash sensitive fields before delivery.
 - Fan out one source topic into destination-specific representations.
+- Run opt-in, digest-pinned WebAssembly filters and transforms inside explicit
+  resource and capability limits.
 - Run as a standalone Rust binary or through the Kubernetes operator.
 - Observe delivery, errors, lag, retries, and dead-letter records with
   Prometheus metrics.
@@ -51,6 +53,7 @@ order, and inspect the two destination-specific outputs.
 | Understand the product boundary | [When to use StreamForge](docs/WHEN_TO_USE.md) |
 | Build a selective replication pipeline | [Usage guide](docs/USAGE.md) |
 | Learn the filter and transform language | [DSL reference](docs/ADVANCED_DSL_GUIDE.md) |
+| Build a sandboxed custom filter or transform | [WebAssembly UDFs](docs/WASM_UDFS.md) |
 | Deploy with Podman or Kubernetes | [Deployment guide](docs/DEPLOYMENT.md) |
 | Configure TLS and SASL | [Security configuration](docs/SECURITY_CONFIGURATION.md) |
 | Operate and troubleshoot a pipeline | [Operations](docs/OPERATIONS.md) |

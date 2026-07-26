@@ -1,0 +1,4 @@
+ffcc74515167b305dd4580ad5e744c3c7583e65cb0a078fbee838d29b36b1496  envelope-transform-v1.wasm
+a7816141d01935a8aa5f65ab6f13d4ed7c12a5cee9dfba061efa3af1b11e7517  filter-v1.wasm
+244836f9c569fdb2b2809ae3790750c1ea9264a963e477d004e71595540adf98  forbidden-import.wasm
+c0b9ba8ea723dc119cc32f5f84769f1c294fae90fbfd7ef5f8566f520c7798c9  value-transform-v1.wasm

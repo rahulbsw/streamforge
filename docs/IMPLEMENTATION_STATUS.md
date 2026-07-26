@@ -29,6 +29,47 @@ Known boundaries:
 - Runtime configuration reload is not implemented.
 - The generic raw/typed envelope described in `PROJECT_SPEC.md` remains planned.
 
+## Stateless WebAssembly UDFs
+
+Implemented in the current source:
+
+- Optional Wasmtime component runtime; native-only configurations do not
+  initialize it.
+- Versioned WIT worlds for envelope-aware filters, JSON value transforms, and
+  mutable key/value/header/timestamp envelope transforms.
+- Canonical-root artifact resolution, bounded single-read loading, mandatory
+  SHA-256 verification, empty-linker import rejection, world checking, and
+  startup instantiation probes before Kafka client construction.
+- Fresh per-invocation stores and instances backed by the pooling allocator,
+  with epoch deadlines and configured artifact/input/output/memory/table/stack/
+  concurrency limits.
+- Native/UDF stage composition and typed destination error-policy behavior,
+  including contextual DLQ routing without rerunning successful destinations.
+- Specification-aligned destination ordering: filters, then value transforms,
+  then key/header/timestamp and full-envelope mutations, with a regression test
+  proving envelope logic observes the final payload.
+- Bounded-label Prometheus metrics for compilation, invocation status,
+  duration, input/output size, and active calls.
+- Operator ConfigMap/PVC artifact delivery with read-only mounts, digest rollout
+  checksums, hardened container security context, full destination rendering,
+  and same-broker validation.
+- A source-based Rust guest SDK/examples and dedicated correctness, security,
+  concurrency, and Criterion benchmark coverage.
+- Wasmtime is pinned to the patched `36.0.10` release. Dependency-audit failures
+  block CI, and CI compiles all Rust guest examples for
+  `wasm32-unknown-unknown` and verifies the checked-in fixture digests.
+
+Known boundaries:
+
+- Guests are stateless by contract; persistent state and recovery are not
+  implemented.
+- Modules are loaded only at startup from the configured local root. Hot reload,
+  network download, and OCI distribution are not implemented.
+- WASI and all ambient host capabilities are deliberately unavailable.
+- Only the Rust guest SDK is maintained in this phase.
+
+See `docs/WASM_UDFS.md` for the complete ABI and operating contract.
+
 ## Filter and transform DSL
 
 Implemented:
@@ -136,13 +177,31 @@ without loss, but do not change or prove general delivery semantics.
 
 Verified for the current source on 2026-07-25 UTC:
 
-- `cargo test --all --no-fail-fast`: 474 passed, 0 failed, 30 ignored across
+- `cargo test --all --locked --offline --no-fail-fast`: 525 passed, 0 failed,
+  30 ignored across
   unit, integration, and documentation tests.
+- WASM-specific coverage includes all three WIT worlds, forbidden imports,
+  digest and path attacks, mutation after load, guest payload-echo suppression,
+  malformed output, deadlines, scheduler liveness, memory/table/stack/input/
+  output limits, pooling reuse, fresh state, and concurrent isolation.
+- `cargo clippy --all-targets --all-features --locked --offline -- -D warnings`
+  passed. The existing optional `redis 0.24.0` dependency emits Cargo's
+  future-incompatibility notice but no current Clippy diagnostic.
+- `cargo audit --ignore RUSTSEC-2024-0437` reports zero vulnerabilities after
+  the Wasmtime `36.0.10` patch update. Seven warnings inherited from `main`
+  remain allowed by Cargo Audit's default warning policy.
+- The operator passed 7 tests, warnings-denied Clippy, and formatting checks;
+  Helm lint passed.
+- The release binaries built with the locked dependency graph and
+  `streamforge-validate` loaded, verified, compiled, linked, and probed the
+  digest-pinned release-smoke component successfully.
+- The final fixture digests verified, the complete WASM Criterion target
+  completed, and the dated local benchmark record captures startup, native
+  no-UDF, three-world, fan-out, error, limit, and timeout measurements.
 - Partition-worker tests verify same-partition FIFO order, cross-lane
   concurrency, and bounded-queue backpressure.
 - Queued-delivery tests verify successful acknowledgements, broker failures,
   canceled futures, configuration safety constraints, and flush forwarding.
-- `cargo clippy --all-targets --offline -- -D warnings`: passed.
 - `cargo fmt --all -- --check`, benchmark Bash/Python syntax checks,
   `git diff --check`, generated benchmark-config validation, and JSON schema
   parsing: passed.

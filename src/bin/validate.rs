@@ -10,6 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use streamforge::config::MirrorMakerConfig;
 use streamforge::filter_parser::{parse_filter, parse_key_transform, parse_transform_with_cache};
+use streamforge::WasmRegistry;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -74,6 +75,16 @@ fn main() {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
     let mut expr_count = 0;
+
+    if let Some(wasm) = &config.wasm {
+        match WasmRegistry::load(wasm) {
+            Ok(registry) => {
+                let module_count = registry.module_names().count();
+                println!("🧩 WebAssembly modules verified: {module_count}");
+            }
+            Err(error) => errors.push(format!("WebAssembly registry: {error}")),
+        }
+    }
 
     // Validate single-destination mode
     if config.routing.is_none() {

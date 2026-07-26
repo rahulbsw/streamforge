@@ -29,6 +29,10 @@ pub struct StreamforgePipelineSpec {
     /// Destination configurations
     pub destinations: Vec<DestinationConfig>,
 
+    /// WebAssembly UDF modules available to destination bindings.
+    #[serde(default)]
+    pub udfs: Option<UdfConfig>,
+
     /// Resource requirements
     #[serde(default)]
     pub resources: ResourceRequirements,
@@ -83,12 +87,109 @@ pub struct DestinationConfig {
     pub topic: String,
     pub filter: Option<String>,
     pub transform: Option<String>,
+    /// Optional WebAssembly UDF bindings for this destination.
+    #[serde(default)]
+    pub udfs: Option<UdfBindings>,
     #[serde(default)]
     pub partitioner: Option<String>,
     pub partitioner_field: Option<String>,
     #[serde(default = "default_compression")]
     pub compression: String,
     pub security: Option<SecurityConfig>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UdfConfig {
+    /// Runtime limits. Omitted fields use StreamForge's production defaults.
+    #[serde(default)]
+    pub runtime: UdfRuntimeConfig,
+    /// Module registry. Module names must be unique within the pipeline.
+    pub modules: Vec<UdfModule>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UdfRuntimeConfig {
+    pub max_module_bytes: Option<u64>,
+    pub max_input_bytes: Option<u64>,
+    pub max_output_bytes: Option<u64>,
+    pub max_memory_bytes: Option<u64>,
+    pub max_table_elements: Option<u64>,
+    pub max_execution_ms: Option<u64>,
+    pub epoch_tick_ms: Option<u64>,
+    pub max_wasm_stack_bytes: Option<u64>,
+    pub max_concurrent_instances: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UdfModule {
+    /// Stable module name referenced by destination bindings.
+    pub name: String,
+    /// Lowercase SHA-256 digest, exactly 64 hexadecimal characters.
+    pub sha256: String,
+    /// Exported world implemented by the module.
+    pub world: UdfWorld,
+    /// StreamForge UDF ABI version.
+    #[serde(default)]
+    pub abi: UdfAbi,
+    /// Kubernetes artifact containing the component binary.
+    pub artifact: UdfArtifactRef,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UdfWorld {
+    Filter,
+    ValueTransform,
+    EnvelopeTransform,
+}
+
+impl UdfWorld {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Filter => "filter",
+            Self::ValueTransform => "value_transform",
+            Self::EnvelopeTransform => "envelope_transform",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UdfAbi {
+    #[default]
+    V1,
+}
+
+impl UdfAbi {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::V1 => "v1",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum UdfArtifactRef {
+    /// A single ConfigMap key containing the component binary.
+    ConfigMap { name: String, key: String },
+    /// A component at a safe relative path inside a read-only PVC.
+    PersistentVolumeClaim {
+        #[serde(rename = "claimName")]
+        claim_name: String,
+        path: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UdfBindings {
+    pub filter: Option<String>,
+    pub value_transform: Option<String>,
+    pub envelope_transform: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
@@ -217,4 +318,92 @@ fn default_image_tag() -> String {
 }
 fn default_image_pull_policy() -> String {
     "IfNotPresent".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn udf_spec_round_trips_with_typed_artifact_references() {
+        let source = serde_json::json!({
+            "apiVersion": "streamforge.io/v1alpha1",
+            "kind": "StreamforgePipeline",
+            "metadata": {"name": "orders"},
+            "spec": {
+                "source": {
+                    "brokers": "kafka:9092",
+                    "topic": "orders"
+                },
+                "destinations": [{
+                    "brokers": "target:9092",
+                    "topic": "filtered-orders",
+                    "udfs": {
+                        "filter": "allow-orders",
+                        "valueTransform": "redact-orders"
+                    }
+                }],
+                "udfs": {
+                    "runtime": {
+                        "maxMemoryBytes": 67108864,
+                        "maxExecutionMs": 10
+                    },
+                    "modules": [
+                        {
+                            "name": "allow-orders",
+                            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "world": "filter",
+                            "artifact": {
+                                "configMap": {
+                                    "name": "order-udfs",
+                                    "key": "allow.wasm"
+                                }
+                            }
+                        },
+                        {
+                            "name": "redact-orders",
+                            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                            "world": "value_transform",
+                            "abi": "v1",
+                            "artifact": {
+                                "persistentVolumeClaim": {
+                                    "claimName": "udf-artifacts",
+                                    "path": "release/redact.wasm"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+
+        let pipeline: StreamforgePipeline = serde_json::from_value(source).unwrap();
+        let serialized = serde_json::to_value(&pipeline).unwrap();
+        let reparsed: StreamforgePipeline = serde_json::from_value(serialized).unwrap();
+        let udfs = reparsed.spec.udfs.unwrap();
+
+        assert_eq!(udfs.modules.len(), 2);
+        assert!(matches!(
+            udfs.modules[0].artifact,
+            UdfArtifactRef::ConfigMap { ref name, ref key }
+                if name == "order-udfs" && key == "allow.wasm"
+        ));
+        assert!(matches!(
+            udfs.modules[1].artifact,
+            UdfArtifactRef::PersistentVolumeClaim {
+                ref claim_name,
+                ref path
+            } if claim_name == "udf-artifacts" && path == "release/redact.wasm"
+        ));
+        assert_eq!(udfs.runtime.max_memory_bytes, Some(67_108_864));
+        assert_eq!(
+            reparsed.spec.destinations[0]
+                .udfs
+                .as_ref()
+                .unwrap()
+                .value_transform
+                .as_deref(),
+            Some("redact-orders")
+        );
+    }
 }

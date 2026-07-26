@@ -119,10 +119,22 @@ StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka se
   - `Envelope<String, Bytes>` for key-based routing
   - Zero deserialization overhead for passthrough pipelines
 
-- [ ] **User-Defined Functions (UDF)**
-  - WASM-based UDF runtime (lightweight, sandboxed)
-  - Or Lua scripting (Rhai engine considered)
-  - Custom filter/transform logic without recompiling
+- [x] **Stateless WebAssembly UDFs**
+  - Versioned WIT worlds for filters, JSON value transforms, and mutable
+    envelope transforms
+  - Deterministic destination order: filters, value transforms, then envelope
+    mutations, so envelope logic observes the final payload
+  - Digest-pinned startup loading with no WASI imports and bounded execution,
+    memory, stack, input, output, tables, and concurrency
+  - Native DSL/UDF composition, typed error-policy and DLQ integration,
+    Prometheus metrics, operator ConfigMap/PVC delivery, Rust guest SDK, and
+    correctness/security/performance coverage
+  - Wasmtime pinned to the security-patched `36.0.10` release, with a blocking
+    dependency audit, guest-SDK compilation, and fixture verification in CI
+  - User, ABI, SDK, deployment, security, and performance documentation in
+    `docs/WASM_UDFS.md` and `udf-sdk/rust/README.md`
+  - Stateful guests, runtime hot reload, network/OCI loading, and additional
+    language SDKs remain out of scope
 
 - [ ] **State Management**
   - RocksDB-backed state store
@@ -269,7 +281,7 @@ StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka se
 |---------|-------------|--------|
 | v1.0.0  | 2026-04-18  | ✅ Released |
 | v1.0.1  | 2026-05-15  | Patch release (bugfixes) |
-| v1.1.0  | 2026-09-01  | Feature release |
+| v1.1.0  | 2026-09-01  | In development — WASM UDFs implemented |
 | v1.2.0  | 2026-12-01  | Feature release |
 | v2.0.0  | 2027-03-01  | Breaking changes |
 | v3.0.0  | 2028-01-01  | Major evolution |
@@ -283,7 +295,7 @@ Want to contribute? Here are high-impact areas:
 ### Code Contributions
 - Implement Avro support (Issue #123)
 - Add exactly-once semantics (Issue #145)
-- Build WASM UDF runtime (Issue #178)
+- Extend the Rust UDF SDK with additional reviewed examples
 - Performance benchmarking suite (Issue #201)
 
 ### Documentation Contributions

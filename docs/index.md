@@ -172,6 +172,7 @@ selective-replication.yaml cargo run --release \
       <a href="SECURITY_CONFIGURATION.html"><span>Secure</span><strong>Security</strong><em>Configure TLS, SASL, and credentials.</em></a>
       <a href="OBSERVABILITY_QUICKSTART.html"><span>Observe</span><strong>Observability</strong><em>Monitor metrics and consumer lag.</em></a>
       <a href="DELIVERY_GUARANTEES.html"><span>Reason</span><strong>Delivery guarantees</strong><em>Understand retries, DLQs, and failure modes.</em></a>
+      <a href="WASM_UDFS.html"><span>Extend</span><strong>WebAssembly UDFs</strong><em>Run digest-pinned, resource-bounded custom policy.</em></a>
       <a href="COMPATIBILITY.html"><span>Verify</span><strong>Compatibility</strong><em>Review supported broker targets and scope.</em></a>
     </div>
   </section>

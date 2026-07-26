@@ -17,8 +17,10 @@ pub mod observability;
 pub mod partition_pipeline;
 pub mod partitioner;
 pub mod processor;
+mod processor_policy;
 pub mod processor_with_retry;
 pub mod retry;
+pub mod wasm;
 
 pub use aggregation::{AggregateEmission, AggregationEngine, GroupKey};
 pub use cache::{
@@ -54,3 +56,11 @@ pub use hash::{hash_bytes, hash_value, HashAlgorithm};
 pub use jsonpath::{extract_owned_with_segments, extract_with_segments, JsonPath};
 pub use kafka::sink::KafkaSink;
 pub use retry::{retry_with_backoff, RetryConfig, RetryPolicy};
+pub use wasm::config::{
+    DestinationUdfConfig, WasmAbiVersion, WasmConfig, WasmModuleConfig, WasmRuntimeConfig,
+    WasmWorld,
+};
+pub use wasm::{
+    compose_filter, compose_value_transform, WasmEnvelopeOutput, WasmEnvelopeTransform, WasmError,
+    WasmErrorKind, WasmFilter, WasmRegistry, WasmValueTransform, ADAPTER_COMPOSITION_ORDER,
+};

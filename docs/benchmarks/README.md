@@ -21,3 +21,8 @@ schema-version-3 AWS sustained baseline is
 [`results/BENCHMARK_RESULTS.md`](results/BENCHMARK_RESULTS.md). The first
 corrected local run remains diagnostic because its worktree and saturation
 gates were not publication-eligible.
+
+[`results/wasm-udf-local-baseline-20260725.md`](results/wasm-udf-local-baseline-20260725.md)
+captures the clean local pre-change Criterion and test reference for the WASM
+UDF implementation branch. It is development evidence only; release gates must
+use same-revision A/B runs on controlled native hardware.
