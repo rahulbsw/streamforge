@@ -11,7 +11,7 @@ Basic topic mirroring with no transformations. Good starting point for understan
 - Simple source → destination mirroring
 - 2 replicas for high availability
 - Latest offset (doesn't replay historical messages)
-- Consumer group for offset tracking
+- `appid` consumer identity for offset tracking
 
 **Usage:**
 ```bash
@@ -33,8 +33,8 @@ Pipeline with SASL authentication using Kubernetes secrets.
 ```bash
 # Create secrets first
 kubectl create secret generic kafka-sasl-credentials \
-  --from-literal=username=myuser \
-  --from-literal=password=mypassword \
+  --from-file=username=/secure/path/username \
+  --from-file=password=/secure/path/password \
   -n streamforge-system
 
 kubectl create secret generic kafka-ca-cert \
@@ -61,30 +61,11 @@ kubectl create secret generic kafka-tls-certs \
   --from-file=ca.crt=/path/to/ca-cert.pem \
   --from-file=client.crt=/path/to/client-cert.pem \
   --from-file=client.key=/path/to/client-key.pem \
-  --from-literal=key.password=myKeyPassword \
+  --from-file=key.password=/secure/path/key-password \
   -n streamforge-system
 
 # Deploy pipeline
 kubectl apply -f secure-tls-pipeline.yaml
-```
-
-### multi-cluster-secure-pipeline.yaml
-Advanced example: Mirror between multiple Kafka clusters with different credentials.
-
-**Features:**
-- Source and 2 destinations, each with different authentication
-- Production → Analytics (SASL) + Backup (mTLS)
-- Demonstrates secret path organization (source/, destination-0/, destination-1/)
-- No credential conflicts between clusters
-
-**Usage:**
-```bash
-# See the file for complete secret creation commands
-kubectl apply -f multi-cluster-secure-pipeline.yaml
-
-# Verify secret mounting paths
-kubectl exec -n streamforge-system deployment/multi-cluster-secure-pipeline -- \
-  ls -R /etc/streamforge/secrets/
 ```
 
 **📖 For detailed secret management documentation, see [SECRETS.md](./SECRETS.md)**
@@ -98,14 +79,13 @@ A StreamforgePipeline has the following main components:
 source:
   brokers: "kafka-broker:9092"    # Kafka broker addresses
   topic: "source-topic"           # Source topic name
-  offset: "latest"                # Start offset: latest, earliest, or specific
-  groupId: "consumer-group-id"    # Consumer group for offset management
+  offset: "latest"                # Start offset: latest or earliest
 ```
 
 ### Destination Configuration
 ```yaml
 destinations:
-  - brokers: "kafka-broker:9092"  # Can be same or different cluster
+  - brokers: "kafka-broker:9092"  # Shared by all destinations in one pipeline
     topic: "dest-topic"           # Destination topic name
 ```
 

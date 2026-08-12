@@ -143,13 +143,15 @@ routing:
 
 ```yaml
 threads: 8
+compression:
+  compression_type: raw
+  compression_algo: zstd
 performance:
   fetch_min_bytes: 1048576
   fetch_max_wait_ms: 100
   max_partition_fetch_bytes: 5242880
   batch_size: 2000
   linger_ms: 20
-  compression: "zstd"
 ```
 
 ## Retry and DLQ

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use futures::StreamExt;
+use k8s_openapi::api::apps::v1::Deployment;
 use kube::{
     runtime::{controller::Action, watcher, Controller},
     Api, Client, ResourceExt,
@@ -16,6 +17,8 @@ mod reconciler_tests;
 mod render;
 #[cfg(test)]
 mod render_tests;
+mod resources;
+mod status;
 
 use crd::StreamforgePipeline;
 use reconciler::PipelineReconciler;
@@ -69,6 +72,11 @@ async fn main() -> Result<()> {
     } else {
         Api::<StreamforgePipeline>::namespaced(client.clone(), &args.namespace)
     };
+    let deployments = if args.namespace.is_empty() {
+        Api::<Deployment>::all(client.clone())
+    } else {
+        Api::<Deployment>::namespaced(client.clone(), &args.namespace)
+    };
 
     // Create reconciler
     let reconciler = Arc::new(PipelineReconciler::new(client.clone()));
@@ -77,6 +85,7 @@ async fn main() -> Result<()> {
 
     // Start controller
     Controller::new(pipelines.clone(), watcher::Config::default())
+        .owns(deployments, watcher::Config::default())
         .shutdown_on_signal()
         .run(
             move |pipeline, ctx| {

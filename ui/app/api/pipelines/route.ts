@@ -1,132 +1,114 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as k8s from '@kubernetes/client-node';
-import { requireAuth } from '@/lib/auth';
+import { apiErrorResponse, readJsonBody, requireKubernetesName } from '@/lib/api';
+import { requireAdmin, requireAuth } from '@/lib/auth';
+import {
+  customObjectsApi,
+  PIPELINE_GROUP,
+  PIPELINE_PLURAL,
+  PIPELINE_VERSION,
+} from '@/lib/kubernetes';
 
-const kc = new k8s.KubeConfig();
-kc.loadFromDefault();
-
-const customObjectsApi = kc.makeApiClient(k8s.CustomObjectsApi);
-
-const GROUP = 'streamforge.io';
-const VERSION = 'v1alpha1';
-const PLURAL = 'streamforgepipelines';
+interface PipelineResource {
+  metadata?: { name?: string; namespace?: string };
+  [key: string]: unknown;
+}
 
 export async function GET(request: NextRequest) {
   try {
     await requireAuth();
-
-    const namespace = request.nextUrl.searchParams.get('namespace') || 'default';
-
+    const namespace = requireKubernetesName(
+      request.nextUrl.searchParams.get('namespace') || 'default',
+      'namespace',
+    );
     const response = await customObjectsApi.listNamespacedCustomObject({
       namespace,
-      group: GROUP,
-      version: VERSION,
-      plural: PLURAL,
+      group: PIPELINE_GROUP,
+      version: PIPELINE_VERSION,
+      plural: PIPELINE_PLURAL,
     });
-
     return NextResponse.json(response);
-  } catch (error: any) {
-    if (error.message === 'Unauthorized') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    console.error('Error listing pipelines:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to list pipelines' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, 'Failed to list pipelines');
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    await requireAdmin();
+    const body = await readJsonBody<PipelineResource>(request);
+    const namespace = requireKubernetesName(body.metadata?.namespace || 'default', 'namespace');
+    requireKubernetesName(body.metadata?.name || null, 'pipeline name');
 
-    const body = await request.json();
-    const namespace = body.metadata?.namespace || 'default';
+    await customObjectsApi.createNamespacedCustomObject({
+      namespace,
+      group: PIPELINE_GROUP,
+      version: PIPELINE_VERSION,
+      plural: PIPELINE_PLURAL,
+      body,
+      dryRun: 'All',
+      fieldManager: 'streamforge-ui',
+      fieldValidation: 'Strict',
+    });
 
     const response = await customObjectsApi.createNamespacedCustomObject({
       namespace,
-      group: GROUP,
-      version: VERSION,
-      plural: PLURAL,
+      group: PIPELINE_GROUP,
+      version: PIPELINE_VERSION,
+      plural: PIPELINE_PLURAL,
       body,
+      fieldManager: 'streamforge-ui',
+      fieldValidation: 'Strict',
     });
-
     return NextResponse.json(response, { status: 201 });
-  } catch (error: any) {
-    if (error.message === 'Unauthorized') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    console.error('Error creating pipeline:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to create pipeline' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, 'Failed to create pipeline');
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
-    await requireAuth();
-
-    const name = request.nextUrl.searchParams.get('name');
-    const namespace = request.nextUrl.searchParams.get('namespace') || 'default';
-
-    if (!name) {
-      return NextResponse.json({ error: 'Pipeline name is required' }, { status: 400 });
-    }
+    await requireAdmin();
+    const name = requireKubernetesName(
+      request.nextUrl.searchParams.get('name'),
+      'pipeline name',
+    );
+    const namespace = requireKubernetesName(
+      request.nextUrl.searchParams.get('namespace') || 'default',
+      'namespace',
+    );
 
     await customObjectsApi.deleteNamespacedCustomObject({
       namespace,
-      group: GROUP,
-      version: VERSION,
-      plural: PLURAL,
+      group: PIPELINE_GROUP,
+      version: PIPELINE_VERSION,
+      plural: PIPELINE_PLURAL,
       name,
     });
-
     return NextResponse.json({ message: 'Pipeline deleted successfully' });
-  } catch (error: any) {
-    if (error.message === 'Unauthorized') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    console.error('Error deleting pipeline:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to delete pipeline' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, 'Failed to delete pipeline');
   }
 }
 
 export async function PATCH(request: NextRequest) {
   try {
-    await requireAuth();
-
-    const body = await request.json();
-    const namespace = body.metadata?.namespace || 'default';
-    const name = body.metadata?.name;
-
-    if (!name) {
-      return NextResponse.json({ error: 'Pipeline name is required' }, { status: 400 });
-    }
+    await requireAdmin();
+    const body = await readJsonBody<PipelineResource>(request);
+    const namespace = requireKubernetesName(body.metadata?.namespace || 'default', 'namespace');
+    const name = requireKubernetesName(body.metadata?.name || null, 'pipeline name');
 
     const response = await customObjectsApi.patchNamespacedCustomObject({
       namespace,
-      group: GROUP,
-      version: VERSION,
-      plural: PLURAL,
+      group: PIPELINE_GROUP,
+      version: PIPELINE_VERSION,
+      plural: PIPELINE_PLURAL,
       name,
       body,
+      fieldManager: 'streamforge-ui',
+      fieldValidation: 'Strict',
     });
-
     return NextResponse.json(response);
-  } catch (error: any) {
-    if (error.message === 'Unauthorized') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    console.error('Error updating pipeline:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to update pipeline' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, 'Failed to update pipeline');
   }
 }

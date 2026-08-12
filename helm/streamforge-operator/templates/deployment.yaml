@@ -11,8 +11,6 @@ spec:
       {{- include "streamforge-operator.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         {{- include "streamforge-operator.selectorLabels" . | nindent 8 }}
     spec:
@@ -23,7 +21,7 @@ spec:
       {{- end }}
       containers:
         - name: operator
-          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
+          image: "{{ .Values.operator.image.repository }}:{{ include "streamforge-operator.imageTag" (list .Values.operator.image.tag .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
           {{- with .Values.operator.securityContext }}
           securityContext:
@@ -41,9 +39,25 @@ spec:
             - name: DEFAULT_IMAGE_REPOSITORY
               value: {{ .Values.defaults.image.repository }}
             - name: DEFAULT_IMAGE_TAG
-              value: {{ .Values.defaults.image.tag }}
+              value: {{ include "streamforge-operator.imageTag" (list .Values.defaults.image.tag .Chart.AppVersion) }}
+            - name: DEFAULT_IMAGE_PULL_POLICY
+              value: {{ .Values.defaults.image.pullPolicy }}
             - name: DEFAULT_SERVICE_ACCOUNT
               value: {{ include "streamforge-operator.pipelineServiceAccountName" . }}
+            - name: DEFAULT_REPLICAS
+              value: {{ .Values.defaults.replicas | quote }}
+            - name: DEFAULT_THREADS
+              value: {{ .Values.defaults.threads | quote }}
+            - name: DEFAULT_LOG_LEVEL
+              value: {{ .Values.defaults.logLevel | quote }}
+            - name: DEFAULT_REQUEST_CPU
+              value: {{ .Values.defaults.resources.requests.cpu | quote }}
+            - name: DEFAULT_REQUEST_MEMORY
+              value: {{ .Values.defaults.resources.requests.memory | quote }}
+            - name: DEFAULT_LIMIT_CPU
+              value: {{ .Values.defaults.resources.limits.cpu | quote }}
+            - name: DEFAULT_LIMIT_MEMORY
+              value: {{ .Values.defaults.resources.limits.memory | quote }}
           resources:
             {{- toYaml .Values.operator.resources | nindent 12 }}
           volumeMounts:

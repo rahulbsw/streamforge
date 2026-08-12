@@ -1,6 +1,6 @@
 # Multi-stage build using Chainguard hardened images
 # Stage 1: Build
-FROM cgr.dev/chainguard/rust:latest-dev AS builder
+FROM cgr.dev/chainguard/rust:latest-dev@sha256:01ee5e47325bc99f25a253593c0dc5cf26183ecd2c5c543855856e0a7f4a3d26 AS builder
 
 USER root
 
@@ -20,6 +20,8 @@ WORKDIR /build
 # Copy dependency manifests for layer caching
 COPY Cargo.toml Cargo.lock ./
 COPY benches ./benches
+COPY crates/streamforge-config-model/Cargo.toml ./crates/streamforge-config-model/Cargo.toml
+COPY crates/streamforge-config-model/src ./crates/streamforge-config-model/src
 
 # Cache dependencies with dummy binary
 RUN mkdir -p src && \
@@ -34,7 +36,7 @@ RUN touch src/main.rs && \
     cargo build --release --locked --bin streamforge
 
 # Stage 2: Runtime
-FROM cgr.dev/chainguard/rust:latest
+FROM cgr.dev/chainguard/rust:latest@sha256:9403ae8340434a1c2a18b41fd55850a61c7851e6189905efe9f0813bdc8f083d
 
 LABEL org.opencontainers.image.source="https://github.com/rahulbsw/streamforge"
 LABEL org.opencontainers.image.description="High-performance Kafka streaming toolkit"

@@ -489,7 +489,7 @@ let config = CacheConfig {
 
 ## See Also
 
-- [Examples](../examples/config.hash-and-cache.yaml)
+- [Configuration schema](CONFIG_SCHEMA.json)
 - [API Documentation](https://docs.rs/streamforge)
 - [Performance Guide](PERFORMANCE.md)
 - [Advanced DSL Guide](ADVANCED_DSL_GUIDE.md)

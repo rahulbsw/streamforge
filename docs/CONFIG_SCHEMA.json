@@ -24,6 +24,10 @@
       "minLength": 1,
       "examples": ["localhost:9092", "kafka1:9092,kafka2:9092"]
     },
+    "target_broker": {
+      "type": "string",
+      "description": "Target Kafka bootstrap servers; defaults to bootstrap"
+    },
     "input": {
       "type": "string",
       "description": "Source Kafka topic to consume from",
@@ -111,18 +115,48 @@
       "maximum": 64,
       "default": 4
     },
-    "commit_strategy": {
-      "type": "string",
-      "description": "Offset commit strategy",
-      "enum": ["auto", "manual", "per-message", "time-based"],
-      "default": "auto"
+    "compression": {
+      "type": "object",
+      "properties": {
+        "compression_type": {
+          "type": "string",
+          "enum": ["none", "raw", "enveloped"],
+          "default": "none"
+        },
+        "compression_algo": {
+          "type": "string",
+          "enum": ["gzip", "snappy", "zstd", "lz4"],
+          "default": "gzip"
+        }
+      }
     },
-    "commit_interval_ms": {
-      "type": "integer",
-      "description": "Commit interval in milliseconds (for time-based strategy)",
-      "minimum": 100,
-      "maximum": 300000,
-      "default": 5000
+    "consumer_properties": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "producer_properties": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "commit_strategy": {
+      "type": "object",
+      "description": "Offset commit and legacy DLQ compatibility settings",
+      "properties": {
+        "manual_commit": {"type": "boolean", "default": false},
+        "commit_mode": {"type": "string", "enum": ["async", "sync"], "default": "async"},
+        "commit_interval_ms": {"type": "integer", "minimum": 1, "default": 5000},
+        "enable_dlq": {"type": "boolean", "default": false},
+        "dlq_topic": {"type": ["string", "null"]},
+        "max_retries": {"type": "integer", "minimum": 0, "default": 3},
+        "retry_backoff": {
+          "type": "object",
+          "properties": {
+            "initial_backoff_ms": {"type": "integer", "minimum": 0, "default": 100},
+            "max_backoff_ms": {"type": "integer", "minimum": 0, "default": 30000},
+            "multiplier": {"type": "number", "exclusiveMinimum": 0, "default": 2.0}
+          }
+        }
+      }
     },
     "performance": {
       "type": "object",
@@ -224,10 +258,17 @@
           "maximum": 300000,
           "default": 30000
         },
+        "multiplier": {
+          "type": "number",
+          "minimum": 1,
+          "default": 2.0
+        },
         "jitter": {
-          "type": "boolean",
-          "description": "Add random jitter to retry delays",
-          "default": true
+          "type": "number",
+          "description": "Jitter factor from 0.0 through 1.0",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1
         }
       }
     },
@@ -245,69 +286,37 @@
           "description": "DLQ topic name",
           "default": "streamforge-dlq"
         },
-        "include_error_headers": {
+        "brokers": {
+          "type": ["string", "null"],
+          "description": "Optional Kafka broker override for the DLQ"
+        },
+        "include_original_headers": {
           "type": "boolean",
-          "description": "Include error details in DLQ message headers",
+          "description": "Include original record headers",
           "default": true
         },
-        "max_retries": {
+        "include_stack_trace": {
+          "type": "boolean",
+          "default": false
+        },
+        "max_dlq_retries": {
           "type": "integer",
-          "description": "Max retries before sending to DLQ",
+          "description": "Maximum retries when a DLQ write fails",
           "minimum": 0,
-          "maximum": 10,
           "default": 3
+        },
+        "compression": {
+          "type": ["string", "null"]
         }
       }
     },
-    "kafka": {
-      "type": "object",
-      "description": "Kafka security and connection settings",
-      "properties": {
-        "security": {
-          "type": "object",
-          "properties": {
-            "protocol": {
-              "type": "string",
-              "enum": ["PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"],
-              "default": "PLAINTEXT"
-            },
-            "sasl_mechanism": {
-              "type": "string",
-              "enum": ["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER"],
-              "description": "SASL authentication mechanism"
-            },
-            "sasl_username": {
-              "type": "string",
-              "description": "SASL username (can use ${ENV_VAR} syntax)"
-            },
-            "sasl_password": {
-              "type": "string",
-              "description": "SASL password (can use ${ENV_VAR} syntax)"
-            }
-          }
-        },
-        "ssl": {
-          "type": "object",
-          "properties": {
-            "ca_location": {
-              "type": "string",
-              "description": "Path to CA certificate"
-            },
-            "certificate_location": {
-              "type": "string",
-              "description": "Path to client certificate"
-            },
-            "key_location": {
-              "type": "string",
-              "description": "Path to client private key"
-            },
-            "key_password": {
-              "type": "string",
-              "description": "Private key password"
-            }
-          }
-        }
-      }
+    "security": {
+      "$ref": "#/definitions/security",
+      "description": "Source Kafka security; also used for the target when target_security is omitted"
+    },
+    "target_security": {
+      "$ref": "#/definitions/security",
+      "description": "Optional target Kafka security override"
     },
     "routing": {
       "type": "object",
@@ -333,10 +342,6 @@
                 "description": "Destination Kafka topic",
                 "minLength": 1
               },
-              "bootstrap": {
-                "type": "string",
-                "description": "Override bootstrap servers for this destination"
-              },
               "filter": {
                 "type": "string",
                 "description": "DSL filter expression",
@@ -360,21 +365,18 @@
                 "description": "Transform for message key",
                 "examples": ["/user/id", "HASH:MD5,/email"]
               },
-              "partitioning": {
+              "partition": {
                 "type": "string",
-                "description": "Partitioning strategy",
-                "enum": ["default", "random", "hash", "field"],
-                "default": "default"
-              },
-              "partition_field": {
-                "type": "string",
-                "description": "Field to use for field-based partitioning",
+                "description": "JSON path used for field-based partitioning",
                 "examples": ["/user/region", "/tenant/id"]
               },
-              "preserve_timestamp": {
+              "timestamp": {
+                "type": "string",
+                "description": "PRESERVE, CURRENT, a JSON path, ADD:seconds, or SUBTRACT:seconds"
+              },
+              "broadcast": {
                 "type": "boolean",
-                "description": "Preserve source message timestamp",
-                "default": true
+                "default": false
               },
               "headers": {
                 "type": "object",
@@ -397,62 +399,81 @@
         }
       }
     },
-    "metrics": {
+    "observability": {
       "type": "object",
       "description": "Observability and metrics configuration",
       "properties": {
-        "enabled": {
+        "metrics_enabled": {
           "type": "boolean",
           "description": "Enable Prometheus metrics",
           "default": true
         },
-        "port": {
+        "metrics_port": {
           "type": "integer",
           "description": "HTTP port for metrics endpoint",
-          "minimum": 1024,
+          "minimum": 1,
           "maximum": 65535,
-          "default": 8080
+          "default": 9090
         },
-        "path": {
+        "metrics_bind_address": {
+          "type": "string",
+          "description": "IP address on which the observability server listens",
+          "default": "0.0.0.0"
+        },
+        "metrics_path": {
           "type": "string",
           "description": "Metrics endpoint path",
           "default": "/metrics"
+        },
+        "lag_monitoring_enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "lag_monitoring_interval_secs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30
         }
       }
     },
     "cache": {
       "type": "object",
       "description": "Caching configuration for enrichment",
+      "required": ["backend_type"],
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Enable caching",
-          "default": true
-        },
-        "type": {
+        "backend_type": {
           "type": "string",
-          "description": "Cache backend type",
-          "enum": ["local", "redis"],
-          "default": "local"
+          "enum": ["local", "redis", "kafka", "multi"]
         },
-        "ttl_seconds": {
-          "type": "integer",
-          "description": "Cache entry TTL in seconds",
-          "minimum": 1,
-          "maximum": 86400,
-          "default": 300
+        "local": {
+          "type": ["object", "null"],
+          "properties": {
+            "max_capacity": {"type": "integer", "minimum": 1, "default": 10000},
+            "ttl_seconds": {"type": ["integer", "null"], "minimum": 1},
+            "tti_seconds": {"type": ["integer", "null"], "minimum": 1}
+          }
         },
-        "max_entries": {
-          "type": "integer",
-          "description": "Maximum cache entries (local cache only)",
-          "minimum": 100,
-          "maximum": 10000000,
-          "default": 10000
+        "redis": {
+          "type": ["object", "null"],
+          "required": ["url"],
+          "properties": {
+            "url": {"type": "string"},
+            "pool_size": {"type": "integer", "minimum": 1},
+            "key_prefix": {"type": ["string", "null"]},
+            "default_ttl_seconds": {"type": ["integer", "null"], "minimum": 1}
+          }
         },
-        "redis_url": {
-          "type": "string",
-          "description": "Redis connection URL (for redis cache type)",
-          "examples": ["redis://localhost:6379", "redis://:password@redis:6379/0"]
+        "kafka": {
+          "type": ["object", "null"],
+          "required": ["bootstrap", "topic", "group_id", "key_field"],
+          "properties": {
+            "bootstrap": {"type": "string"},
+            "topic": {"type": "string"},
+            "group_id": {"type": "string"},
+            "key_field": {"type": "string"},
+            "value_field": {"type": "string", "default": "."},
+            "warmup_on_start": {"type": "boolean", "default": true}
+          }
         }
       }
     }
@@ -468,6 +489,45 @@
         "envelope_transform": {"type": "string", "minLength": 1}
       },
       "additionalProperties": false
+    },
+    "security": {
+      "type": "object",
+      "required": ["protocol"],
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "enum": ["PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"]
+        },
+        "ssl": {
+          "type": "object",
+          "properties": {
+            "ca_location": {"type": "string", "description": "Path to the CA certificate"},
+            "certificate_location": {"type": "string", "description": "Path to the client certificate"},
+            "key_location": {"type": "string", "description": "Path to the client private key"},
+            "key_password": {"type": "string", "deprecated": true, "description": "Compatibility-only inline private-key password; prefer key_password_file"},
+            "key_password_file": {"type": "string", "description": "Path to a protected file containing the private-key password"},
+            "endpoint_identification_algorithm": {"type": "string", "description": "TLS hostname verification algorithm"}
+          }
+        },
+        "sasl": {
+          "type": "object",
+          "required": ["mechanism"],
+          "properties": {
+            "mechanism": {
+              "type": "string",
+              "enum": ["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512", "GSSAPI", "OAUTHBEARER"]
+            },
+            "username": {"type": "string", "deprecated": true, "description": "Compatibility-only inline username; prefer username_file"},
+            "password": {"type": "string", "deprecated": true, "description": "Compatibility-only inline password; prefer password_file"},
+            "username_file": {"type": "string", "description": "Path to a protected file containing the SASL username"},
+            "password_file": {"type": "string", "description": "Path to a protected file containing the SASL password"},
+            "kerberos_service_name": {"type": "string"},
+            "kerberos_principal": {"type": "string"},
+            "kerberos_keytab": {"type": "string", "description": "Path to a protected Kerberos keytab"},
+            "oauthbearer_token": {"type": "string", "deprecated": true, "description": "Compatibility-only inline OAuth bearer token"}
+          }
+        }
+      }
     }
   },
   "examples": [
@@ -489,12 +549,13 @@
         "max_attempts": 3,
         "initial_delay_ms": 100,
         "max_delay_ms": 30000,
-        "jitter": true
+        "multiplier": 2.0,
+        "jitter": 0.1
       },
       "dlq": {
         "enabled": true,
         "topic": "user-processor-dlq",
-        "include_error_headers": true
+        "include_original_headers": true
       },
       "routing": {
         "routing_type": "filter",
@@ -510,14 +571,15 @@
           }
         ]
       },
-      "metrics": {
-        "enabled": true,
-        "port": 8080
+      "observability": {
+        "metrics_enabled": true,
+        "metrics_port": 9090
       }
     },
     {
       "appid": "cross-region-sync",
       "bootstrap": "kafka-us-east:9092",
+      "target_broker": "kafka-us-west:9092",
       "input": "events",
       "offset": "earliest",
       "threads": 8,
@@ -529,17 +591,28 @@
         "batch_size": 5000,
         "linger_ms": 50
       },
-      "kafka": {
-        "security": {
-          "protocol": "SASL_SSL",
-          "sasl_mechanism": "SCRAM-SHA-512",
-          "sasl_username": "${KAFKA_USER}",
-          "sasl_password": "${KAFKA_PASSWORD}"
-        },
+      "security": {
+        "protocol": "SASL_SSL",
         "ssl": {
           "ca_location": "/certs/ca.crt",
           "certificate_location": "/certs/client.crt",
           "key_location": "/certs/client.key"
+        },
+        "sasl": {
+          "mechanism": "SCRAM-SHA-512",
+          "username_file": "/run/secrets/source-kafka-username",
+          "password_file": "/run/secrets/source-kafka-password"
+        }
+      },
+      "target_security": {
+        "protocol": "SASL_SSL",
+        "ssl": {
+          "ca_location": "/certs/target-ca.crt"
+        },
+        "sasl": {
+          "mechanism": "SCRAM-SHA-512",
+          "username_file": "/run/secrets/target-kafka-username",
+          "password_file": "/run/secrets/target-kafka-password"
         }
       },
       "routing": {
@@ -547,9 +620,7 @@
         "destinations": [
           {
             "output": "events",
-            "bootstrap": "kafka-us-west:9092",
-            "partitioning": "default",
-            "preserve_timestamp": true
+            "timestamp": "PRESERVE"
           }
         ]
       }
@@ -576,8 +647,7 @@
             "output": "regional-orders-us",
             "filter": "/region,==,us",
             "transform": "/data",
-            "partitioning": "field",
-            "partition_field": "/state"
+            "partition": "/state"
           }
         ]
       }

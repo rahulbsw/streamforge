@@ -1,0 +1,45 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "streamforge-operator.fullname" . }}-pipeline-metrics
+  labels:
+    {{- include "streamforge-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pipeline-metrics
+    streamforge.io/metrics-service: "true"
+spec:
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: streamforge
+    app.kubernetes.io/component: pipeline
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "streamforge-operator.fullname" . }}-pipelines
+  labels:
+    {{- include "streamforge-operator.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      streamforge.io/metrics-service: "true"
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      honorLabels: false
+{{- end }}
+{{- end }}

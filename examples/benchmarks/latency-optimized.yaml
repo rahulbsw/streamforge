@@ -1,6 +1,5 @@
 # Benchmark config: Low-latency configuration
-# Target: < 10ms p95 latency
-# Use case: Validate minimum latency with low batching
+# Use case: Measure latency with low batching
 
 appid: "benchmark-latency"
 bootstrap: "localhost:9092"
@@ -12,21 +11,20 @@ threads: 2  # Fewer threads for lower contention
 performance:
   fetch_min_bytes: 1          # Don't wait for data
   fetch_max_wait_ms: 10       # Very short wait
-  max_partition_fetch_bytes: 1048576  # 1 MB
   queue_buffering_max_ms: 1
   batch_size: 100             # Small batches
   linger_ms: 0                # Send immediately
-  compression: "none"         # No compression overhead
 
-# Per-message commit for low latency
-commit_strategy: "per-message"
+# Auto commit keeps this diagnostic profile focused on processing latency.
+commit_strategy:
+  manual_commit: false
 
 # No retry for latency test
 retry:
   max_attempts: 1
   initial_delay_ms: 1
   max_delay_ms: 10
-  jitter: false
+  jitter: 0.0
 
 # DLQ disabled
 dlq:
@@ -40,6 +38,6 @@ routing:
       partitioning: "default"
       preserve_timestamp: true
 
-metrics:
-  enabled: true
-  port: 8080
+observability:
+  metrics_enabled: true
+  metrics_port: 9090

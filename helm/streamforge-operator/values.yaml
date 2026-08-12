@@ -4,7 +4,8 @@
 operator:
   image:
     repository: ghcr.io/rahulbsw/streamforge-operator
-    tag: "0.1.0"
+    # Defaults to Chart.appVersion when empty.
+    tag: ""
     pullPolicy: IfNotPresent
 
   replicas: 1
@@ -60,7 +61,8 @@ operator:
 defaults:
   image:
     repository: ghcr.io/rahulbsw/streamforge
-    tag: "0.3.0"
+    # Defaults to Chart.appVersion when empty.
+    tag: ""
     pullPolicy: IfNotPresent
 
   resources:
@@ -92,55 +94,13 @@ monitoring:
     scrapeTimeout: 10s
     labels: {}
 
+  prometheusRule:
+    labels: {}
+
   # Grafana dashboard
   grafanaDashboard:
     enabled: false
     namespace: monitoring
-
-# Example pipelines (can be enabled for quick start)
-examples:
-  enabled: false
-
-  pipelines:
-    - name: simple-mirror
-      spec:
-        appid: simple-mirror
-        source:
-          brokers: kafka-source:9092
-          topic: source-topic
-          groupId: streamforge-simple
-          offset: latest
-        destinations:
-          - brokers: kafka-target:9092
-            topic: target-topic
-        replicas: 1
-
-    - name: filtered-pipeline
-      spec:
-        appid: filtered-pipeline
-        source:
-          brokers: kafka-source:9092
-          topic: events
-          groupId: streamforge-filtered
-        destinations:
-          - brokers: kafka-target:9092
-            topic: active-events
-            filter: "/status,==,active"
-          - brokers: kafka-target:9092
-            topic: inactive-events
-            filter: "/status,==,inactive"
-        replicas: 2
-
-# Namespace to deploy pipelines (leave empty for current namespace)
-namespace: ""
-
-# CRD installation
-crds:
-  # Whether to install CRDs
-  install: true
-
-  # Keep CRDs on chart uninstall
-  keep: true
 
 # UI Configuration (optional web interface)
 ui:
@@ -149,7 +109,8 @@ ui:
 
   image:
     repository: ghcr.io/rahulbsw/streamforge-ui
-    tag: "latest"
+    # Defaults to Chart.appVersion when empty.
+    tag: ""
     pullPolicy: IfNotPresent
 
   replicas: 1
@@ -164,12 +125,20 @@ ui:
 
   # Service configuration
   service:
-    type: NodePort
+    type: ClusterIP
     port: 3001
-    nodePort: 30001
+    nodePort: null
 
-  # JWT secret for authentication (change in production!)
-  jwtSecret: "streamforge-secret-key-change-in-production"
+  # UI authentication. Production installations must reference a Secret that
+  # already exists. Set developmentMode only for disposable local clusters; in
+  # that mode the chart creates and retains a random JWT secret.
+  auth:
+    existingSecret: ""
+    secretKey: jwt-secret
+    usersKey: users.json
+    demoAdminPasswordKey: demo-admin-password
+    demoViewerPasswordKey: demo-viewer-password
+    developmentMode: false
 
   # Service account
   serviceAccount:
@@ -218,7 +187,5 @@ ui:
 
   # Environment variables
   env:
-    - name: NODE_ENV
-      value: production
     - name: PORT
       value: "3001"

@@ -6,275 +6,288 @@ parent: Deployment
 
 # Run StreamForge on Kubernetes
 
-The repository includes a `StreamforgePipeline` custom resource, a Rust
-operator, and a Helm chart at `helm/streamforge-operator`. Install from a local
-checkout or a reviewed internal artifact; this guide does not assume a public
-chart repository or public image tag.
-
-## Current operator scope
-
-The operator currently:
-
-- watches namespaced `StreamforgePipeline` resources;
-- creates a `ConfigMap` and `Deployment` for each pipeline;
-- reports ready replica count and a coarse phase;
-- reconciles on changes and on a periodic interval;
-- materializes only the first configured destination into the runtime
-  configuration.
-
-Important limitations:
-
-- CR fields for additional destinations are not emitted to the generated
-  runtime configuration.
-- The CR `source.groupId` value is not used by the runtime; the generated
-  `appid` remains the Kafka consumer group.
-- CR security and compression fields are not currently emitted to the runtime
-  configuration.
-- Operator status is based on Deployment readiness, not verified Kafka
-  delivery.
-- The bundled chart creates cluster-scoped RBAC for the controller.
-
-Review those limitations and the rendered RBAC before using the operator in a
-shared cluster. Use a direct Kubernetes Deployment when they do not fit the
-required security or routing model.
+StreamForge 1.1.0 ships a versioned OCI Helm chart, operator image, engine
+image, and optional UI image. Pin one exact version across all components.
 
 ## Prerequisites
 
-- `kubectl` access to the intended cluster
+- Kubernetes 1.28 or newer
 - Helm 3
-- private registry images for the StreamForge runtime and operator
-- Kafka reachable through private cluster egress
-- pre-created topics and least-privilege Kafka ACLs
-- a namespace dedicated to StreamForge workloads
+- `kubectl` access to the target cluster
+- Kafka topics and least-privilege ACLs created in advance
+- network access from pipeline pods to Kafka
 
-## Render before install
+Prometheus Operator and Grafana are optional external dependencies. The chart
+does not install them.
 
-Create a private values file with immutable image references:
+## Install the published chart
+
+```bash
+export STREAMFORGE_VERSION=1.1.0
+
+helm upgrade --install streamforge \
+  oci://ghcr.io/rahulbsw/charts/streamforge-operator \
+  --version "${STREAMFORGE_VERSION}" \
+  --namespace streamforge-system \
+  --create-namespace \
+  --wait
+```
+
+The default image tags come from `Chart.appVersion`. Override repositories when
+using a reviewed internal mirror:
 
 ```yaml
 operator:
   image:
     repository: registry.internal/streamforge-operator
-    tag: reviewed-release
-
 defaults:
   image:
     repository: registry.internal/streamforge
-    tag: reviewed-release
-
 ui:
-  enabled: false
+  image:
+    repository: registry.internal/streamforge-ui
 ```
 
-Render and inspect the manifests:
+Render and inspect local changes before installation:
 
 ```bash
-helm template streamforge-operator ./helm/streamforge-operator \
+helm template streamforge ./helm/streamforge-operator \
   --namespace streamforge-system \
   --values private-values.yaml > rendered-streamforge.yaml
+
+kubectl apply --server-side --dry-run=server \
+  -f rendered-streamforge.yaml
 ```
 
-Review:
+Review cluster-scoped RBAC, image references, pod security contexts, resource
+limits, and all exposed services.
 
-- `ClusterRole` permissions and cluster-wide watch scope;
-- service accounts and image references;
-- pod and container security contexts;
-- resource requests and limits;
-- whether any `Service`, `Ingress`, `NodePort`, or `LoadBalancer` would be
-  created;
-- all generated configuration for secrets or public endpoints.
+## Create a multi-destination pipeline
 
-The UI is disabled above. Do not enable it until its authentication, RBAC,
-secret handling, and private access path have completed a production security
-review.
-
-## Install the local chart
-
-```bash
-kubectl create namespace streamforge-system
-
-helm upgrade --install streamforge-operator ./helm/streamforge-operator \
-  --namespace streamforge-system \
-  --values private-values.yaml \
-  --wait
-```
-
-Verify the controller:
-
-```bash
-kubectl get deployment,pods -n streamforge-system
-kubectl logs -n streamforge-system \
-  deployment/streamforge-operator \
-  --tail=200
-```
-
-The generated Deployment name can include Helm release-name expansion. Use
-`kubectl get deployment -n streamforge-system` if the exact name differs.
-
-## Create a basic pipeline
-
-The operator's generated runtime configuration currently supports one
-destination:
+All destinations in one `v1alpha1` pipeline share one target Kafka broker set
+and target security configuration.
 
 ```yaml
 apiVersion: streamforge.io/v1alpha1
 kind: StreamforgePipeline
 metadata:
-  name: orders-copy
+  name: orders
   namespace: streamforge-system
 spec:
-  appid: orders-copy
+  appid: orders-replication
   source:
     brokers: source-kafka.kafka.svc.cluster.local:9092
     topic: orders
     offset: earliest
   destinations:
-    - brokers: destination-kafka.kafka.svc.cluster.local:9092
-      topic: orders-copy
+    - brokers: target-kafka.kafka.svc.cluster.local:9092
+      topic: orders-analytics
+      filter: "and($region == 'us', $amount >= 100)"
+    - brokers: target-kafka.kafka.svc.cluster.local:9092
+      topic: orders-redacted
+      transform: "construct(order_id=$order_id, region=$region)"
   replicas: 1
   threads: 4
-  image:
-    repository: registry.internal/streamforge
-    tag: reviewed-release
-    pullPolicy: IfNotPresent
-  resources:
-    requests:
-      cpu: 250m
-      memory: 256Mi
-    limits:
-      cpu: 1
-      memory: 1Gi
 ```
 
-Apply and inspect:
+`spec.appid` is the Kafka consumer identity and defaults to `metadata.name`.
+The compatibility field `spec.source.groupId` remains accepted but is ignored
+by the runtime.
+
+Validate locally and against the API server:
 
 ```bash
+streamforge-validate \
+  --input-format pipeline-crd \
+  --output json \
+  pipeline.yaml
+
+kubectl apply --server-side --dry-run=server -f pipeline.yaml
 kubectl apply -f pipeline.yaml
-kubectl get streamforgepipelines -n streamforge-system
-kubectl describe streamforgepipeline orders-copy -n streamforge-system
-kubectl get deployment,pods,configmap -n streamforge-system \
-  -l streamforge.io/pipeline=orders-copy
+kubectl wait \
+  --namespace streamforge-system \
+  --for=condition=Ready \
+  streamforgepipeline/orders \
+  --timeout=120s
 ```
 
-The resource values demonstrate schema and Kubernetes syntax; establish
-production sizing with the target workload.
+The operator derives `Ready` from the owned Deployment's observed generation
+and available replicas. Unchanged status is not rewritten, and generated
+Deployments and ConfigMaps carry controller owner references.
 
-## Secure Kafka connections
+## Local Podman-backed Minikube smoke
 
-Because the operator does not currently emit CR security fields into the
-runtime configuration, do not put Kafka usernames or passwords directly in the
-CR and assume they will be applied.
+The source-built integration harness requires rootless Podman and Minikube
+`v1.38.1` or newer. Point `MINIKUBE_BIN` at a reviewed compatible binary:
 
-For TLS/SASL pipelines, use a directly managed Deployment with a complete
-StreamForge configuration supplied from a Kubernetes `Secret`, or update and
-verify the operator before using it. See [Security](SECURITY_CONFIGURATION.md).
+```bash
+MINIKUBE_BIN=/path/to/minikube \
+  scripts/tests/minikube_podman_smoke.sh
+```
 
-Never store a secret-bearing StreamForge configuration in a `ConfigMap`.
+The harness refuses existing profiles and contexts, creates an isolated
+profile, verifies Kafka replication, status, observability, security,
+reconciliation behavior, and owner cleanup, then removes its profile and
+uniquely tagged local images. It does not replace the installed Minikube
+binary.
 
-## Private metrics access
+## TLS and SASL Secret references
 
-StreamForge listens on the configured metrics port on all pod interfaces. The
-endpoint has no authentication or TLS.
-
-If a metrics service is required, make it internal:
+Do not put credential values in a custom resource. Reference Kubernetes
+Secrets; the operator mounts them read-only and the shared converter emits only
+file paths in the pipeline `ConfigMap`.
 
 ```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: streamforge-metrics
-  namespace: streamforge-system
 spec:
-  type: ClusterIP
-  selector:
-    streamforge.io/pipeline: orders-copy
-  ports:
-    - name: metrics
-      port: 9090
-      targetPort: 9090
+  source:
+    brokers: source-kafka:9093
+    topic: orders
+    security:
+      protocol: SASL_SSL
+      ssl:
+        caSecret:
+          name: source-kafka-ca
+          key: ca.crt
+      sasl:
+        mechanism: SCRAM-SHA-512
+        usernameSecret:
+          name: source-kafka-auth
+          key: username
+        passwordSecret:
+          name: source-kafka-auth
+          key: password
+  destinations:
+    - brokers: target-kafka:9093
+      topic: orders-copy
+      security:
+        protocol: SASL_SSL
+        ssl:
+          caSecret:
+            name: target-kafka-ca
+            key: ca.crt
+        sasl:
+          mechanism: SCRAM-SHA-512
+          usernameSecret:
+            name: target-kafka-auth
+            key: username
+          passwordSecret:
+            name: target-kafka-auth
+            key: password
 ```
 
-Add a `NetworkPolicy` that permits ingress only from the monitoring namespace
-and egress only to Kafka, DNS, and other required private services. Do not use a
-public `LoadBalancer`, `NodePort`, or internet-facing `Ingress` for metrics or
-the UI.
+For multiple destinations, repeat the identical `security` block on each
+destination. Different target broker or authentication settings require
+separate pipeline resources.
 
-For temporary local inspection:
+Inline `ssl.keyPassword`, `sasl.username`, and `sasl.password` values are
+rejected for pipeline resources. Supported references include CA,
+certificate, private key, private-key password, SASL username/password, and
+Kerberos keytab Secret keys.
+
+## WebAssembly UDF artifacts
+
+Declare UDF modules once under `spec.udfs` and bind them per destination.
+ConfigMap keys and PVC paths are mounted read-only under
+`/var/run/streamforge/udfs`. The validator checks module names, SHA-256
+digests, ABI, world compatibility, limits, and safe artifact paths before the
+operator creates a workload.
+
+See [WebAssembly UDFs](WASM_UDFS.md) for the complete schema and lifecycle.
+
+## Optional UI
+
+The UI is disabled by default. Production mode requires an existing Secret with
+a JWT signing key and a JSON user list:
+
+```yaml
+ui:
+  enabled: true
+  auth:
+    existingSecret: streamforge-ui-auth
+    secretKey: jwt-secret
+    usersKey: users.json
+```
+
+The generated credentials mode is limited to disposable local clusters:
+
+```yaml
+ui:
+  enabled: true
+  auth:
+    developmentMode: true
+```
+
+Production mode contains no default credentials. Viewer accounts are
+read-only; admin accounts can validate and mutate pipelines. Keep the UI on a
+private `ClusterIP` or approved authenticated ingress.
+
+## Optional monitoring
+
+Enable the metrics Service and alert rules:
+
+```yaml
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+  grafanaDashboard:
+    enabled: true
+    namespace: monitoring
+```
+
+`monitoring.enabled` is the parent gate. Prometheus Operator and Grafana must
+already be installed. Keep `/metrics`, `/health`, and `/ready` on a private
+network and restrict access with `NetworkPolicy`.
+
+## Operations
+
+Inspect a pipeline:
 
 ```bash
-kubectl port-forward -n streamforge-system \
-  deployment/orders-copy 9090:9090
-curl --fail http://127.0.0.1:9090/health
+kubectl get streamforgepipelines -n streamforge-system
+kubectl describe streamforgepipeline orders -n streamforge-system
+kubectl get deployment,pods,configmap -n streamforge-system \
+  -l streamforge.io/pipeline=orders
 ```
 
-## Scaling
-
-Useful consumer parallelism is bounded by source partitions. Increase replicas
-only while partitions remain available for assignment and watch the rebalance.
-
-```bash
-kubectl patch streamforgepipeline orders-copy \
-  --namespace streamforge-system \
-  --type merge \
-  --patch '{"spec":{"replicas":2}}'
-```
-
-Measure lag, broker-acknowledged deliveries, processing errors, CPU, memory, and
-restart behavior after each change. More replicas do not divide a single hot
-partition.
+Useful consumer parallelism is bounded by source partitions. After changing
+replicas or threads, measure lag, broker-acknowledged delivery, errors, CPU,
+memory, restarts, and rebalance behavior.
 
 ## Upgrade and rollback
 
-Render the new chart and diff it before applying:
+Render and diff the next exact chart version before upgrading:
 
 ```bash
-helm template streamforge-operator ./helm/streamforge-operator \
-  --namespace streamforge-system \
-  --values private-values.yaml > rendered-streamforge-next.yaml
+helm template streamforge \
+  oci://ghcr.io/rahulbsw/charts/streamforge-operator \
+  --version 1.1.0 \
+  --namespace streamforge-system > rendered-streamforge-next.yaml
 
 kubectl diff --server-side -f rendered-streamforge-next.yaml
-```
-
-Then upgrade:
-
-```bash
-helm upgrade streamforge-operator ./helm/streamforge-operator \
+helm upgrade streamforge \
+  oci://ghcr.io/rahulbsw/charts/streamforge-operator \
+  --version 1.1.0 \
   --namespace streamforge-system \
-  --values private-values.yaml \
   --wait
 ```
 
-Retain the previous image digests and values file. A Helm rollback restores
-chart state, but it does not undo Kafka records, consumer offsets, topic
-changes, or externally managed secrets.
+Use `helm rollback streamforge REVISION --namespace streamforge-system` for
+chart state. Rollback does not undo Kafka records, consumer offsets, topic
+changes, or external Secret rotation.
 
 ## Removal
 
-Before uninstalling, decide whether pipeline custom resources and their
-consumer groups must be retained. The chart is configured to keep the CRD by
-default.
-
 ```bash
-helm uninstall streamforge-operator --namespace streamforge-system
+helm uninstall streamforge --namespace streamforge-system
 ```
 
-Inventory remaining custom resources, deployments, config maps, service
-accounts, cluster roles, cluster role bindings, services, secrets, and CRDs.
-Deleting a namespace or custom resource is destructive and should follow an
-approved data and offset-retention plan.
+The CRD is retained by default. Inventory remaining custom resources,
+deployments, ConfigMaps, Secrets, RBAC, services, consumer groups, and topics
+before deleting anything else. Deleting a `StreamforgePipeline` garbage-collects
+the Deployment and ConfigMap controlled by that resource; externally managed
+Secrets, Kafka topics, consumer groups, and UDF artifact sources are retained.
 
-## Production checklist
-
-- Images are private, immutable, scanned, and signed.
-- Rendered cluster-scoped RBAC has been approved.
-- UI remains disabled unless separately security-reviewed.
-- No public service, ingress, listener, or security-group rule is created.
-- Secret-bearing configuration is stored in a `Secret`, not a `ConfigMap`.
-- Kafka TLS/SASL and ACLs are verified from the running pod.
-- Metrics use `ClusterIP` plus restrictive network policy.
-- Resource sizing comes from a representative workload.
-- Delivery behavior is tested across a restart and rebalance.
-- Rollback and teardown inventories have been rehearsed.
-
-Continue with [Deployment](DEPLOYMENT.md), [Observability](OBSERVABILITY_QUICKSTART.md),
-and [Troubleshooting](TROUBLESHOOTING.md).
+Continue with [Security](SECURITY_CONFIGURATION.md),
+[Observability](OBSERVABILITY_QUICKSTART.md), and
+[Troubleshooting](TROUBLESHOOTING.md).

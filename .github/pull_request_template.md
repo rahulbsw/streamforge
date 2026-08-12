@@ -35,6 +35,7 @@ Closes #(issue)
 - [ ] Added new tests for new functionality
 - [ ] Ran benchmarks (if performance-related)
 - [ ] Manually tested with sample configuration
+- [ ] Recorded exact commands and results as current evidence
 
 ## Configuration Example
 
@@ -48,10 +49,14 @@ Closes #(issue)
 - [ ] I have performed a self-review of my code
 - [ ] I have commented my code, particularly in hard-to-understand areas
 - [ ] I have made corresponding changes to the documentation
+- [ ] I updated affected examples, indexes, cross-references, and release notes
+- [ ] I removed superseded code, dependencies, flags, APIs, UI, Helm values,
+      examples, and documentation, or documented a compatibility exception
 - [ ] My changes generate no new warnings
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
 - [ ] Any dependent changes have been merged and published
+- [ ] Security impact and rollback behavior are documented
 
 ## Screenshots (if applicable)
 

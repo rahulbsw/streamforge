@@ -404,22 +404,10 @@ all-caches = ["local-cache", "redis-cache"]
    - Multi-level cache patterns
    - How to populate Moka cache
 
-3. **[examples/config.hash-and-cache.yaml](../../../examples/config.hash-and-cache.yaml)**
-   - 10+ hash function examples
-   - All algorithms demonstrated
-   - Performance tips
+3. **[Configuration schema](../../CONFIG_SCHEMA.json)**
+   - Current commit, retry, DLQ, and cache configuration
 
-4. **[examples/config.at-least-once.yaml](../../../examples/config.at-least-once.yaml)**
-   - 10+ commit strategy examples
-   - DLQ configuration
-   - Retry patterns
-
-5. **[examples/config.cache-backends.yaml](../../../examples/config.cache-backends.yaml)**
-   - Local, Redis, Kafka cache examples
-   - Multi-level cache
-   - How to populate cache (5 methods)
-
-6. **[QUICK_REFERENCE_HASH_CACHE.md](QUICK_REFERENCE_HASH_CACHE.md)**
+4. **[QUICK_REFERENCE_HASH_CACHE.md](QUICK_REFERENCE_HASH_CACHE.md)**
    - Quick start guide
    - Common patterns
    - API reference

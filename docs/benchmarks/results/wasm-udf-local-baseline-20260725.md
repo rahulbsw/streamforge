@@ -124,6 +124,22 @@ budget. A noisy isolated rerun of the four-destination 4 KiB value transform
 was statistically unchanged; controlled matched A/B hardware remains
 authoritative for a release decision.
 
+## Wasmtime 36.0.13 security patch check — 2026-08-12
+
+Wasmtime was upgraded from `36.0.10` to `36.0.13` for
+`RUSTSEC-2026-0222`. A same-session Apple arm64 Criterion comparison ran the
+complete `wasm_udf_benchmarks` suite under `caffeinate`, with `36.0.13` saved
+first and `36.0.10` compared against it before the worktree was restored to
+`36.0.13`.
+
+Criterion detected no performance change in startup or any of the 256 B,
+4 KiB, and 64 KiB native no-UDF controls. The older `36.0.10` runtime was
+statistically slower in multiple filter, value-transform, and
+envelope-transform invocation cases; failure paths were mixed or unchanged.
+This is favorable local diagnostic evidence, not a release claim. The
+controlled-hardware matched A/B requirement remains unchanged, and Criterion
+runtime output was not added to version control.
+
 ## Post-change native reference comparison
 
 The unchanged native controls were rerun after the feature work. Median deltas

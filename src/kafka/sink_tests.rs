@@ -17,6 +17,7 @@ fn create_test_config() -> MirrorMakerConfig {
         consumer_properties: HashMap::new(),
         producer_properties: HashMap::new(),
         security: None,
+        target_security: None,
         commit_strategy: CommitStrategyConfig::default(),
         cache: None,
         observability: Default::default(),

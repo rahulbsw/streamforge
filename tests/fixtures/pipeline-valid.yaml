@@ -1,0 +1,26 @@
+apiVersion: streamforge.io/v1alpha1
+kind: StreamforgePipeline
+metadata:
+  name: orders
+spec:
+  source:
+    brokers: source-kafka:9092
+    topic: orders
+    offset: earliest
+  destinations:
+    - brokers: target-kafka:9092
+      topic: orders-us
+      filter: /region,==,us
+    - brokers: target-kafka:9092
+      topic: order-details
+      transform: /payload
+  retry:
+    maxAttempts: 4
+    initialDelayMs: 100
+    maxDelayMs: 5000
+    multiplier: 2.0
+  dlq:
+    enabled: true
+    topic: orders-dlq
+    includeHeaders: false
+    maxDlqRetries: 2

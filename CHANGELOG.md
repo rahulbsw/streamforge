@@ -7,6 +7,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+The working tree contains implementation for the sequenced `v1.1`–`v1.4`
+tracks. These entries are not released until the live gates in
+[`ROADMAP.md`](ROADMAP.md) pass.
+
+### Added
+
+- Sandboxed, digest-pinned Wasmtime component UDF filters, value transforms,
+  and envelope transforms with a versioned WIT ABI, Rust SDK, bounded runtime,
+  operator delivery, metrics, fixtures, security checks, and benchmarks.
+- Release archives for both binaries with checksums, SPDX SBOMs, provenance,
+  exact-version multi-architecture images, and OCI Helm publication.
+- Docker/Podman `scripts/quickstart.sh up|verify|down`.
+- An isolated rootless-Podman Minikube smoke harness covering Kafka
+  replication, workload readiness, observability, security, reconciliation,
+  owner garbage collection, and cleanup.
+- Structured `/ready`, build/readiness metrics, JSON/text log selection,
+  ServiceMonitor, PrometheusRule, alerts, and Grafana dashboard.
+- Guided multi-destination Kubernetes UI, structured CRD validation,
+  server-side dry-run, pipeline detail APIs/views, and viewer/admin controls.
+- Additive v1alpha1 retry/DLQ fields and one shared CRD-to-engine mapping.
+- Separate source and target file-backed TLS/SASL configuration plus safe
+  Kubernetes Secret-reference projection.
+- Performance workload catalog, normalized baseline record, and fail-closed
+  release-regression evaluator.
+- Project-wide Codex/Claude standing rules in `AGENTS.md` and `CLAUDE.md`.
+
+### Changed
+
+- Wasmtime moved to security-patched `36.0.13`; a same-session local Criterion
+  A/B found no detected change in the three native no-UDF controls and favored
+  the patched runtime in multiple UDF invocation paths.
+- UI dependency locks now use patched `js-yaml`, `ip-address`, `nanoid`, and
+  `brace-expansion` releases; the root, operator, and UI vulnerability audits
+  report zero known vulnerabilities.
+- Release and Helm component versions are exact and synchronized; moving
+  release tags are no longer published.
+- Production UI installation requires explicit JWT/user secrets; generated
+  credentials require explicit development mode.
+- `observability.metrics_path` is honored and Kubernetes pipeline pods use
+  `/ready` and `/health` probes.
+- The UI image contains the matching `streamforge-validate` release binary.
+- `streamforge-validate` accepts engine config or pipeline CRD input and can
+  emit field-specific JSON diagnostics.
+- Release Dockerfiles pin immutable base-image digests; engine and
+  operator-managed workloads run as non-root identities.
+- The optional Redis client moved to `0.25.5`, removing the Rust
+  future-incompatibility warning from the former `0.24` release.
+- `streamforge-validate` now uses maintained Clap 4 argument parsing; the
+  StructOpt 0.3 and unsound/unmaintained transitive dependency chain was
+  removed.
+- `streamforge --help` and `--version` now exit before logging, configuration,
+  or Kafka initialization so release artifacts can be smoke-tested safely.
+- `PROJECT_SPEC.md` is now the concise locked product boundary; current state
+  and sequenced work remain in their dedicated status and roadmap documents.
+- Operator status writes are idempotent, publish a workload-backed `Ready`
+  condition with stable transition times, and react to owned Deployment
+  changes without a status-driven reconcile storm.
+- Generated pipeline Deployments and ConfigMaps use controller owner
+  references and are garbage-collected with their pipeline.
+
+### Removed
+
+- Non-blocking release publication paths and insecure default production UI
+  credentials.
+- The obsolete operator single-destination-only configuration projection.
+- The UI's unused `jsonwebtoken` dependency and superseded onboarding path.
+- The unsupported per-destination compression CRD/UI field, duplicate
+  single-destination example, and contradictory multi-target security example.
+- Superseded DSL/observability implementation reports, the broken observability
+  benchmark wrapper, and six unsupported pre-v1.0 benchmark configurations.
+
+### Fixed
+
+- Corrected the Apache Kafka 3.9 standalone Kubernetes KRaft listener and
+  inter-broker listener configuration.
+
+### Security
+
+- WebAssembly modules require SHA-256 digests, use an empty host linker, and are
+  bounded by configured input/output, memory, table, stack, execution-time, and
+  concurrency limits.
+- Validator execution is bounded, uses no shell, restricts temporary-file
+  permissions, and cleans up.
+- Operational logs omit payload, credential, key, filter-expression, and
+  transform-expression contents.
+- Pipeline resources reject inline credential values; generated ConfigMaps
+  contain only read-only Secret mount paths.
+- The previously exposed local Claude setting credential was removed from the
+  working file; its owner must rotate the credential because deletion does not
+  revoke an exposed value.
+
+### Known release blockers
+
+- Published-artifact, clean-host Docker/Podman, published-chart kind/minikube,
+  live Kafka recovery/Prometheus, PromQL, browser, and multi-architecture
+  UI-image smoke evidence is pending.
+- New v1.4 workload measurements and p99 latency evidence are pending.
+
+See [`docs/releases/`](docs/releases/README.md) for migration, limitations, and
+rollback notes for each planned minor release.
+
+---
+
 ## [1.0.0] - 2026-04-18
 
 ### Overview
@@ -119,7 +224,7 @@ StreamForge v1.0.0 is the first production-ready release. This release focuses o
   - DSL type requirements table
   - Implementation deferred to v1.1 (see Deferred section)
 
-- **Phase 3 Pragmatic Approach** ([`docs/PHASE_3_PRAGMATIC_APPROACH.md`](docs/PHASE_3_PRAGMATIC_APPROACH.md))
+- **Phase 3 Pragmatic Approach** ([archived plan](docs/archive/v1-completion/PHASE_3_PRAGMATIC_APPROACH.md))
   - Decision to defer generic envelope to v1.1
   - Runtime type awareness for v1.0
   - Migration path to v1.1
@@ -139,7 +244,7 @@ StreamForge v1.0.0 is the first production-ready release. This release focuses o
   - `README.md`: Production examples guide with tuning and deployment instructions
 
 #### Testing
-- **Integration Test Infrastructure** ([`tests/integration/`](tests/integration/))
+- **Integration Test Infrastructure** ([`tests/`](tests/))
   - Testcontainers setup with Redpanda
   - Common test utilities (TestKafka, message helpers, assertions)
   - Test scenarios: happy path, retry, DLQ, commit strategies, at-least-once delivery
@@ -216,7 +321,7 @@ The `streamforge-validate` CLI will warn about deprecated syntax.
   - Reason: 20-30 hours of work, high risk, touches entire codebase
   - v1.0: Documentation complete, runtime type awareness planned
   - v1.1: Evaluate the implementation with the reproducible benchmark harness
-  - See: [`docs/TYPED_ENVELOPE_DESIGN.md`](docs/TYPED_ENVELOPE_DESIGN.md) and [`docs/PHASE_3_PRAGMATIC_APPROACH.md`](docs/PHASE_3_PRAGMATIC_APPROACH.md)
+  - See: [`docs/TYPED_ENVELOPE_DESIGN.md`](docs/TYPED_ENVELOPE_DESIGN.md) and the [archived Phase 3 plan](docs/archive/v1-completion/PHASE_3_PRAGMATIC_APPROACH.md)
 
 #### Parser Refactor
 - **Full parser refactor with AST, validator, and improved error messages** deferred to post-v1.0
@@ -236,7 +341,6 @@ The `streamforge-validate` CLI will warn about deprecated syntax.
 
 #### Configuration
 - Fixed missing validation at startup
-- Fixed env variable substitution in config
 - Fixed secret mounting in Kubernetes examples
 
 ---
@@ -319,12 +423,14 @@ Run `streamforge-validate config.yaml` to check for deprecations.
 Add `performance:` block for tuning (optional):
 
 ```yaml
+compression:
+  compression_type: raw
+  compression_algo: zstd
 performance:
   fetch_min_bytes: 5120
   fetch_max_wait_ms: 100
   batch_size: 2000
   linger_ms: 20
-  compression: "zstd"
 ```
 
 See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#performance-tuning) for guidance.
@@ -407,7 +513,7 @@ See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#performance-tuning) for guidance.
 
 ### Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions! See [the contributing guide](docs/CONTRIBUTING.md).
 
 ---
 

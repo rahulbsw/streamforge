@@ -3,810 +3,178 @@ title: Contributing
 nav_order: 9
 ---
 
-# Contributing Guide
+# Contributing
 
-Thank you for considering contributing to StreamForge! This guide will help you get started.
+StreamForge welcomes code, documentation, tests, bug reports, feature proposals,
+and community support. All participation is governed by the
+[Code of Conduct](https://github.com/rahulbsw/streamforge/blob/main/CODE_OF_CONDUCT.md),
+and all contributions are licensed under the
+[Apache License 2.0](https://github.com/rahulbsw/streamforge/blob/main/LICENSE).
 
-## Table of Contents
+## Set up
 
-- [Getting Started](#getting-started)
-- [Development Environment](#development-environment)
-- [Project Structure](#project-structure)
-- [Development Workflow](#development-workflow)
-- [Testing](#testing)
-- [Code Style](#code-style)
-- [Adding Features](#adding-features)
-- [Documentation](#documentation)
-- [Pull Request Process](#pull-request-process)
-
-## Getting Started
-
-### Prerequisites
-
-**Required:**
-- Rust 1.70+ (install via [rustup](https://rustup.rs/))
-- Cargo (comes with Rust)
-- Git
-
-**Optional:**
-- Docker (for containerized testing)
-- Kafka cluster (or use Docker Compose)
-- IDE with Rust support (VS Code, IntelliJ IDEA, etc.)
-
-### Quick Start
+Required: Git and the stable Rust toolchain. The UI additionally uses Node.js
+20 and npm. Container, Kubernetes, and Helm work requires the corresponding
+tools. The Linux packages used by CI are authoritative in
+[the CI workflow](https://github.com/rahulbsw/streamforge/blob/main/.github/workflows/ci.yml).
 
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/rahulbsw/streamforge.git
 cd streamforge
-
-# Install Rust (if not already installed)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Build the project
-cargo build
-
-# Run tests
-cargo test
-
-# Run with example config
-cargo run -- config.example.json
+rustup component add clippy rustfmt
+cargo build --locked
+cargo test --all --all-features
 ```
 
-## Development Environment
-
-### Local Setup
-
-#### 1. Install Rust
+Run the engine with a YAML or JSON configuration through `CONFIG_FILE`:
 
 ```bash
-# Install rustup (Rust installer)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Add to PATH
-source $HOME/.cargo/env
-
-# Verify installation
-rustc --version
-cargo --version
+CONFIG_FILE=examples/redpanda/selective-replication.yaml \
+  cargo run --release --bin streamforge
 ```
 
-#### 2. Install Development Tools
+Validate configuration without connecting to Kafka:
 
 ```bash
-# Formatting
-rustup component add rustfmt
-
-# Linting
-rustup component add clippy
-
-# IDE support
-cargo install rust-analyzer
+cargo run --quiet --bin streamforge-validate -- \
+  examples/configs/config.example.yaml --fail-on-warnings
 ```
 
-#### 3. Clone and Build
+For a working local broker journey, use the [Quick Start](QUICKSTART.md).
+
+## Choose the right source of truth
+
+- Product scope: [PROJECT_SPEC.md](https://github.com/rahulbsw/streamforge/blob/main/PROJECT_SPEC.md)
+- Architecture: [ARCHITECTURE.md](https://github.com/rahulbsw/streamforge/blob/main/ARCHITECTURE.md)
+- Planned work: [ROADMAP.md](https://github.com/rahulbsw/streamforge/blob/main/ROADMAP.md)
+- Verified implementation state:
+  [IMPLEMENTATION_STATUS.md](https://github.com/rahulbsw/streamforge/blob/main/docs/IMPLEMENTATION_STATUS.md)
+- Configuration: [YAML_CONFIGURATION.md](YAML_CONFIGURATION.md)
+- Filters and transforms: [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md)
+- Delivery behavior: [DELIVERY_GUARANTEES.md](DELIVERY_GUARANTEES.md)
+- Performance measurement: [PERFORMANCE.md](PERFORMANCE.md)
+
+Update the relevant source of truth with behavior changes. Do not create a
+second description of the same contract.
+
+## Make a change
+
+1. Fork the repository and branch from `main`; use a focused name such as
+   `feature/...`, `bugfix/...`, or `docs/...`.
+2. Make the smallest complete change. Add or update tests for changed behavior.
+3. Update the canonical documentation and `CHANGELOG.md` when applicable.
+4. Run the checks below.
+5. Open a focused pull request and respond to review feedback.
+
+Use conventional commit and PR-title types: `feat`, `fix`, `docs`, `style`,
+`refactor`, `perf`, `test`, `build`, `ci`, `chore`, or `revert`. PR titles must
+start their subject with an uppercase letter, for example
+`fix(kafka): Preserve keyed partition ordering`.
+
+New filters or transforms belong in the existing filter/transform and parser
+flow, with parser and evaluation tests. New dependencies need a demonstrated
+need and must pass dependency and security review.
+
+## Verify
+
+The following root checks mirror the current CI workflow:
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd streamforge
-
-# Build debug version
-cargo build
-
-# Build release version
-cargo build --release
-
-# Binary locations
-./target/debug/streamforge      # Debug
-./target/release/streamforge    # Release
-```
-
-### IDE Setup
-
-#### Visual Studio Code
-
-1. Install extensions:
-   - rust-analyzer
-   - CodeLLDB (for debugging)
-   - Better TOML
-
-2. Configure `.vscode/settings.json`:
-```json
-{
-  "rust-analyzer.checkOnSave.command": "clippy",
-  "editor.formatOnSave": true
-}
-```
-
-3. Configure `.vscode/launch.json` for debugging:
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug",
-      "cargo": {
-        "args": ["build", "--bin=streamforge"],
-        "filter": {
-          "name": "streamforge",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "CONFIG_FILE": "config.example.json",
-        "RUST_LOG": "debug"
-      }
-    }
-  ]
-}
-```
-
-#### IntelliJ IDEA
-
-1. Install "Rust" plugin
-2. Open project
-3. Configure run configuration:
-   - Program arguments: `config.example.json`
-   - Environment variables: `RUST_LOG=debug`
-
-### Local Kafka Setup
-
-#### Option 1: Docker Compose
-
-```bash
-# Start Kafka (included in project)
-docker-compose --profile kafka up -d
-
-# Verify
-docker-compose ps
-
-# Create test topic
-docker exec -it kafka kafka-topics.sh \
-  --bootstrap-server localhost:9092 \
-  --create \
-  --topic test-input \
-  --partitions 3 \
-  --replication-factor 1
-
-# Stop
-docker-compose down
-```
-
-#### Option 2: Manual Kafka
-
-```bash
-# Download Kafka
-wget https://downloads.apache.org/kafka/3.6.0/kafka_2.13-3.6.0.tgz
-tar -xzf kafka_2.13-3.6.0.tgz
-cd kafka_2.13-3.6.0
-
-# Start Zookeeper
-bin/zookeeper-server-start.sh config/zookeeper.properties
-
-# Start Kafka (in another terminal)
-bin/kafka-server-start.sh config/server.properties
-
-# Create topic
-bin/kafka-topics.sh --bootstrap-server localhost:9092 \
-  --create --topic test-input --partitions 3
-
-# Produce test messages
-bin/kafka-console-producer.sh \
-  --bootstrap-server localhost:9092 \
-  --topic test-input
-```
-
-## Project Structure
-
-```
-streamforge/
-├── src/
-│   ├── main.rs              # Application entry point
-│   ├── lib.rs               # Library root
-│   ├── error.rs             # Error types
-│   ├── config.rs            # Configuration parsing
-│   ├── filter.rs            # Filter implementations
-│   ├── filter_parser.rs     # DSL parser
-│   ├── compression.rs       # Compression algorithms
-│   ├── partitioner.rs       # Partitioning strategies
-│   ├── processor.rs         # Message processing
-│   ├── metrics.rs           # Metrics collection
-│   └── kafka/
-│       ├── mod.rs           # Kafka module
-│       └── sink.rs          # KafkaSink implementation
-├── Cargo.toml               # Dependencies
-├── Cargo.lock               # Dependency lock file
-├── Dockerfile               # Dynamic binary image
-├── Dockerfile.static        # Static binary image
-├── docker-compose.yml       # Docker compose config
-├── config*.json             # Example configurations
-└── docs/
-    ├── README.md            # Main documentation
-    ├── USAGE.md             # Usage guide
-    ├── PERFORMANCE.md       # Performance guide
-    └── CONTRIBUTING.md      # This file
-```
-
-### Module Overview
-
-**Core Modules:**
-- `main.rs` - Application startup and configuration loading
-- `lib.rs` - Public API and module organization
-- `error.rs` - Error types and Result alias
-
-**Kafka Integration:**
-- `kafka/sink.rs` - Producer implementation, multi-destination routing
-- `kafka/mod.rs` - Kafka module exports
-
-**Filtering & Transformation:**
-- `filter.rs` - Filter and Transform traits, implementations
-- `filter_parser.rs` - DSL string parsing
-
-**Processing:**
-- `processor.rs` - Message routing and processing logic
-- `compression.rs` - Message compression
-- `partitioner.rs` - Partition assignment strategies
-- `metrics.rs` - Performance metrics
-
-## Development Workflow
-
-### 1. Create a Branch
-
-```bash
-# Create feature branch
-git checkout -b feature/my-new-feature
-
-# Create bugfix branch
-git checkout -b bugfix/issue-123
-```
-
-### 2. Make Changes
-
-```bash
-# Edit files
-vim src/filter.rs
-
-# Format code
-cargo fmt
-
-# Check for issues
-cargo clippy
-
-# Run tests
-cargo test
-
-# Build
-cargo build
-```
-
-### 3. Test Locally
-
-```bash
-# Unit tests
-cargo test --lib
-
-# Integration tests
-cargo test --test integration_tests
-
-# Specific test
-cargo test test_array_filter
-
-# With output
-cargo test -- --nocapture
-
-# Run application
-RUST_LOG=debug cargo run -- config.example.json
-```
-
-### 4. Commit Changes
-
-```bash
-# Stage changes
-git add src/filter.rs
-
-# Commit with descriptive message
-git commit -m "Add array filter support for ARRAY_ALL and ARRAY_ANY"
-
-# Push to remote
-git push origin feature/my-new-feature
-```
-
-## Testing
-
-### Running Tests
-
-```bash
-# All tests
-cargo test
-
-# Library tests only
-cargo test --lib
-
-# Specific module
-cargo test filter::tests
-
-# Specific test
-cargo test test_array_filter_all_mode
-
-# With output
-cargo test -- --nocapture
-
-# With logging
-RUST_LOG=debug cargo test -- --nocapture
-```
-
-### Writing Tests
-
-**Unit Tests:**
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_my_feature() {
-        let filter = MyFilter::new("test");
-        let msg = json!({"field": "value"});
-        assert!(filter.evaluate(&msg).unwrap());
-    }
-}
-```
-
-**Integration Tests:**
-
-Create file in `tests/`:
-
-```rust
-// tests/integration_test.rs
-use streamforge::filter::*;
-use serde_json::json;
-
-#[test]
-fn test_end_to_end() {
-    // Test complete workflow
-}
-```
-
-### Test Coverage
-
-```bash
-# Install tarpaulin
-cargo install cargo-tarpaulin
-
-# Run coverage
-cargo tarpaulin --out Html
-
-# View report
-open tarpaulin-report.html
-```
-
-### Benchmarking
-
-```bash
-# Add to Cargo.toml
-[dev-dependencies]
-criterion = "0.5"
-
-# Create benchmark file
-# benches/filter_bench.rs
-
-# Run benchmarks
-cargo bench
-```
-
-Example benchmark:
-
-```rust
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use streamforge::filter::*;
-use serde_json::json;
-
-fn filter_benchmark(c: &mut Criterion) {
-    let filter = JsonPathFilter::new("/message/siteId", ">", "10000").unwrap();
-    let msg = json!({"message": {"siteId": 15000}});
-
-    c.bench_function("simple filter", |b| {
-        b.iter(|| filter.evaluate(black_box(&msg)))
-    });
-}
-
-criterion_group!(benches, filter_benchmark);
-criterion_main!(benches);
-```
-
-## Code Style
-
-### Formatting
-
-```bash
-# Format all code
-cargo fmt
-
-# Check formatting
+cargo machete
+cargo test --all --verbose
+cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt -- --check
-
-# Format specific file
-rustfmt src/filter.rs
+cargo bench --no-run
 ```
 
-### Linting
+CI also compiles the Rust WebAssembly examples, verifies their checked-in
+digests, and validates promoted configurations:
 
 ```bash
-# Run clippy
-cargo clippy
+rustup target add wasm32-unknown-unknown
+cargo check --manifest-path udf-sdk/rust/Cargo.toml \
+  --workspace --target wasm32-unknown-unknown --locked
+(cd tests/fixtures/wasm/generated && sha256sum -c SHA256SUMS)
 
-# Strict mode
-cargo clippy -- -D warnings
-
-# Fix automatically (where possible)
-cargo clippy --fix
+for config in \
+  examples/configs/config.example.yaml \
+  examples/redpanda/selective-replication.yaml \
+  examples/production/pii-redaction.yaml \
+  examples/production/cdc-to-datalake.yaml \
+  tests/fixtures/wasm/release-smoke.yaml
+do
+  cargo run --quiet --bin streamforge-validate -- "$config"
+done
 ```
 
-### Style Guidelines
-
-**Naming:**
-- Types: `PascalCase`
-- Functions: `snake_case`
-- Constants: `SCREAMING_SNAKE_CASE`
-- Modules: `snake_case`
-
-**Documentation:**
-```rust
-/// Short description.
-///
-/// Longer description with details.
-///
-/// # Examples
-///
-/// ```
-/// let filter = MyFilter::new("test");
-/// assert!(filter.is_valid());
-/// ```
-///
-/// # Errors
-///
-/// Returns error if input is invalid.
-pub fn my_function() -> Result<()> {
-    // implementation
-}
-```
-
-**Error Handling:**
-```rust
-// Use Result type
-pub fn process() -> Result<Value> {
-    let value = read_value()?;  // Use ? operator
-    transform(value)
-}
-
-// Provide context
-.map_err(|e| MirrorMakerError::Processing(
-    format!("Failed to parse JSON: {}", e)
-))?
-```
-
-**Testing:**
-```rust
-#[test]
-fn test_feature() {
-    // Arrange
-    let input = create_test_input();
-
-    // Act
-    let result = process(input).unwrap();
-
-    // Assert
-    assert_eq!(result, expected);
-}
-```
-
-## Adding Features
-
-### Adding a New Filter
-
-1. **Define the filter in `src/filter.rs`:**
-
-```rust
-/// My new filter description
-pub struct MyFilter {
-    field: String,
-}
-
-impl MyFilter {
-    pub fn new(field: &str) -> Result<Self> {
-        Ok(Self {
-            field: field.to_string(),
-        })
-    }
-}
-
-impl Filter for MyFilter {
-    fn evaluate(&self, value: &Value) -> Result<bool> {
-        // Implementation
-        Ok(true)
-    }
-}
-```
-
-2. **Add parser support in `src/filter_parser.rs`:**
-
-```rust
-pub fn parse_filter(expr: &str) -> Result<Arc<dyn Filter>> {
-    // ...
-    match parts[0] {
-        // ...
-        "MY_FILTER" => Ok(Arc::from(parse_my_filter(&parts[1..])?)),
-        _ => // ...
-    }
-}
-
-fn parse_my_filter(parts: &[&str]) -> Result<Box<dyn Filter>> {
-    // Parse and return filter
-    Ok(Box::new(MyFilter::new(parts[0])?))
-}
-```
-
-3. **Add tests:**
-
-```rust
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_my_filter() {
-        let filter = MyFilter::new("test").unwrap();
-        let msg = json!({"test": "value"});
-        assert!(filter.evaluate(&msg).unwrap());
-    }
-
-    #[test]
-    fn test_parse_my_filter() {
-        let filter = parse_filter("MY_FILTER:arg").unwrap();
-        let msg = json!({"field": "value"});
-        assert!(filter.evaluate(&msg).unwrap());
-    }
-}
-```
-
-4. **Update documentation:**
-   - Add to `ADVANCED_DSL_GUIDE.md`
-   - Add examples
-   - Update README.md
-
-### Adding a New Transform
-
-Similar process as filters, but implement `Transform` trait:
-
-```rust
-pub struct MyTransform {
-    config: String,
-}
-
-impl Transform for MyTransform {
-    fn transform(&self, value: Value) -> Result<Value> {
-        // Implementation
-        Ok(value)
-    }
-}
-```
-
-### Adding Dependencies
+Install `cargo-machete` or `cargo-audit` before running them if absent:
 
 ```bash
-# Add dependency
-cargo add serde_json
-
-# Add dev dependency
-cargo add --dev mockall
-
-# Update Cargo.toml manually
-# [dependencies]
-# new_crate = "1.0"
+cargo install cargo-machete --locked
+cargo install cargo-audit --locked
+cargo audit
 ```
 
-## Documentation
-
-### Code Documentation
-
-```rust
-/// Brief description.
-///
-/// More detailed explanation.
-///
-/// # Arguments
-///
-/// * `param` - Description
-///
-/// # Returns
-///
-/// Description of return value
-///
-/// # Errors
-///
-/// When this returns an error
-///
-/// # Examples
-///
-/// ```
-/// let result = function(param);
-/// assert_eq!(result, expected);
-/// ```
-pub fn function(param: Type) -> Result<Type> {
-    // implementation
-}
-```
-
-### Generate Documentation
+For operator changes:
 
 ```bash
-# Generate docs
-cargo doc
-
-# Generate and open
-cargo doc --open
-
-# Include private items
-cargo doc --document-private-items
-
-# Check doc tests
-cargo test --doc
+cd operator
+cargo test --verbose
+cargo clippy --all-targets -- -D warnings
+cargo fmt -- --check
 ```
 
-### Documentation Files
-
-Update relevant files:
-- `README.md` - Overview and quick start
-- `USAGE.md` - Use cases and examples
-- `ADVANCED_DSL_GUIDE.md` - DSL reference
-- `PERFORMANCE.md` - Performance tuning
-- `CHANGELOG.md` - Version history
-
-## Pull Request Process
-
-### Before Submitting
-
-**Checklist:**
-- [ ] Code compiles without warnings
-- [ ] All tests pass
-- [ ] New tests added for new features
-- [ ] Code formatted with `cargo fmt`
-- [ ] Linted with `cargo clippy`
-- [ ] Documentation updated
-- [ ] CHANGELOG.md updated
-- [ ] No breaking changes (or documented)
-
-### Submitting PR
-
-1. **Push your branch:**
-```bash
-git push origin feature/my-feature
-```
-
-2. **Create Pull Request:**
-   - Clear title describing the change
-   - Detailed description of what and why
-   - Reference any related issues
-   - Include screenshots/examples if applicable
-
-3. **PR Template:**
-```markdown
-## Description
-Brief description of changes
-
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Testing
-How was this tested?
-
-## Checklist
-- [ ] Tests pass
-- [ ] Documentation updated
-- [ ] CHANGELOG updated
-```
-
-### Code Review
-
-- Address reviewer comments
-- Update based on feedback
-- Keep discussion professional
-- Ask questions if unclear
-
-### After Merge
+For UI changes:
 
 ```bash
-# Update local main
-git checkout main
-git pull origin main
-
-# Delete feature branch
-git branch -d feature/my-feature
-git push origin --delete feature/my-feature
+cd ui
+npm ci
+npm test
+npm run type-check
+npm run lint
+npm run unused-deps
+npm audit --omit=dev --audit-level=high
+npm run build
 ```
 
-## Development Tips
-
-### Debugging
+For Helm changes:
 
 ```bash
-# Debug logging
-RUST_LOG=debug cargo run
-
-# Specific module
-RUST_LOG=streamforge::filter=trace cargo run
-
-# With debugger (VS Code)
-# Set breakpoints and press F5
+helm lint helm/streamforge-operator
+helm template streamforge helm/streamforge-operator \
+  --set operator.image.repository=test \
+  --set operator.image.tag=test
 ```
 
-### Performance Profiling
+Run only the checks relevant to a documentation-only change, including the
+site’s internal-link check after generating `_site`:
 
 ```bash
-# Install perf tools
-# Linux: apt-get install linux-tools-generic
-# macOS: brew install flamegraph
-
-# Profile
-cargo build --release
-perf record --call-graph dwarf ./target/release/streamforge
-
-# Generate flamegraph
-perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
+python3 scripts/docs/check_internal_links.py _site --baseurl /streamforge
 ```
 
-### Common Issues
+Use the maintained performance procedure in [PERFORMANCE.md](PERFORMANCE.md)
+for performance claims; a local `cargo bench` result alone is not publication
+evidence.
 
-**Build Errors:**
-```bash
-# Clean and rebuild
-cargo clean
-cargo build
+## Pull requests
 
-# Update dependencies
-cargo update
-```
+A pull request must:
 
-**Test Failures:**
-```bash
-# Run specific failing test
-cargo test failing_test -- --nocapture
+- explain what changed and why, and link related issues;
+- include tests or explain why behavior is unchanged;
+- pass required CI and resolve all review conversations;
+- carry at least one of `bug`, `enhancement`, `documentation`, `maintenance`,
+  or `dependencies`;
+- add the `security` label when touching security-sensitive paths;
+- document breaking changes and provide migration guidance; and
+- update documentation and the changelog, or use `skip-changelog` when a
+  changelog update is intentionally unnecessary.
 
-# Check for data races
-cargo test -- --test-threads=1
-```
+Small, reviewable commits are preferred. Do not include credentials, generated
+build output, or unrelated cleanup. Security vulnerabilities must not be filed
+publicly; follow the [Security Policy](https://github.com/rahulbsw/streamforge/blob/main/SECURITY.md).
 
-**Clippy Warnings:**
-```bash
-# Fix automatically
-cargo clippy --fix
-
-# Allow specific warning
-#[allow(clippy::warning_name)]
-```
-
-## Getting Help
-
-- Check existing documentation
-- Search issues for similar problems
-- Ask in pull request comments
-- Contact maintainers
-
-## License
-
-Apache License 2.0 - See
-[LICENSE](https://github.com/rahulbsw/streamforge/blob/main/LICENSE) for details.
-
-Copyright 2025 Rahul Jain
-
-## Thank You!
-
-Thank you for contributing to Streamforge! Your contributions help make this project better for everyone.
+See [Governance](https://github.com/rahulbsw/streamforge/blob/main/GOVERNANCE.md)
+for decision authority and review expectations, and
+[Support](https://github.com/rahulbsw/streamforge/blob/main/SUPPORT.md) for help.

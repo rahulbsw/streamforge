@@ -24,6 +24,11 @@ What you expected to happen.
 
 What actually happened.
 
+## Current Evidence
+
+Paste the exact command, file, status, or reproducible observation that proves
+the current state. Redact credentials, payloads, and personal data.
+
 ## Configuration
 
 ```yaml
@@ -32,7 +37,7 @@ What actually happened.
 
 ## Environment
 
-- **Streamforge Version**: [e.g., 0.3.0]
+- **StreamForge Version**: [e.g., 1.1.0]
 - **OS**: [e.g., Ubuntu 22.04]
 - **Rust Version**: [e.g., 1.75.0]
 - **Kafka Version**: [e.g., 3.6.0]
@@ -42,6 +47,33 @@ What actually happened.
 ```
 # Relevant log output
 ```
+
+## Dependencies
+
+List prerequisite issues, services, artifacts, environments, or write `None`.
+
+## Acceptance Tests
+
+- [ ] Reproduction fails before the fix and passes after it
+- [ ] Relevant unit/integration/release checks pass
+
+## Documentation Changes
+
+List affected guides/examples/index links, or explain why none change.
+
+## Cleanup Obligations
+
+List obsolete code, tests, flags, dependencies, examples, or compatibility
+paths to remove or migrate.
+
+## Security Impact
+
+State credential, authorization, data exposure, input-validation, dependency,
+and network impact.
+
+## Rollback Behavior
+
+Describe how to return to the prior behavior and what state cannot be undone.
 
 ## Additional Context
 

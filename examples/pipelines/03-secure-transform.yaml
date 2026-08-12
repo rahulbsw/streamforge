@@ -10,16 +10,21 @@ spec:
   source:
     brokers: "kafka-source.example.com:9093"
     topic: "raw-events"
-    groupId: "streamforge-secure"
     offset: "latest"
     security:
       protocol: "SASL_SSL"
       ssl:
-        caLocation: "/etc/kafka/certs/ca.crt"
+        caSecret:
+          name: source-kafka-ca
+          key: ca.crt
       sasl:
         mechanism: "SCRAM-SHA-256"
-        username: "streamforge-consumer"
-        password: "consumer-secret"
+        usernameSecret:
+          name: source-kafka-auth
+          key: username
+        passwordSecret:
+          name: source-kafka-auth
+          key: password
 
   # Destination with transformation
   destinations:
@@ -27,7 +32,7 @@ spec:
       topic: "transformed-events"
 
       # Transform: Extract fields and construct new object
-      transform: "CONSTRUCT:output,/user/id:userId,/user/email:userEmail,/event/type:eventType,/timestamp:timestamp"
+      transform: "CONSTRUCT:userId=/user/id:userEmail=/user/email:eventType=/event/type:timestamp=/timestamp"
 
       # Only process active users
       filter: "/user/active,==,true"
@@ -36,16 +41,20 @@ spec:
       partitioner: "field"
       partitionerField: "/user/id"
 
-      compression: "zstd"
-
       security:
         protocol: "SASL_SSL"
         ssl:
-          caLocation: "/etc/kafka/certs/ca.crt"
+          caSecret:
+            name: target-kafka-ca
+            key: ca.crt
         sasl:
           mechanism: "SCRAM-SHA-256"
-          username: "streamforge-producer"
-          password: "producer-secret"
+          usernameSecret:
+            name: target-kafka-auth
+            key: username
+          passwordSecret:
+            name: target-kafka-auth
+            key: password
 
   resources:
     requests:
@@ -58,6 +67,3 @@ spec:
   replicas: 4
   threads: 8
   logLevel: "info"
-
-  # Mount secrets for SSL certs
-  # (Handled by operator - maps secrets to pod volumes)

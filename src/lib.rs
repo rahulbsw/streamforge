@@ -3,6 +3,8 @@ pub mod cache;
 pub mod cache_backend;
 pub mod compression;
 pub mod config;
+#[path = "../crates/streamforge-config-model/src/lib.rs"]
+mod config_model;
 pub mod dlq;
 pub mod dsl;
 pub mod envelope;
@@ -12,6 +14,7 @@ pub mod filter_parser;
 pub mod hash;
 pub mod jsonpath;
 pub mod kafka;
+pub mod kubernetes;
 pub mod metrics;
 pub mod observability;
 pub mod partition_pipeline;

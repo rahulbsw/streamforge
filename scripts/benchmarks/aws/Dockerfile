@@ -29,6 +29,8 @@ WORKDIR /build
 
 COPY Cargo.toml Cargo.lock ./
 COPY benches ./benches
+COPY crates/streamforge-config-model/Cargo.toml ./crates/streamforge-config-model/Cargo.toml
+COPY crates/streamforge-config-model/src ./crates/streamforge-config-model/src
 RUN mkdir -p src \
     && printf '%s\n' 'fn main() {}' > src/main.rs \
     && cargo build --release --locked --bin streamforge \

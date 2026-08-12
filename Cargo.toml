@@ -1,6 +1,6 @@
 [package]
 name = "streamforge"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 authors = ["Rahul Jain <rahul.oracle.db@gmail.com>"]
 description = "High-performance Kafka streaming toolkit with advanced filtering and transformation"
@@ -10,6 +10,22 @@ license = "Apache-2.0"
 keywords = ["kafka", "streaming", "mirror", "data-pipeline", "etl"]
 categories = ["command-line-utilities", "database"]
 readme = "README.md"
+include = [
+    "/src/**",
+    "/crates/streamforge-config-model/src/**",
+    "/wit/**",
+    "/benches/**",
+    "/tests/**",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/LICENSE",
+]
+
+[package.metadata.cargo-machete]
+# The package is published as `md-5` but imported as the `md5` crate in
+# `src/hash.rs`; cargo-machete cannot infer that rename without registry metadata.
+ignored = ["md-5"]
 
 [dependencies]
 # Kafka client
@@ -30,23 +46,18 @@ snap = "1.1"     # snappy
 zstd = "0.13"    # zstd
 
 # Error handling
-anyhow = "1.0"
 thiserror = "1.0"
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Configuration
-config = "0.14"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Utilities
 async-trait = "0.1"
-bytes = "1.7"
 regex = "1.10"  # Regular expressions
 rand = "0.8"    # Random number generation for jitter
 chrono = "0.4"  # Date/time for timestamps
-structopt = "0.3"  # CLI argument parsing
+clap = { version = "4.5.60", features = ["derive"] }
 datasketches = "0.2.0"
 
 # Hashing functions
@@ -59,10 +70,7 @@ hex = "0.4"
 # Caching
 moka = { version = "0.12", features = ["future", "sync"] }
 dashmap = "6.0"  # Concurrent HashMap
-redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], optional = true }
-
-# Retry logic
-tokio-retry = "0.3"
+redis = { version = "0.25.5", features = ["tokio-comp", "connection-manager"], optional = true }
 
 # Observability - Prometheus metrics
 prometheus = { version = "0.14", features = ["process"] }
@@ -70,12 +78,9 @@ lazy_static = "1.4"
 
 # HTTP server for metrics endpoint
 axum = "0.7"
-tower = "0.4"
-tower-http = { version = "0.5", features = ["trace"] }
-
 # Sandboxed WebAssembly UDF runtime. WASI and async support are intentionally
 # omitted: UDF components receive only their typed arguments and export values.
-wasmtime = { version = "=36.0.10", default-features = false, features = [
+wasmtime = { version = "=36.0.13", default-features = false, features = [
     "component-model",
     "cranelift",
     "parallel-compilation",
@@ -86,9 +91,8 @@ wasmtime = { version = "=36.0.10", default-features = false, features = [
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-testcontainers = "0.15"
 uuid = { version = "1.6", features = ["v4"] }
-serial_test = "3.0"
+serial_test = "3.5"
 
 [[bin]]
 name = "streamforge"

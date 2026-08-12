@@ -292,4 +292,4 @@ let stats = cache.stats();
 ## See Also
 
 - [Full Documentation](../../HASH_AND_CACHE.md)
-- [Examples](../../../examples/config.hash-and-cache.yaml)
+- [Configuration schema](../../CONFIG_SCHEMA.json)
