@@ -3,7 +3,7 @@
 > Selective replication for Kafka. Filter, transform, redact, and route records
 > between topics and clusters without deploying Kafka Connect.
 
-[![Version](https://img.shields.io/badge/version-1.0.0-36d1c4.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.0-36d1c4.svg)](CHANGELOG.md)
 [![CI](https://github.com/rahulbsw/streamforge/workflows/CI/badge.svg)](https://github.com/rahulbsw/streamforge/actions)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-38a3ff.svg)](https://rahulbsw.github.io/streamforge/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-d5dde4.svg)](LICENSE)
@@ -30,21 +30,17 @@ Kafka source ──► filter ──► transform ──┬──► analytics t
 
 ## Run the local demo
 
-Prerequisites: a Rust toolchain, Podman, and a Podman Compose provider.
+Prerequisites: Docker or Podman with Compose support.
 
 ```bash
-podman compose -f examples/redpanda/docker-compose.yml up -d
-
-cargo run --quiet --bin streamforge-validate -- \
-  examples/redpanda/selective-replication.yaml
-
-CONFIG_FILE=examples/redpanda/selective-replication.yaml \
-  cargo run --release --bin streamforge
+scripts/quickstart.sh up
+scripts/quickstart.sh verify
+scripts/quickstart.sh down
 ```
 
-Keep StreamForge running, then follow the
-[five-minute quickstart](docs/QUICKSTART.md) to create the topics, publish one
-order, and inspect the two destination-specific outputs.
+The script creates topics, starts StreamForge, publishes a record, verifies the
+destination output, and removes its resources. See the
+[quickstart](docs/QUICKSTART.md) for the manual journey.
 
 ## Choose a path
 
@@ -57,6 +53,8 @@ order, and inspect the two destination-specific outputs.
 | Deploy with Podman or Kubernetes | [Deployment guide](docs/DEPLOYMENT.md) |
 | Configure TLS and SASL | [Security configuration](docs/SECURITY_CONFIGURATION.md) |
 | Operate and troubleshoot a pipeline | [Operations](docs/OPERATIONS.md) |
+| Follow the focused release tracks | [Roadmap](ROADMAP.md) |
+| Review draft release changes and rollback | [Release notes](docs/releases/README.md) |
 | Browse the complete public documentation | [StreamForge documentation](https://rahulbsw.github.io/streamforge/) |
 
 ## Deployment modes
@@ -72,6 +70,12 @@ Use the operator and `StreamforgePipeline` custom resource when pipelines
 should be managed declaratively. Start with
 [Kubernetes](docs/KUBERNETES.md) or the
 [Helm chart](helm/streamforge-operator/README.md).
+
+The UI is Kubernetes/operator-backed. It provides guided multi-destination
+onboarding, server-side validation/dry-run, and pipeline status, metrics, events,
+and logs. TLS/SASL setup uses Kubernetes Secret references; credential values
+are not stored in pipeline resources or generated ConfigMaps. It is not a local
+process-control daemon.
 
 ## Compatibility and boundaries
 

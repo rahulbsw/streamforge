@@ -172,10 +172,6 @@ spec:
                         enum: [default, random, hash, field]
                       partitionerField:
                         type: string
-                      compression:
-                        type: string
-                        enum: [none, gzip, snappy, lz4, zstd]
-                        default: none
                       security:
                         type: object
                         properties:
@@ -375,38 +371,31 @@ spec:
                       properties:
                         cpu:
                           type: string
-                          default: "100m"
                         memory:
                           type: string
-                          default: "128Mi"
                     limits:
                       type: object
                       properties:
                         cpu:
                           type: string
-                          default: "1000m"
                         memory:
                           type: string
-                          default: "512Mi"
 
                 # Scaling configuration
                 replicas:
                   type: integer
                   minimum: 1
-                  default: 1
                   description: Number of pipeline replicas
 
                 # Additional settings
                 threads:
                   type: integer
                   minimum: 1
-                  default: 4
                   description: Number of consumer threads
 
                 logLevel:
                   type: string
                   enum: [trace, debug, info, warn, error]
-                  default: info
 
                 # Pod configuration
                 image:
@@ -414,14 +403,11 @@ spec:
                   properties:
                     repository:
                       type: string
-                      default: ghcr.io/rahulbsw/streamforge
                     tag:
                       type: string
-                      default: latest
                     pullPolicy:
                       type: string
                       enum: [Always, IfNotPresent, Never]
-                      default: IfNotPresent
 
                 serviceAccount:
                   type: string

@@ -66,7 +66,7 @@ When using Streamforge in production:
 ✅ **Do:**
 - Use SSL/TLS for Kafka connections
 - Use SASL/SCRAM or mutual TLS for authentication
-- Store credentials in environment variables or secret management systems
+- Inject credentials as protected files from a secret-management system
 - Enable Kafka ACLs to restrict access
 
 ❌ **Don't:**
@@ -125,7 +125,7 @@ To check for known vulnerabilities in dependencies.
 ### Configuration Security
 
 - **Credentials in config files**: Never commit config files with credentials to version control
-- **Environment variables**: Use environment variables for sensitive data
+- **Protected files**: Mount secret-store material with least-privilege permissions
 - **File permissions**: Set config files to 600 (owner read/write only)
 
 Example secure configuration:
@@ -137,24 +137,24 @@ security:
     ca_location: /etc/streamforge/ca-cert.pem
   sasl:
     mechanism: SCRAM-SHA-256
-    username: ${KAFKA_USERNAME}  # From environment
-    password: ${KAFKA_PASSWORD}  # From environment
+    username_file: /run/secrets/kafka-username
+    password_file: /run/secrets/kafka-password
 ```
 
 ### Container Image Security
 
 Our official Docker images:
 
-- Use Chainguard base images (minimal, no CVEs)
+- Use minimal, digest-pinned Chainguard runtime bases
 - Run as non-root user (UID 65532)
 - Don't include unnecessary tools
 - Are regularly scanned for vulnerabilities
 
-Verify image signatures:
+Pull and inspect the exact release image:
 
 ```bash
-docker pull rahulbsw/streamforge:latest
-docker inspect rahulbsw/streamforge:latest
+docker pull ghcr.io/rahulbsw/streamforge:1.1.0
+docker inspect ghcr.io/rahulbsw/streamforge:1.1.0
 ```
 
 ## Security Contacts
@@ -177,5 +177,4 @@ We thank the following security researchers for responsibly disclosing vulnerabi
 
 ---
 
-**Last Updated**: 2026-04-18
-**Version**: 1.0.0
+**Last Updated**: 2026-07-26

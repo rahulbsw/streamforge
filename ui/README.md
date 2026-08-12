@@ -1,292 +1,180 @@
-# Streamforge UI
+# StreamForge Control UI
 
-Web-based management interface for Streamforge Kubernetes Operator.
+Kubernetes-native interface for creating, validating, observing, and troubleshooting
+`StreamforgePipeline` resources.
 
-## Features
+## Capabilities
 
-- 🔐 **Authentication** - JWT-based authentication with secure HTTP-only cookies
-- 📝 **Visual Pipeline Builder** - Create pipelines using an intuitive form or YAML editor
-- 📊 **Real-time Monitoring** - View pipeline status, replicas, and health at a glance
-- 📋 **Log Viewer** - View real-time logs from pipeline pods with auto-refresh
-- 🔄 **Auto-refresh** - Pipeline list and logs update every 5 seconds
-- 🎯 **Kubernetes Native** - Directly manages StreamforgePipeline CRDs
-- 🎨 **Modern UI** - Built with Next.js, React, and Tailwind CSS
+- Six-stage pipeline onboarding: identity, source, destinations, processing,
+  reliability/resources, and review.
+- Multiple destinations with V2 function-style filters and transforms.
+- Kafka security references backed by Kubernetes Secrets; credential values are
+  never entered into or returned by the UI.
+- Retry and dead-letter policy configuration.
+- YAML import, export, review, and bounded validator execution.
+- Kubernetes server-side dry-run before resource creation.
+- Pipeline status, workload health, conditions, events, metrics, and bounded logs.
+- `admin` and `viewer` roles. Viewers can inspect resources but cannot create,
+  update, or delete them.
+- Graceful metrics degradation: Kubernetes status, events, and logs remain usable
+  when Prometheus is unavailable.
 
 ## Prerequisites
 
-- Node.js 18+ or Bun
-- Kubernetes cluster with Streamforge Operator installed
-- kubectl configured with access to the cluster
-
-## Installation
-
-```bash
-# Install dependencies
-npm install
-# or
-bun install
-```
+- Node.js 20.19 or newer (Node.js 22.12 or newer recommended)
+- A Kubernetes cluster with the StreamForge operator and CRD installed
+- Kubernetes credentials with the access described in the deployment RBAC
+- `streamforge-validate` available in the UI container or at the configured path
 
 ## Development
 
 ```bash
-# Start development server
+npm install
 npm run dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001) in your browser.
+The development server listens on <http://localhost:3001>.
 
-### Default Credentials
-
-For development, the following demo accounts are available:
-
-| Username | Password | Role |
-|----------|----------|------|
-| admin | admin | admin |
-| operator | operator | operator |
-
-**⚠️ Important:** These are demo credentials. In production, implement proper authentication with password hashing and user management.
-
-## Building for Production
+Demo authentication is disabled by default. Enable it only for a local,
+non-production process:
 
 ```bash
-# Type check
-npm run type-check
+STREAMFORGE_DEMO_AUTH=true npm run dev
+```
 
-# Lint code
+This exposes local `admin` and `viewer` accounts using the passwords supplied in
+`STREAMFORGE_DEMO_ADMIN_PASSWORD` and `STREAMFORGE_DEMO_VIEWER_PASSWORD`. The
+flag is ignored in production. `JWT_SECRET` remains required in development;
+load all three values from your approved local secret store before starting the
+server.
+
+## Production configuration
+
+The following environment variables define the production boundary:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `JWT_SECRET` | Yes | JWT signing secret of at least 32 characters |
+| `STREAMFORGE_UI_USERS` | Yes | JSON array of configured users |
+| `STREAMFORGE_VALIDATOR_PATH` | No | Validator path; defaults to `streamforge-validate` |
+| `PROMETHEUS_URL` | No | Server-side Prometheus base URL |
+| `NODE_ENV` | Yes | Set to `production` |
+
+`STREAMFORGE_UI_USERS` must be an array of objects containing `username`,
+`passwordHash`, and `role`. Roles are `admin` or `viewer`; passwords must be
+bcrypt hashes.
+
+```json
+[
+  {
+    "username": "platform-admin",
+    "passwordHash": "<bcrypt-hash-from-approved-secret-store>",
+    "role": "admin"
+  },
+  {
+    "username": "operations",
+    "passwordHash": "<bcrypt-hash-from-approved-secret-store>",
+    "role": "viewer"
+  }
+]
+```
+
+Do not place the JSON value or JWT secret in a checked-in manifest. Reference an
+existing Kubernetes Secret from the deployment.
+
+Prometheus queries are predefined on the server. Browser-supplied query text and
+datasource URLs are not accepted. Supported time windows are `15m`, `1h`, `6h`,
+and `24h`.
+
+## Quality checks
+
+```bash
+npm test
 npm run lint
-
-# Build the application
+npm run type-check
+npm run unused-deps
 npm run build
+npm audit --omit=dev --audit-level=high
+```
 
-# Start production server
+The focused tests verify multi-destination serialization, TLS/SASL Secret
+references, reliability settings, plaintext-security omission, and step-level
+validation.
+
+## API
+
+All endpoints require the HTTP-only session cookie. Mutation endpoints require an
+`admin` role.
+
+### Authentication
+
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+
+### Pipelines
+
+- `GET /api/pipelines?namespace=<namespace>`
+- `POST /api/pipelines` — validates with Kubernetes dry-run, then creates
+- `PATCH /api/pipelines` — admin only
+- `DELETE /api/pipelines?name=<name>&namespace=<namespace>` — admin only
+
+### Validation
+
+`POST /api/config/validate` accepts:
+
+```json
+{ "content": "<StreamforgePipeline YAML>" }
+```
+
+The body is limited to 256 KiB. The server writes a mode-`0600` temporary file
+and executes, without a shell:
+
+```text
+streamforge-validate --input-format pipeline-crd --output json <path>
+```
+
+Execution is limited to eight seconds and 256 KiB of output. Temporary content
+is removed in all completion paths. A genuinely missing validator returns HTTP
+503 with the required command contract.
+
+### Operations
+
+- `GET /api/pipelines/{name}/summary?namespace=<namespace>`
+- `GET /api/pipelines/{name}/metrics?namespace=<namespace>&window=15m|1h|6h|24h`
+- `GET /api/pipelines/{name}/events?namespace=<namespace>`
+- `GET /api/pipelines/{name}/logs`
+
+Log filters are bounded:
+
+| Query | Values / maximum |
+| --- | --- |
+| `tailLines` | 1–500 |
+| `sinceSeconds` | 1–86400 |
+| `level` | `all`, `error`, `warn`, `info`, `debug`, `trace` |
+| `search` | Up to 128 characters |
+| `pod` | One valid Kubernetes pod name |
+
+At most ten pods and 512 KiB per pod are read in one request.
+
+## Build
+
+```bash
+npm run build
 npm start
 ```
 
-## Configuration
+The Next.js standalone output listens on port 3001. The container build compiles
+`streamforge-validate` in a Debian builder matching the Node runtime ABI and
+smoke-tests the validator inside the image. It receives Kubernetes and
+authentication configuration only through the deployment environment.
 
-The UI uses your local `~/.kube/config` to connect to Kubernetes. Make sure kubectl is configured properly:
-
-```bash
-kubectl config current-context
-kubectl get nodes
-```
-
-## Features Overview
-
-### Dashboard
-
-- View all pipelines across namespaces
-- Real-time status updates (Running, Pending, Failed)
-- Replica count monitoring
-- Quick delete actions
-
-### Pipeline Builder
-
-- **Form Mode**: User-friendly form with validation
-  - Source Kafka configuration
-  - Destination Kafka configuration
-  - Optional filters and transforms
-  - Resource allocation (replicas, threads)
-
-- **YAML Mode**: Direct YAML editing for advanced users
-  - Syntax highlighting
-  - Live preview
-  - Import/export YAML
-
-### Supported Operations
-
-- ✅ User authentication (login/logout)
-- ✅ Create new pipelines
-- ✅ List pipelines by namespace
-- ✅ View pipeline status and replicas
-- ✅ View real-time pipeline logs
-- ✅ Delete pipelines
-- 🚧 Edit existing pipelines (coming soon)
-
-## Tech Stack
-
-- **Framework**: Next.js 15 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Icons**: Lucide React
-- **Kubernetes**: @kubernetes/client-node
-- **YAML**: js-yaml
-- **Authentication**: jose (JWT)
-- **Linting**: ESLint with Next.js config
-
-## Project Structure
-
-```
-ui/
-├── app/
-│   ├── api/
-│   │   ├── auth/
-│   │   │   ├── login/route.ts    # Login endpoint
-│   │   │   ├── logout/route.ts   # Logout endpoint
-│   │   │   └── me/route.ts       # Current user endpoint
-│   │   └── pipelines/
-│   │       ├── [name]/
-│   │       │   └── logs/route.ts # Pipeline logs endpoint
-│   │       └── route.ts          # Pipeline CRUD endpoints
-│   ├── login/
-│   │   └── page.tsx              # Login page
-│   ├── pipelines/
-│   │   └── new/
-│   │       └── page.tsx          # Pipeline creation form
-│   ├── globals.css               # Global styles
-│   ├── layout.tsx                # Root layout
-│   └── page.tsx                  # Dashboard (home)
-├── components/
-│   └── PipelineLogs.tsx          # Log viewer component
-├── lib/
-│   └── auth.ts                   # Authentication utilities
-├── middleware.ts                 # Route protection
-├── public/                       # Static assets
-├── .eslintrc.json                # ESLint configuration
-├── package.json
-├── tailwind.config.ts
-└── tsconfig.json
-```
-
-## API Routes
-
-### Authentication Endpoints
-
-#### POST /api/auth/login
-Authenticate user and create session
-
-Body:
-```json
-{
-  "username": "admin",
-  "password": "admin"
-}
-```
-
-Returns: User object and sets HTTP-only session cookie
-
-#### POST /api/auth/logout
-Invalidate current session
-
-Returns: Success confirmation
-
-#### GET /api/auth/me
-Get current authenticated user
-
-Returns: User object or 401 if not authenticated
-
-### Pipeline Endpoints (Protected)
-
-All pipeline endpoints require authentication via session cookie.
-
-#### GET /api/pipelines
-List all pipelines in a namespace
-
-Query params:
-- `namespace` (optional, default: "default")
-
-#### POST /api/pipelines
-Create a new pipeline
-
-Body: StreamforgePipeline CRD object
-
-#### DELETE /api/pipelines
-Delete a pipeline
-
-Query params:
-- `name` (required)
-- `namespace` (optional, default: "default")
-
-#### PATCH /api/pipelines
-Update an existing pipeline
-
-Body: StreamforgePipeline CRD object with modifications
-
-#### GET /api/pipelines/[name]/logs
-Get logs from pipeline pods
-
-Query params:
-- `namespace` (optional, default: "streamforge-system")
-- `tailLines` (optional, default: 100)
-
-Returns:
-```json
-{
-  "logs": [
-    {
-      "podName": "pipeline-pod-1",
-      "logs": "log content..."
-    }
-  ]
-}
-```
-
-## Security Considerations
-
-### Current Implementation
-
-✅ **JWT Authentication**: Session-based authentication with HTTP-only cookies (8-hour expiry)
-✅ **Route Protection**: Middleware protects all routes except login
-✅ **API Protection**: All pipeline endpoints require authentication
-
-⚠️ **Development Mode**: Uses demo credentials (admin/admin, operator/operator)
-
-### Production Recommendations
-
-For production deployment:
-
-- **Authentication**:
-  - Replace demo credentials with proper user management
-  - Use bcrypt or argon2 for password hashing
-  - Consider OAuth2/OIDC integration (Azure AD, Okta, etc.)
-  - Implement MFA for admin accounts
-
-- **Secrets Management**:
-  - Use Kubernetes secrets for JWT secret key
-  - Rotate secrets regularly
-  - Never commit secrets to version control
-
-- **RBAC & Permissions**:
-  - Use proper Kubernetes RBAC to limit permissions
-  - Create service account with restricted access
-  - Implement role-based access control in UI
-
-- **Network Security**:
-  - Run behind TLS reverse proxy (Ingress with cert-manager)
-  - Use network policies to restrict access
-  - Enable CORS with specific origins only
-
-- **Monitoring & Auditing**:
-  - Log all authentication attempts
-  - Monitor for suspicious activity
-  - Audit pipeline creation/deletion operations
-
-## Docker Deployment
+Build the container from the repository root:
 
 ```bash
-# Build Docker image
-docker build -t streamforge-ui:latest .
-
-# Run container
-docker run -p 3001:3001 \
-  -e JWT_SECRET=your-secret-key-here \
-  -v ~/.kube/config:/root/.kube/config:ro \
-  streamforge-ui:latest
+docker build -f ui/Dockerfile -t streamforge-ui:local .
+docker run --rm \
+  --entrypoint /usr/local/bin/streamforge-validate \
+  streamforge-ui:local \
+  --help
 ```
-
-### Environment Variables
-
-- `JWT_SECRET` (optional): Secret key for JWT signing (default: "streamforge-secret-key-change-in-production")
-- `NODE_ENV` (optional): Set to "production" for production mode
-- `PORT` (optional): Server port (default: 3001)
-
-## Contributing
-
-See [../CONTRIBUTING.md](../CONTRIBUTING.md)
-
-## License
-
-Apache License 2.0

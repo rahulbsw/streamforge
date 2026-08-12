@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, RefreshCw, Trash2, Activity, LogOut, User, FileText } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, Activity, LogOut, User, FileText, Gauge } from 'lucide-react';
 import PipelineLogs from '@/components/PipelineLogs';
 
 interface Pipeline {
@@ -31,7 +31,7 @@ interface Pipeline {
 
 interface User {
   username: string;
-  role: string;
+  role: 'admin' | 'viewer';
 }
 
 export default function Home() {
@@ -55,7 +55,7 @@ export default function Home() {
     }
   };
 
-  const fetchPipelines = async () => {
+  const fetchPipelines = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -69,12 +69,12 @@ export default function Home() {
       }
       const data = await response.json();
       setPipelines(data.items || []);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch pipelines');
     } finally {
       setLoading(false);
     }
-  };
+  }, [namespace, router]);
 
   useEffect(() => {
     fetchUser();
@@ -84,7 +84,7 @@ export default function Home() {
     fetchPipelines();
     const interval = setInterval(fetchPipelines, 5000);
     return () => clearInterval(interval);
-  }, [namespace]);
+  }, [fetchPipelines]);
 
   const handleLogout = async () => {
     try {
@@ -109,8 +109,9 @@ export default function Home() {
         throw new Error('Failed to delete pipeline');
       }
       fetchPipelines();
-    } catch (err: any) {
-      alert(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to delete pipeline';
+      alert(`Error: ${message}`);
     }
   };
 
@@ -128,15 +129,15 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="sf-shell">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 shadow-sm">
+      <header className="sf-header">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                 <Activity className="w-8 h-8 text-blue-600" />
-                Streamforge
+                StreamForge
               </h1>
               <p className="text-sm text-gray-500 mt-1">
                 High-performance Kafka streaming pipelines
@@ -150,13 +151,12 @@ export default function Home() {
                   <span className="text-xs text-gray-500">({user.role})</span>
                 </div>
               )}
-              <Link
-                href="/pipelines/new"
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="w-5 h-5" />
-                New Pipeline
-              </Link>
+              {user?.role === 'admin' && (
+                <Link href="/pipelines/new" className="sf-button-primary">
+                  <Plus className="w-5 h-5" />
+                  New Pipeline
+                </Link>
+              )}
               <button
                 onClick={handleLogout}
                 className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
@@ -217,15 +217,16 @@ export default function Home() {
             <Activity className="w-16 h-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No pipelines found</h3>
             <p className="text-gray-500 mb-6">
-              Get started by creating your first Streamforge pipeline
+              Get started by creating your first StreamForge pipeline
             </p>
-            <Link
-              href="/pipelines/new"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="w-5 h-5" />
-              Create Pipeline
-            </Link>
+            {user?.role === 'admin' ? (
+              <Link href="/pipelines/new" className="sf-button-primary">
+                <Plus className="w-5 h-5" />
+                Create Pipeline
+              </Link>
+            ) : (
+              <p className="text-sm text-gray-500">A pipeline administrator can create the first pipeline.</p>
+            )}
           </div>
         ) : (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -239,7 +240,7 @@ export default function Home() {
                     Source
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Destination
+                    Destinations
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
@@ -267,10 +268,10 @@ export default function Home() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm text-gray-900">
-                        {pipeline.spec.destinations[0]?.topic || '-'}
+                        {pipeline.spec.destinations.length} configured
                       </div>
                       <div className="text-sm text-gray-500">
-                        {pipeline.spec.destinations[0]?.brokers || '-'}
+                        {pipeline.spec.destinations.map((destination) => destination.topic).join(', ') || '-'}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -287,6 +288,13 @@ export default function Home() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end gap-2">
+                        <Link
+                          href={`/pipelines/${pipeline.metadata.name}?namespace=${pipeline.metadata.namespace}`}
+                          className="text-teal-700 hover:text-teal-900 inline-flex items-center gap-1"
+                        >
+                          <Gauge className="w-4 h-4" />
+                          Operate
+                        </Link>
                         <button
                           onClick={() => setSelectedPipeline(pipeline)}
                           className="text-blue-600 hover:text-blue-900 inline-flex items-center gap-1"
@@ -294,13 +302,15 @@ export default function Home() {
                           <FileText className="w-4 h-4" />
                           Logs
                         </button>
-                        <button
-                          onClick={() => deletePipeline(pipeline.metadata.name)}
-                          className="text-red-600 hover:text-red-900 inline-flex items-center gap-1"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          Delete
-                        </button>
+                        {user?.role === 'admin' && (
+                          <button
+                            onClick={() => deletePipeline(pipeline.metadata.name)}
+                            className="text-red-600 hover:text-red-900 inline-flex items-center gap-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

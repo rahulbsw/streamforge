@@ -11,7 +11,6 @@ spec:
     brokers: "kafka-mtls.kafka.svc.cluster.local:9093"
     topic: "secure-input-topic"
     offset: "latest"
-    groupId: "secure-tls-group"
     security:
       protocol: "SSL"
       ssl:
@@ -53,14 +52,13 @@ spec:
   threads: 4
   appid: "secure-tls-pipeline"
 
----
 # Example: Create TLS certificate secret
 #
 # kubectl create secret generic kafka-tls-certs \
 #   --from-file=ca.crt=/path/to/ca-cert.pem \
 #   --from-file=client.crt=/path/to/client-cert.pem \
 #   --from-file=client.key=/path/to/client-key.pem \
-#   --from-literal=key.password=myKeyPassword \
+#   --from-file=key.password=/secure/path/key-password \
 #   -n streamforge-system
 #
 # Or create from TLS type:

@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "passthrough",
+      "description": "Replicate records without filter or transform work.",
+      "payload_sizes_bytes": [1024, 10240],
+      "required_destinations": 1
+    },
+    {
+      "id": "transform-heavy",
+      "description": "Apply representative filter and construct transformations.",
+      "payload_sizes_bytes": [1024, 10240],
+      "required_destinations": 1
+    },
+    {
+      "id": "fan-out",
+      "description": "Deliver every accepted record to multiple destinations.",
+      "payload_sizes_bytes": [1024, 10240],
+      "required_destinations": 3
+    },
+    {
+      "id": "aggregation-heavy",
+      "description": "Exercise windowed aggregation and state-store pressure.",
+      "payload_sizes_bytes": [1024, 10240],
+      "required_destinations": 1
+    }
+  ],
+  "processing_modes": ["legacy_batch", "partition_ordered"],
+  "delivery_modes": ["acknowledged", "queued"],
+  "invalid_mode_pairs": [
+    {
+      "processing_mode": "legacy_batch",
+      "delivery_mode": "queued",
+      "reason": "Unsupported by the current engine"
+    }
+  ],
+  "publication_requirements": {
+    "dedicated_hardware": true,
+    "minimum_repetitions": 3,
+    "maximum_throughput_cv": 0.03,
+    "maximum_throughput_regression": 0.05,
+    "maximum_p99_latency_regression": 0.1,
+    "maximum_peak_rss_regression": 0.1,
+    "exact_accounting": true,
+    "maximum_errors": 0,
+    "teardown_evidence": true,
+    "cost_evidence": true
+  }
+}

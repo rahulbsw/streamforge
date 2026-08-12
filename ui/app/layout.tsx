@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Streamforge UI",
-  description: "Kubernetes Operator UI for Streamforge pipelines",
+  title: "StreamForge Control",
+  description: "Create and operate StreamForge Kafka pipelines on Kubernetes",
 };
 
 export default function RootLayout({

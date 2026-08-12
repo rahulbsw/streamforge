@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { X, RefreshCw, Terminal } from 'lucide-react';
 
 interface PipelineLogsProps {
@@ -14,24 +14,33 @@ export default function PipelineLogs({ pipelineName, namespace, onClose }: Pipel
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [tailLines, setTailLines] = useState(100);
+  const [sinceSeconds, setSinceSeconds] = useState(3600);
+  const [level, setLevel] = useState('all');
+  const [search, setSearch] = useState('');
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     try {
       setError(null);
-      const response = await fetch(
-        `/api/pipelines/${pipelineName}/logs?namespace=${namespace}&tailLines=50`
-      );
+      const query = new URLSearchParams({
+        namespace,
+        tailLines: String(tailLines),
+        sinceSeconds: String(sinceSeconds),
+        level,
+        search,
+      });
+      const response = await fetch(`/api/pipelines/${encodeURIComponent(pipelineName)}/logs?${query}`);
       if (!response.ok) {
         throw new Error('Failed to fetch logs');
       }
       const data = await response.json();
       setLogs(data.logs || []);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch logs');
     } finally {
       setLoading(false);
     }
-  };
+  }, [level, namespace, pipelineName, search, sinceSeconds, tailLines]);
 
   useEffect(() => {
     fetchLogs();
@@ -40,7 +49,7 @@ export default function PipelineLogs({ pipelineName, namespace, onClose }: Pipel
       const interval = setInterval(fetchLogs, 5000);
       return () => clearInterval(interval);
     }
-  }, [autoRefresh, pipelineName, namespace]);
+  }, [autoRefresh, fetchLogs]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -78,6 +87,37 @@ export default function PipelineLogs({ pipelineName, namespace, onClose }: Pipel
               <X className="w-5 h-5" />
             </button>
           </div>
+        </div>
+
+        <div className="grid gap-3 border-b border-gray-200 bg-slate-50 p-4 sm:grid-cols-4">
+          <label>
+            <span className="sf-label">Range</span>
+            <select className="sf-input" value={sinceSeconds} onChange={(event) => setSinceSeconds(Number(event.target.value))}>
+              <option value={900}>15 minutes</option>
+              <option value={3600}>1 hour</option>
+              <option value={21600}>6 hours</option>
+              <option value={86400}>24 hours</option>
+            </select>
+          </label>
+          <label>
+            <span className="sf-label">Lines per pod</span>
+            <select className="sf-input" value={tailLines} onChange={(event) => setTailLines(Number(event.target.value))}>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={250}>250</option>
+              <option value={500}>500</option>
+            </select>
+          </label>
+          <label>
+            <span className="sf-label">Severity</span>
+            <select className="sf-input" value={level} onChange={(event) => setLevel(event.target.value)}>
+              {['all', 'error', 'warn', 'info', 'debug', 'trace'].map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="sf-label">Search</span>
+            <input className="sf-input" value={search} maxLength={128} onChange={(event) => setSearch(event.target.value)} placeholder="Text in log line" />
+          </label>
         </div>
 
         {/* Content */}

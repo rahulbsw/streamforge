@@ -33,8 +33,16 @@ pub struct StreamforgePipelineSpec {
     #[serde(default)]
     pub udfs: Option<UdfConfig>,
 
-    /// Resource requirements
+    /// Retry policy for transient processing failures
     #[serde(default)]
+    pub retry: RetryConfig,
+
+    /// Dead-letter queue policy
+    #[serde(default)]
+    pub dlq: DlqConfig,
+
+    /// Resource requirements
+    #[serde(default = "default_resources")]
     pub resources: ResourceRequirements,
 
     /// Number of replicas
@@ -54,6 +62,7 @@ pub struct StreamforgePipelineSpec {
     pub image: ImageConfig,
 
     /// Service account
+    #[serde(default = "default_service_account")]
     pub service_account: Option<String>,
 
     /// Node selector
@@ -93,9 +102,47 @@ pub struct DestinationConfig {
     #[serde(default)]
     pub partitioner: Option<String>,
     pub partitioner_field: Option<String>,
-    #[serde(default = "default_compression")]
-    pub compression: String,
     pub security: Option<SecurityConfig>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RetryConfig {
+    pub max_attempts: u32,
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: u64,
+    pub multiplier: f64,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: 30_000,
+            multiplier: 2.0,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DlqConfig {
+    pub enabled: bool,
+    pub topic: String,
+    pub include_headers: bool,
+    pub max_dlq_retries: u32,
+}
+
+impl Default for DlqConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            topic: "streamforge-dlq".to_string(),
+            include_headers: true,
+            max_dlq_retries: 3,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
@@ -146,29 +193,11 @@ pub enum UdfWorld {
     EnvelopeTransform,
 }
 
-impl UdfWorld {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Filter => "filter",
-            Self::ValueTransform => "value_transform",
-            Self::EnvelopeTransform => "envelope_transform",
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UdfAbi {
     #[default]
     V1,
-}
-
-impl UdfAbi {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::V1 => "v1",
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
@@ -242,10 +271,16 @@ pub struct SaslConfig {
     pub keytab_secret: Option<SecretReference>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct ResourceRequirements {
     pub requests: Option<BTreeMap<String, String>>,
     pub limits: Option<BTreeMap<String, String>>,
+}
+
+impl Default for ResourceRequirements {
+    fn default() -> Self {
+        default_resources()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
@@ -269,7 +304,8 @@ impl Default for ImageConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct PipelineStatus {
     #[serde(default)]
     pub phase: String,
@@ -280,7 +316,7 @@ pub struct PipelineStatus {
     pub last_updated: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PipelineCondition {
     pub r#type: String,
@@ -292,19 +328,16 @@ pub struct PipelineCondition {
 
 // Default functions
 fn default_replicas() -> i32 {
-    1
+    env_i32("DEFAULT_REPLICAS", 1)
 }
 fn default_threads() -> i32 {
-    4
+    env_i32("DEFAULT_THREADS", 4)
 }
 fn default_log_level() -> String {
-    "info".to_string()
+    std::env::var("DEFAULT_LOG_LEVEL").unwrap_or_else(|_| "info".to_string())
 }
 fn default_offset() -> String {
     "latest".to_string()
-}
-fn default_compression() -> String {
-    "none".to_string()
 }
 fn default_protocol() -> String {
     "PLAINTEXT".to_string()
@@ -314,10 +347,48 @@ fn default_image_repository() -> String {
         .unwrap_or_else(|_| "ghcr.io/rahulbsw/streamforge".to_string())
 }
 fn default_image_tag() -> String {
-    std::env::var("DEFAULT_IMAGE_TAG").unwrap_or_else(|_| "0.3.0".to_string())
+    std::env::var("DEFAULT_IMAGE_TAG").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string())
 }
 fn default_image_pull_policy() -> String {
-    "IfNotPresent".to_string()
+    std::env::var("DEFAULT_IMAGE_PULL_POLICY").unwrap_or_else(|_| "IfNotPresent".to_string())
+}
+fn default_service_account() -> Option<String> {
+    std::env::var("DEFAULT_SERVICE_ACCOUNT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+fn default_resources() -> ResourceRequirements {
+    let requests = BTreeMap::from([
+        (
+            "cpu".to_string(),
+            std::env::var("DEFAULT_REQUEST_CPU").unwrap_or_else(|_| "100m".to_string()),
+        ),
+        (
+            "memory".to_string(),
+            std::env::var("DEFAULT_REQUEST_MEMORY").unwrap_or_else(|_| "128Mi".to_string()),
+        ),
+    ]);
+    let limits = BTreeMap::from([
+        (
+            "cpu".to_string(),
+            std::env::var("DEFAULT_LIMIT_CPU").unwrap_or_else(|_| "1000m".to_string()),
+        ),
+        (
+            "memory".to_string(),
+            std::env::var("DEFAULT_LIMIT_MEMORY").unwrap_or_else(|_| "512Mi".to_string()),
+        ),
+    ]);
+    ResourceRequirements {
+        requests: Some(requests),
+        limits: Some(limits),
+    }
+}
+fn env_i32(name: &str, fallback: i32) -> i32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(fallback)
 }
 
 #[cfg(test)]

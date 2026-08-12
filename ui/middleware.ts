@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { verifyToken } from './lib/auth';
+import { verifyToken } from './lib/session';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -27,6 +27,10 @@ export async function middleware(request: NextRequest) {
 
   if (!user) {
     return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  if (pathname.startsWith('/pipelines/new') && user.role !== 'admin') {
+    return NextResponse.redirect(new URL('/', request.url));
   }
 
   return NextResponse.next();

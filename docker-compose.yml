@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: streamforge:latest
+    image: streamforge:1.1.0
     container_name: streamforge
     environment:
       - CONFIG_FILE=/app/config/config.json
@@ -32,7 +32,7 @@ services:
     network_mode: bridge
     # Health check
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "streamforge"]
+      test: ["CMD", "/usr/local/bin/streamforge", "--version"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -43,7 +43,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.static
-    image: streamforge:static
+    image: streamforge:1.1.0-static
     container_name: streamforge-static
     environment:
       - CONFIG_FILE=/app/config/config.json

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "workload_id": "passthrough-current-json",
+  "publication_eligible": false,
+  "repetitions": 3,
+  "source": {
+    "commit": "d848f118e62b41c7605250c69c9da087af688d0c",
+    "document": "../results/BENCHMARK_RESULTS.md",
+    "measured_at": "2026-07-25T00:00:00Z",
+    "environment": "AWS c7i.2xlarge"
+  },
+  "accounting": {
+    "exact": true,
+    "records_per_repetition": 16200000,
+    "errors": 0
+  },
+  "metrics": {
+    "throughput_median_messages_per_second": 106692.65,
+    "throughput_cv": 0.00058,
+    "peak_rss_bytes": 143759770
+  },
+  "evidence_gaps": [
+    "p99_latency_milliseconds was not captured by this baseline",
+    "the deterministic JSON dataset was not normalized to exactly 1024 bytes"
+  ]
+}

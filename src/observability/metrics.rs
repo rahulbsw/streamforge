@@ -41,8 +41,13 @@ pub mod labels {
 }
 
 lazy_static! {
-    pub static ref REGISTRY: Registry = Registry::new();
     pub static ref METRICS: Metrics = Metrics::new();
+    pub static ref REGISTRY: Registry = {
+        let registry = Registry::new();
+        register_metrics_in(&registry, &METRICS)
+            .expect("StreamForge metrics must have unique names and valid descriptors");
+        registry
+    };
 }
 
 /// Central metrics structure
@@ -100,6 +105,8 @@ pub struct Metrics {
     pub aggregation_records_emitted: CounterVec,
 
     // System health
+    pub build_info: GaugeVec,
+    pub ready: Gauge,
     pub uptime_seconds: Gauge,
     pub kafka_connections: GaugeVec,
 }
@@ -430,6 +437,27 @@ impl Metrics {
             )
             .unwrap(),
 
+            build_info: {
+                let metric = GaugeVec::new(
+                    Opts::new(
+                        "streamforge_build_info",
+                        "StreamForge build information; the value is always 1",
+                    ),
+                    &["version"],
+                )
+                .unwrap();
+                metric
+                    .with_label_values(&[env!("CARGO_PKG_VERSION")])
+                    .set(1.0);
+                metric
+            },
+
+            ready: Gauge::new(
+                "streamforge_ready",
+                "Whether StreamForge is ready to process Kafka records (1 ready, 0 not ready)",
+            )
+            .unwrap(),
+
             uptime_seconds: Gauge::new("streamforge_uptime_seconds", "Service uptime in seconds")
                 .unwrap(),
 
@@ -442,44 +470,54 @@ impl Metrics {
     }
 }
 
-/// Register all metrics with the registry
-pub fn register_metrics() -> Result<(), Box<dyn std::error::Error>> {
-    REGISTRY.register(Box::new(METRICS.messages_consumed.clone()))?;
-    REGISTRY.register(Box::new(METRICS.messages_produced.clone()))?;
-    REGISTRY.register(Box::new(METRICS.messages_delivered.clone()))?;
-    REGISTRY.register(Box::new(METRICS.messages_filtered.clone()))?;
-    REGISTRY.register(Box::new(METRICS.processing_errors.clone()))?;
-    REGISTRY.register(Box::new(METRICS.processing_duration.clone()))?;
-    REGISTRY.register(Box::new(METRICS.batch_processing_duration.clone()))?;
-    REGISTRY.register(Box::new(METRICS.processing_rate.clone()))?;
-    REGISTRY.register(Box::new(METRICS.messages_in_flight.clone()))?;
-    REGISTRY.register(Box::new(METRICS.filter_evaluations.clone()))?;
-    REGISTRY.register(Box::new(METRICS.filter_duration.clone()))?;
-    REGISTRY.register(Box::new(METRICS.filter_errors.clone()))?;
-    REGISTRY.register(Box::new(METRICS.transform_operations.clone()))?;
-    REGISTRY.register(Box::new(METRICS.transform_duration.clone()))?;
-    REGISTRY.register(Box::new(METRICS.transform_errors.clone()))?;
-    REGISTRY.register(Box::new(METRICS.wasm_invocations.clone()))?;
-    REGISTRY.register(Box::new(METRICS.wasm_duration.clone()))?;
-    REGISTRY.register(Box::new(METRICS.wasm_input_bytes.clone()))?;
-    REGISTRY.register(Box::new(METRICS.wasm_output_bytes.clone()))?;
-    REGISTRY.register(Box::new(METRICS.wasm_active_invocations.clone()))?;
-    REGISTRY.register(Box::new(METRICS.wasm_compilations.clone()))?;
-    REGISTRY.register(Box::new(METRICS.wasm_compilation_duration.clone()))?;
-    REGISTRY.register(Box::new(METRICS.key_transforms.clone()))?;
-    REGISTRY.register(Box::new(METRICS.header_operations.clone()))?;
-    REGISTRY.register(Box::new(METRICS.timestamp_operations.clone()))?;
-    REGISTRY.register(Box::new(METRICS.consumer_lag.clone()))?;
-    REGISTRY.register(Box::new(METRICS.consumer_offset.clone()))?;
-    REGISTRY.register(Box::new(METRICS.consumer_high_watermark.clone()))?;
-    REGISTRY.register(Box::new(METRICS.time_since_last_commit.clone()))?;
-    REGISTRY.register(Box::new(METRICS.aggregation_updates.clone()))?;
-    REGISTRY.register(Box::new(METRICS.aggregation_windows_open.clone()))?;
-    REGISTRY.register(Box::new(METRICS.aggregation_flushes.clone()))?;
-    REGISTRY.register(Box::new(METRICS.aggregation_records_emitted.clone()))?;
-    REGISTRY.register(Box::new(METRICS.uptime_seconds.clone()))?;
-    REGISTRY.register(Box::new(METRICS.kafka_connections.clone()))?;
+fn register_metrics_in(registry: &Registry, metrics: &Metrics) -> prometheus::Result<()> {
+    registry.register(Box::new(metrics.messages_consumed.clone()))?;
+    registry.register(Box::new(metrics.messages_produced.clone()))?;
+    registry.register(Box::new(metrics.messages_delivered.clone()))?;
+    registry.register(Box::new(metrics.messages_filtered.clone()))?;
+    registry.register(Box::new(metrics.processing_errors.clone()))?;
+    registry.register(Box::new(metrics.processing_duration.clone()))?;
+    registry.register(Box::new(metrics.batch_processing_duration.clone()))?;
+    registry.register(Box::new(metrics.processing_rate.clone()))?;
+    registry.register(Box::new(metrics.messages_in_flight.clone()))?;
+    registry.register(Box::new(metrics.filter_evaluations.clone()))?;
+    registry.register(Box::new(metrics.filter_duration.clone()))?;
+    registry.register(Box::new(metrics.filter_errors.clone()))?;
+    registry.register(Box::new(metrics.transform_operations.clone()))?;
+    registry.register(Box::new(metrics.transform_duration.clone()))?;
+    registry.register(Box::new(metrics.transform_errors.clone()))?;
+    registry.register(Box::new(metrics.wasm_invocations.clone()))?;
+    registry.register(Box::new(metrics.wasm_duration.clone()))?;
+    registry.register(Box::new(metrics.wasm_input_bytes.clone()))?;
+    registry.register(Box::new(metrics.wasm_output_bytes.clone()))?;
+    registry.register(Box::new(metrics.wasm_active_invocations.clone()))?;
+    registry.register(Box::new(metrics.wasm_compilations.clone()))?;
+    registry.register(Box::new(metrics.wasm_compilation_duration.clone()))?;
+    registry.register(Box::new(metrics.key_transforms.clone()))?;
+    registry.register(Box::new(metrics.header_operations.clone()))?;
+    registry.register(Box::new(metrics.timestamp_operations.clone()))?;
+    registry.register(Box::new(metrics.consumer_lag.clone()))?;
+    registry.register(Box::new(metrics.consumer_offset.clone()))?;
+    registry.register(Box::new(metrics.consumer_high_watermark.clone()))?;
+    registry.register(Box::new(metrics.time_since_last_commit.clone()))?;
+    registry.register(Box::new(metrics.aggregation_updates.clone()))?;
+    registry.register(Box::new(metrics.aggregation_windows_open.clone()))?;
+    registry.register(Box::new(metrics.aggregation_flushes.clone()))?;
+    registry.register(Box::new(metrics.aggregation_records_emitted.clone()))?;
+    registry.register(Box::new(metrics.build_info.clone()))?;
+    registry.register(Box::new(metrics.ready.clone()))?;
+    registry.register(Box::new(metrics.uptime_seconds.clone()))?;
+    registry.register(Box::new(metrics.kafka_connections.clone()))?;
 
+    Ok(())
+}
+
+/// Initialize the process-wide registry.
+///
+/// Registration happens once when the lazy registry is created, so repeated
+/// calls are safe for embedders and tests.
+pub fn register_metrics() -> Result<(), Box<dyn std::error::Error>> {
+    lazy_static::initialize(&REGISTRY);
     Ok(())
 }
 
@@ -572,5 +610,36 @@ mod tests {
             .wasm_active_invocations
             .with_label_values(&["redact", labels::WASM_KIND_VALUE_TRANSFORM])
             .set(1.0);
+    }
+
+    #[test]
+    fn registry_contains_build_and_readiness_metrics() {
+        let registry = Registry::new();
+        let metrics = Metrics::new();
+        register_metrics_in(&registry, &metrics).unwrap();
+
+        let names: Vec<_> = registry
+            .gather()
+            .into_iter()
+            .map(|family| family.name().to_string())
+            .collect();
+
+        assert!(names.contains(&"streamforge_build_info".to_string()));
+        assert!(names.contains(&"streamforge_ready".to_string()));
+    }
+
+    #[test]
+    fn duplicate_registration_is_rejected_without_partial_global_state() {
+        let registry = Registry::new();
+        let metrics = Metrics::new();
+        register_metrics_in(&registry, &metrics).unwrap();
+
+        assert!(register_metrics_in(&registry, &metrics).is_err());
+    }
+
+    #[test]
+    fn process_registry_initialization_is_idempotent() {
+        register_metrics().unwrap();
+        register_metrics().unwrap();
     }
 }

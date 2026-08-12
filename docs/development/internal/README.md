@@ -13,7 +13,6 @@ These documents are **not user-facing documentation**. They track:
 ## Contents
 
 ### Development Status & Tracking
-- **[CI_IMPROVEMENTS.md](CI_IMPROVEMENTS.md)** - CI/CD pipeline improvements and enhancements
 
 ### Feature Implementation Records
 - **[FEATURE_SUMMARY.md](FEATURE_SUMMARY.md)** - Hash, Cache, and At-Least-Once features implementation summary

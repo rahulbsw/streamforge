@@ -1,4 +1,7 @@
 {{- if .Values.ui.enabled }}
+{{- if and .Values.ui.auth.developmentMode .Values.ui.auth.existingSecret }}
+{{- fail "ui.auth.developmentMode cannot be combined with ui.auth.existingSecret" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,13 +30,15 @@ spec:
       {{- end }}
       containers:
         - name: ui
-          image: "{{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag }}"
+          image: "{{ .Values.ui.image.repository }}:{{ include "streamforge-operator.imageTag" (list .Values.ui.image.tag .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
           ports:
             - name: http
               containerPort: 3001
               protocol: TCP
           env:
+            - name: NODE_ENV
+              value: {{ ternary "development" "production" .Values.ui.auth.developmentMode | quote }}
             {{- range .Values.ui.env }}
             - name: {{ .name }}
               value: {{ .value | quote }}
@@ -41,8 +46,28 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "streamforge-operator.fullname" . }}-ui-secret
-                  key: jwt-secret
+                  name: {{ include "streamforge-operator.uiSecretName" . }}
+                  key: {{ .Values.ui.auth.secretKey }}
+            {{- if .Values.ui.auth.developmentMode }}
+            - name: STREAMFORGE_DEMO_AUTH
+              value: "true"
+            - name: STREAMFORGE_DEMO_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "streamforge-operator.uiSecretName" . }}
+                  key: {{ .Values.ui.auth.demoAdminPasswordKey }}
+            - name: STREAMFORGE_DEMO_VIEWER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "streamforge-operator.uiSecretName" . }}
+                  key: {{ .Values.ui.auth.demoViewerPasswordKey }}
+            {{- else }}
+            - name: STREAMFORGE_UI_USERS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "streamforge-operator.uiSecretName" . }}
+                  key: {{ .Values.ui.auth.usersKey }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /

@@ -1,72 +1,35 @@
 # Contributors
 
-This project exists thanks to all the people who contribute.
+StreamForge exists because of its contributors.
 
-## Core Team
+## Core team
 
-### Lead Developer & Maintainer
-**Rahul Jain** - [@rahulbsw](https://github.com/rahulbsw)
-- Project creator and lead developer
-- Architecture and design
-- Performance optimization and benchmarking
-- Documentation
+**Rahul Jain** ([@rahulbsw](https://github.com/rahulbsw)) is the creator and
+lead maintainer, responsible for architecture, design, performance work,
+benchmarking, and documentation.
 
 ## Contributors
 
-We welcome contributions from the community! Thank you to everyone who has contributed to this project.
+Community contributions include bug reports, feature proposals, code,
+documentation, testing, feedback, and support. Contributors are recognized in
+the changelog, release notes, and GitHub contributor history; names listed here
+are ordered alphabetically by first name.
 
-### How to Contribute
+See the [contributing guide](docs/CONTRIBUTING.md) to participate, use
+[GitHub Issues](https://github.com/rahulbsw/streamforge/issues) for bugs and
+feature proposals, or improve the documentation through a pull request.
 
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines on how to contribute.
+## Corporate contributors
 
-### Recognition
-
-Contributors will be listed here in recognition of their work:
-
-- Bug reports and feature requests
-- Code contributions
-- Documentation improvements
-- Community support
-- Testing and feedback
+Cisco Systems has supported contributions from Cisco engineering teams.
 
 ## Acknowledgments
 
-### Projects and Libraries
+Thanks to the maintainers and contributors of
+[Apache Kafka](https://kafka.apache.org/),
+[rdkafka-rust](https://github.com/fede1024/rust-rdkafka),
+[Tokio](https://tokio.rs/), [Serde](https://serde.rs/), and the Rust community.
+StreamForge is inspired by Kafka MirrorMaker and broader stream-processing
+patterns.
 
-Special thanks to the maintainers and contributors of:
-
-- **[Apache Kafka](https://kafka.apache.org/)** - Distributed streaming platform
-- **[rdkafka-rust](https://github.com/fede1024/rust-rdkafka)** - Rust client for Apache Kafka
-- **[Tokio](https://tokio.rs/)** - Asynchronous runtime for Rust
-- **[Serde](https://serde.rs/)** - Serialization framework for Rust
-- **Rust Community** - For the excellent language and ecosystem
-
-### Inspiration
-
-This project was inspired by:
-- **Kafka MirrorMaker** - Original Java implementation
-- **Stream processing patterns** - From the broader data engineering community
-
-## Corporate Contributors
-
-### Cisco Systems
-Support and contributions from Cisco engineering teams.
-
----
-
-## Join Us!
-
-Want to see your name here? We'd love your contribution!
-
-- 🐛 [Report bugs](https://github.com/rahulbsw/streamforge/issues)
-- 💡 [Suggest features](https://github.com/rahulbsw/streamforge/issues)
-- 📖 [Improve documentation](docs/CONTRIBUTING.md)
-- 🔧 [Submit code](docs/CONTRIBUTING.md#pull-requests)
-- ⭐ [Star the project](https://github.com/rahulbsw/streamforge)
-- 📢 Share with others
-
----
-
-**Contributors are listed in alphabetical order by first name.**
-
-Last updated: April 2026
+Last updated: April 2026.

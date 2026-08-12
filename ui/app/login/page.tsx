@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Activity, Lock } from 'lucide-react';
+import { Activity, ArrowRight, LockKeyhole } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,112 +11,79 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setLoading(true);
     setError('');
-
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Login failed');
-      }
-
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Sign in failed');
       router.push('/');
       router.refresh();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Sign in failed');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="max-w-md w-full">
-        {/* Logo/Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-full mb-4">
-            <Activity className="w-10 h-10 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Streamforge</h1>
-          <p className="text-gray-600">Sign in to manage your pipelines</p>
+    <main className="grid min-h-screen lg:grid-cols-[1.1fr_0.9fr]">
+      <section className="relative hidden overflow-hidden bg-[#10212d] p-12 text-white lg:flex lg:flex-col lg:justify-between">
+        <div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,.15)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.15)_1px,transparent_1px)] [background-size:36px_36px]" />
+        <div className="relative flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-teal-500">
+            <Activity className="h-6 w-6" />
+          </span>
+          <span className="text-xl font-bold">StreamForge Control</span>
         </div>
+        <div className="relative max-w-xl">
+          <p className="font-mono text-xs uppercase tracking-[0.2em] text-teal-300">Kubernetes data plane</p>
+          <h1 className="mt-4 text-5xl font-bold leading-[1.05] tracking-tight">
+            See every route.<br />Control every handoff.
+          </h1>
+          <p className="mt-6 max-w-md text-lg leading-8 text-slate-300">
+            Build, validate, and operate selective Kafka replication pipelines from one guarded control surface.
+          </p>
+        </div>
+        <p className="relative font-mono text-xs text-slate-400">AUTHENTICATED OPERATIONS · AUDITABLE CHANGES</p>
+      </section>
 
-        {/* Login Form */}
-        <div className="bg-white rounded-lg shadow-xl p-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Username
-              </label>
-              <input
-                type="text"
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="admin"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="••••••••"
-              />
-            </div>
-
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-            >
-              <Lock className="w-5 h-5" />
-              {loading ? 'Signing in...' : 'Sign In'}
+      <section className="flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-md">
+          <div className="mb-10 lg:hidden">
+            <Activity className="h-9 w-9 text-teal-700" />
+            <h1 className="mt-3 text-2xl font-bold">StreamForge Control</h1>
+          </div>
+          <p className="sf-kicker">Secure console</p>
+          <h2 className="mt-2 text-3xl font-bold tracking-tight">Sign in</h2>
+          <p className="mt-2 text-sm text-slate-600">Use the credentials configured by your platform administrator.</p>
+          <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+            <label>
+              <span className="sf-label">Username</span>
+              <input className="sf-input" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} />
+            </label>
+            <label>
+              <span className="sf-label">Password</span>
+              <input className="sf-input" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
+            </label>
+            {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+            <button className="sf-button-primary w-full" type="submit" disabled={loading}>
+              <LockKeyhole className="h-4 w-4" />
+              {loading ? 'Signing in…' : 'Sign in'}
+              {!loading && <ArrowRight className="ml-auto h-4 w-4" />}
             </button>
           </form>
-
-          {/* Demo Credentials */}
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-xs text-gray-500 text-center mb-2">Demo Credentials:</p>
-            <div className="text-xs text-gray-600 space-y-1">
-              <div className="flex justify-between bg-gray-50 p-2 rounded">
-                <span>Username: <strong>admin</strong></span>
-                <span>Password: <strong>admin</strong></span>
-              </div>
-              <div className="flex justify-between bg-gray-50 p-2 rounded">
-                <span>Username: <strong>operator</strong></span>
-                <span>Password: <strong>operator</strong></span>
-              </div>
-            </div>
-          </div>
+          <p className="mt-6 text-xs leading-5 text-slate-500">
+            Production deployments require an explicit JWT secret and an administrator-managed user list. No default credentials are active.
+          </p>
         </div>
-
-        {/* Footer */}
-        <p className="text-center text-sm text-gray-600 mt-6">
-          Streamforge Kubernetes Operator v0.1.0
-        </p>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

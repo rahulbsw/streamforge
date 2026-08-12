@@ -1,0 +1,67 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "streamforge-operator.fullname" . }}-pipelines
+  labels:
+    {{- include "streamforge-operator.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: streamforge.recording
+      interval: 30s
+      rules:
+        - record: streamforge:delivery_rate:5m
+          expr: sum by (namespace, destination) (rate(streamforge_messages_delivered_total[5m]))
+        - record: streamforge:processing_error_rate:5m
+          expr: sum by (namespace, type) (rate(streamforge_processing_errors_total[5m]))
+        - record: streamforge:consumer_lag:max
+          expr: max by (namespace, topic, partition) (streamforge_consumer_lag)
+        - record: streamforge:processing_latency_seconds:p99_5m
+          expr: histogram_quantile(0.99, sum by (namespace, destination, le) (rate(streamforge_processing_duration_seconds_bucket[5m])))
+    - name: streamforge.alerts
+      interval: 30s
+      rules:
+        - alert: StreamForgeDown
+          expr: up{job=~".*streamforge.*"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: StreamForge metrics target is down
+            description: Prometheus has been unable to scrape a StreamForge target for one minute.
+        - alert: StreamForgeNotReady
+          expr: streamforge_ready == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: StreamForge pipeline is not ready
+            description: StreamForge cannot currently use all required runtime dependencies.
+        - alert: StreamForgeCriticalLag
+          expr: streamforge:consumer_lag:max > 100000
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: StreamForge consumer lag is critical
+            description: Consumer lag for {{ "{{" }} $labels.topic {{ "}}" }}/{{ "{{" }} $labels.partition {{ "}}" }} is {{ "{{" }} $value {{ "}}" }}.
+        - alert: StreamForgeHighErrorRate
+          expr: streamforge:processing_error_rate:5m > 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: StreamForge processing error rate is elevated
+            description: Processing errors are above 10 per second for error category {{ "{{" }} $labels.type {{ "}}" }}.
+        - alert: StreamForgeHighLatency
+          expr: streamforge:processing_latency_seconds:p99_5m > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: StreamForge p99 processing latency is high
+            description: P99 processing latency for {{ "{{" }} $labels.destination {{ "}}" }} is above one second.
+{{- end }}

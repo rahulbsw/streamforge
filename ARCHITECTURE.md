@@ -51,6 +51,13 @@ Responsibilities include:
 `src/main.rs` applies the validated configuration to the consumer and processing
 loop.
 
+`crates/streamforge-config-model` owns the additive
+`StreamforgePipeline` v1alpha1-to-engine projection. The Kubernetes operator
+serializes a CRD through this crate before writing its ConfigMap, and
+`streamforge-validate --input-format pipeline-crd` uses the same projection
+before typed engine validation. This prevents the UI dry-run and reconciler
+from maintaining competing mappings.
+
 ### Consumer and processing loop
 
 `src/main.rs` owns the `StreamConsumer`, subscription, processing-mode
@@ -224,9 +231,53 @@ fault-tolerant state recovery remains future work.
 `src/metrics.rs` and `src/observability/` provide processing metrics, Prometheus
 exposure, HTTP observability endpoints, and consumer-lag monitoring.
 
+The HTTP surface is intentionally bounded:
+
+- `/health` is process liveness and returns the backward-compatible literal
+  `OK`;
+- `/ready` is structured readiness and changes between 200 and 503 based on
+  runtime/Kafka state;
+- the configured metrics path exposes the Prometheus registry.
+
+`STREAMFORGE_LOG_FORMAT` selects `text` or `json`; `RUST_LOG` remains the level
+filter. Operational fields are structured, but payloads, credentials, message
+keys, and DSL expression contents are excluded.
+
+The operator exposes the named metrics port and configures `/ready` and
+`/health` probes. Helm can install a private metrics Service, ServiceMonitor,
+PrometheusRule, alerts, recording rules, and Grafana dashboard.
+
 Performance decisions should use completed-message rate, lag, error rate,
 latency, CPU, and memory together. A microbenchmark result is not an end-to-end
 Kafka service-level result.
+
+### Kubernetes operator and UI
+
+The operator remains the only pipeline-control component. It watches
+`StreamforgePipeline` v1alpha1 resources and reconciles ConfigMaps, Deployments,
+Secret mounts, and status. Multi-destination CRDs project into the engine's
+shared-target-broker routing configuration. The canonical converter emits
+separate source and target security blocks containing only mounted credential
+file paths. Inline pipeline credentials and divergent per-destination target
+security are rejected before workload creation.
+
+Generated ConfigMaps and Deployments carry controller owner references to the
+pipeline. The controller also watches owned Deployment changes so workload
+availability updates status promptly. Status patches are skipped when the
+desired status is unchanged; the `Ready` condition is derived from observed
+Deployment generation, updated/available/ready replicas, and replica failures.
+`lastTransitionTime` changes only when readiness changes. Deleting a pipeline
+therefore garbage-collects its generated workload and configuration.
+
+The Next.js UI talks to Kubernetes and predefined Prometheus queries. Creation
+uses the bundled matching `streamforge-validate` binary without a shell,
+enforces input/time/output bounds, and performs Kubernetes server-side dry-run
+before applying a resource. Pipeline detail APIs expose bounded summaries,
+metrics windows, events, and logs. Viewer sessions cannot mutate resources.
+The UI does not run or supervise standalone local StreamForge processes.
+The UI exposes only supported global/runtime controls; the former
+per-destination compression field was removed because the engine implements
+compression as a global producer policy.
 
 ## Phase 1 performance decisions
 
@@ -313,6 +364,7 @@ src/
 ├── filter/                     filters and transforms
 ├── kafka/sink.rs               producer wrapper and serialization
 ├── kafka/sink/delivery.rs      bounded asynchronous delivery tracking
+├── kubernetes.rs               typed wrapper around shared CRD projection
 ├── partitioner.rs              keyed and field partition decisions
 ├── aggregation.rs              windowed aggregation
 ├── cache.rs                    cache interfaces
@@ -321,6 +373,21 @@ src/
 ├── dlq.rs                      dead-letter queue
 ├── metrics.rs                  processing metrics
 └── observability/              HTTP metrics and lag monitoring
+
+crates/
+└── streamforge-config-model/   shared CRD-to-engine JSON projection
+
+operator/
+├── src/crd.rs                  v1alpha1 resource/status schema
+├── src/reconciler.rs           Kubernetes API reconciliation
+├── src/resources.rs            generated ConfigMap/Deployment construction
+├── src/status.rs               idempotent phase/Ready calculation
+└── src/render.rs               shared-model engine configuration rendering
+
+ui/
+├── app/api/                    bounded Kubernetes/Prometheus APIs
+├── app/pipelines/              onboarding and pipeline operations
+└── lib/                        auth, Kubernetes, API, and pipeline contracts
 ```
 
 ## Verification boundaries
@@ -338,4 +405,4 @@ and are not inferred from unit or microbenchmark success.
 - `docs/PERFORMANCE.md` — tuning and benchmark method
 - `docs/DELIVERY_GUARANTEES.md` — commit and failure semantics
 
-**Last updated:** 2026-07-25
+**Last updated:** 2026-07-26
