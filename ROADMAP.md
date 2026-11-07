@@ -129,7 +129,7 @@ StreamForge aims to be the **fastest, most reliable, and easiest-to-use Kafka se
   - Native DSL/UDF composition, typed error-policy and DLQ integration,
     Prometheus metrics, operator ConfigMap/PVC delivery, Rust guest SDK, and
     correctness/security/performance coverage
-  - Wasmtime pinned to the security-patched `36.0.10` release, with a blocking
+  - Wasmtime pinned to the security-patched `36.0.20` release, with a blocking
     dependency audit, guest-SDK compilation, and fixture verification in CI
   - User, ABI, SDK, deployment, security, and performance documentation in
     `docs/WASM_UDFS.md` and `udf-sdk/rust/README.md`

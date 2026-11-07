@@ -92,6 +92,7 @@ pub struct DlqMessage {
 }
 
 /// Testable abstraction for dead-letter delivery.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait DlqWriter: Send + Sync {
     async fn send(&self, dlq_msg: DlqMessage) -> Result<()>;

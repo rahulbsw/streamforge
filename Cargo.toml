@@ -27,7 +27,7 @@ serde_yaml = "0.9"
 # Compression
 flate2 = "1.0"  # gzip
 snap = "1.1"     # snappy
-zstd = "0.13"    # zstd
+zstd = "0.14.3"  # zstd
 
 # Error handling
 anyhow = "1.0"
@@ -75,7 +75,7 @@ tower-http = { version = "0.5", features = ["trace"] }
 
 # Sandboxed WebAssembly UDF runtime. WASI and async support are intentionally
 # omitted: UDF components receive only their typed arguments and export values.
-wasmtime = { version = "=36.0.10", default-features = false, features = [
+wasmtime = { version = "=36.0.20", default-features = false, features = [
     "component-model",
     "cranelift",
     "parallel-compilation",
