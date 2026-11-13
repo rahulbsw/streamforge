@@ -80,7 +80,7 @@ lazy_static = "1.4"
 axum = "0.7"
 # Sandboxed WebAssembly UDF runtime. WASI and async support are intentionally
 # omitted: UDF components receive only their typed arguments and export values.
-wasmtime = { version = "=36.0.13", default-features = false, features = [
+wasmtime = { version = "=36.0.20", default-features = false, features = [
     "component-model",
     "cranelift",
     "parallel-compilation",

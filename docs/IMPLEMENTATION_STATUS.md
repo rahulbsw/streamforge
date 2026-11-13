@@ -206,7 +206,7 @@ Implemented:
 - operator ConfigMap/PVC read-only artifact delivery and rollout digests;
 - Rust guest SDK/examples, checked-in fixtures, correctness/security/
   concurrency tests, and Criterion coverage;
-- patched Wasmtime `36.0.13`.
+- patched Wasmtime `36.0.20`.
 
 Known boundaries:
 
@@ -264,7 +264,8 @@ Passed on 2026-07-26:
 - focused PR #39 verification on 2026-11-13: quickstart Docker/Podman lifecycle,
   UI namespace, login limiter, and namespace-scoped metric-query tests; Helm
   rendering; catalog-backed performance evidence checks; UI type-check, lint,
-  tests, production build, and full dependency audit;
+  tests, production build, and full dependency audit; Rust formatting and cargo
+  audit (no vulnerable crates; five existing allowed warnings remain);
 - all retained pipeline CRD and engine configuration examples through
   `streamforge-validate`;
 - the source-built Podman-backed Minikube smoke, including Kafka 3.9,
