@@ -1,6 +1,6 @@
 # Implementation Status
 
-Verified source status as of 2026-11-07. This document records implemented
+Verified source status as of 2026-11-13. This document records implemented
 capabilities and known boundaries; it does not assert production throughput
 without a reproducible workload and benchmark result.
 
@@ -173,22 +173,27 @@ delivery, retries disabled, and DLQ disabled for its optimized passthrough
 workload. Exact delivered/output counts verify that a benchmark run completed
 without loss, but do not change or prove general delivery semantics.
 
-## Current verification (2026-11-07)
+## Current verification (2026-11-13)
 
 Validated on macOS Apple Silicon with Rust and Clippy 1.99.0:
 
-- `cargo test --all --locked --quiet`: 512 passed, 0 failed, 30 ignored.
+- `cargo test --all --locked --quiet`: 525 passed, 0 failed, 30 ignored.
 - `cargo clippy --all-targets --all-features --locked -- -D warnings`: passed.
 - `cargo fmt --all -- --check`: passed.
-- `cargo audit`: zero vulnerabilities; 11 default-allowed informational and
-  unmaintained/unsoundness warnings remain.
-- The Rust build and tests pass when CMake and pkg-config use the same explicit
-  OpenSSL 3 prefix.
+- `cargo audit`: zero vulnerabilities; 12 default-allowed warnings remain.
+- `docker build --tag streamforge:pr53 --file Dockerfile .`: passed with the
+  Chainguard builder's OpenSSL 4.0.3 after updating `openssl-sys` to 0.9.118.
+- The first PR #53 image build failed because locked `openssl-sys 0.9.111` did
+  not accept OpenSSL 4.0.3. The lockfile-only update to 0.9.118 supports that
+  ABI and the full local image build now passes.
+- PR #53's Rust tests, benchmarks, Ubuntu/macOS builds, Rust audit, UI and
+  operator checks, Helm validation, and metadata checks passed on its current
+  head before the final lockfile update. GitHub Actions still needs to rerun
+  the updated head, including the image build.
 
-GitHub Actions has not yet rerun for this remediation. The available checks on
-PRs #46–#52 are historical until refreshed. PR #48 still has its own Tailwind
-4 PostCSS plugin migration failure, and PR #52's Wasmtime `36.0.19` head is
-behind the current patched `36.0.20` dependency.
+The available checks on PRs #46–#52 are historical until refreshed. PR #48
+still has its own Tailwind 4 PostCSS plugin migration failure, and PR #52's
+Wasmtime `36.0.19` head is behind the current patched `36.0.20` dependency.
 
 ## Earlier verification
 
