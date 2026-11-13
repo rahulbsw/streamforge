@@ -177,7 +177,8 @@ without loss, but do not change or prove general delivery semantics.
 
 Validated on macOS Apple Silicon with Rust and Clippy 1.99.0:
 
-- `cargo test --all --locked --quiet`: 525 passed, 0 failed, 30 ignored.
+- `cargo test --all --all-features --locked --quiet`: 525 passed, 0 failed,
+  30 ignored.
 - `cargo clippy --all-targets --all-features --locked -- -D warnings`: passed.
 - `cargo fmt --all -- --check`: passed.
 - `cargo audit`: zero vulnerabilities; 12 default-allowed warnings remain.
@@ -186,10 +187,15 @@ Validated on macOS Apple Silicon with Rust and Clippy 1.99.0:
 - The first PR #53 image build failed because locked `openssl-sys 0.9.111` did
   not accept OpenSSL 4.0.3. The lockfile-only update to 0.9.118 supports that
   ABI and the full local image build now passes.
-- PR #53's Rust tests, benchmarks, Ubuntu/macOS builds, Rust audit, UI and
-  operator checks, Helm validation, and metadata checks passed on its current
-  head before the final lockfile update. GitHub Actions still needs to rerun
-  the updated head, including the image build.
+- A subsequent GitHub Actions run found that locked `redis 0.24.0` fails to
+  compile with the current stable Rust compiler's never-type fallback rules.
+  The lockfile now uses Redis `0.24.1`, whose release fixes this compiler
+  compatibility issue. The full all-features test suite passes locally with
+  the updated lockfile.
+- GitHub Actions passed the Rust tests, benchmarks, Ubuntu/macOS builds, Rust
+  audit, UI and operator checks, Helm validation, and metadata checks on the
+  earlier head. The OpenSSL fix passed the local image build; Actions still
+  needs to rerun the latest lockfile updates.
 
 The available checks on PRs #46–#52 are historical until refreshed. PR #48
 still has its own Tailwind 4 PostCSS plugin migration failure, and PR #52's
