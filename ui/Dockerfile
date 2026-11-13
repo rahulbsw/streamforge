@@ -41,7 +41,6 @@ COPY ui/lib ./lib
 COPY ui/public ./public
 COPY ui/eslint.config.mjs \
      ui/middleware.ts \
-     ui/next-env.d.ts \
      ui/next.config.ts \
      ui/postcss.config.mjs \
      ui/tailwind.config.ts \

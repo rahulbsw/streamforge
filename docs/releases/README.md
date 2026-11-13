@@ -9,4 +9,4 @@ is published.
 - [`v1.4`](v1.4.md) — performance productization
 
 The authoritative implementation/evidence boundary is
-[`../IMPLEMENTATION_STATUS.md`](../IMPLEMENTATION_STATUS.md).
+[`IMPLEMENTATION_STATUS.md`](../IMPLEMENTATION_STATUS.md).
