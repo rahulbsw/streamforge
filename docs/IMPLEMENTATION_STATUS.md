@@ -1,6 +1,6 @@
 # Implementation Status
 
-Verified source status as of 2026-07-25. This document records implemented
+Verified source status as of 2026-11-13. This document records implemented
 capabilities and known boundaries; it does not assert production throughput
 without a reproducible workload and benchmark result.
 
@@ -55,8 +55,8 @@ Implemented in the current source:
   and same-broker validation.
 - A source-based Rust guest SDK/examples and dedicated correctness, security,
   concurrency, and Criterion benchmark coverage.
-- Wasmtime is pinned to the patched `36.0.10` release. Dependency-audit failures
-  block CI, and CI compiles all Rust guest examples for
+- Wasmtime is pinned to the patched `36.0.20` release. CI compiles all Rust
+  guest examples for
   `wasm32-unknown-unknown` and verifies the checked-in fixture digests.
 
 Known boundaries:
@@ -173,7 +173,35 @@ delivery, retries disabled, and DLQ disabled for its optimized passthrough
 workload. Exact delivered/output counts verify that a benchmark run completed
 without loss, but do not change or prove general delivery semantics.
 
-## Verification
+## Current verification (2026-11-13)
+
+Validated on macOS Apple Silicon with Rust and Clippy 1.99.0:
+
+- `cargo test --all --all-features --locked --quiet`: 525 passed, 0 failed,
+  30 ignored.
+- `cargo clippy --all-targets --all-features --locked -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `cargo audit`: zero vulnerabilities; 12 default-allowed warnings remain.
+- `docker build --tag streamforge:pr53 --file Dockerfile .`: passed with the
+  Chainguard builder's OpenSSL 4.0.3 after updating `openssl-sys` to 0.9.118.
+- The first PR #53 image build failed because locked `openssl-sys 0.9.111` did
+  not accept OpenSSL 4.0.3. The lockfile-only update to 0.9.118 supports that
+  ABI and the full local image build now passes.
+- A subsequent GitHub Actions run found that locked `redis 0.24.0` fails to
+  compile with the current stable Rust compiler's never-type fallback rules.
+  The lockfile now uses Redis `0.24.1`, whose release fixes this compiler
+  compatibility issue. The full all-features test suite passes locally with
+  the updated lockfile.
+- GitHub Actions passed the Rust tests, benchmarks, Ubuntu/macOS builds, Rust
+  audit, UI and operator checks, Helm validation, and metadata checks on the
+  earlier head. The OpenSSL fix passed the local image build; Actions still
+  needs to rerun the latest lockfile updates.
+
+The available checks on PRs #46–#52 are historical until refreshed. PR #48
+still has its own Tailwind 4 PostCSS plugin migration failure, and PR #52's
+Wasmtime `36.0.19` head is behind the current patched `36.0.20` dependency.
+
+## Earlier verification
 
 Verified for the current source on 2026-07-25 UTC:
 

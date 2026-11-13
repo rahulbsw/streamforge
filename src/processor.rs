@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error};
 
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait SinkWriter: Send + Sync {
     async fn send(&self, envelope: MessageEnvelope) -> Result<()>;
@@ -34,6 +35,7 @@ impl SinkWriter for KafkaSink {
 }
 
 /// Message processor trait
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait MessageProcessor: Send + Sync {
     /// Process a message envelope

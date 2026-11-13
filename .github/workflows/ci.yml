@@ -92,6 +92,16 @@ jobs:
             cmake \
             pkg-config
 
+      - name: Configure OpenSSL 3.5 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install openssl@3.5
+          openssl_prefix="$(brew --prefix openssl@3.5)"
+          echo "OPENSSL_DIR=${openssl_prefix}" >> "$GITHUB_ENV"
+          echo "OPENSSL_ROOT_DIR=${openssl_prefix}" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=${openssl_prefix}" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=${openssl_prefix}/lib/pkgconfig" >> "$GITHUB_ENV"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 

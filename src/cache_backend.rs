@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 /// Cache backend trait - allows different implementations (local, Redis, Kafka)
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait CacheBackend: Send + Sync {
     /// Get a value from cache
