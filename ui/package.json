@@ -30,7 +30,7 @@
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.39.2",
-    "eslint-config-next": "^15.5.22",
+    "eslint-config-next": "^15.5.29",
     "knip": "^6.29.0",
     "postcss": "^8.5.10",
     "tailwindcss": "^3.4.17",
@@ -38,14 +38,16 @@
   },
   "overrides": {
     "postcss": "$postcss",
-    "sharp": "0.35.3",
-    "ip-address": "10.5.0",
+    "sharp": "0.35.5",
+    "ip-address": "10.7.6",
     "nanoid": "3.3.18",
     "minimatch@3.1.5": {
-      "brace-expansion": "1.1.18"
+      "brace-expansion": "1.1.22"
     },
-    "minimatch@10.2.4": {
-      "brace-expansion": "5.0.9"
+    "@typescript-eslint/eslint-plugin": "8.57.0",
+    "@typescript-eslint/parser": "8.57.0",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.8"
     }
   },
   "knip": {

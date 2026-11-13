@@ -157,7 +157,7 @@ Verified locally:
 - UI tests, ESLint, TypeScript, unused-dependency analysis, and production build
   pass;
 - UI release container builds and its bundled Linux validator smoke passes;
-- production npm dependency audit reports zero vulnerabilities.
+- full and production npm dependency audits report zero vulnerabilities.
 
 Still required:
 
@@ -263,7 +263,8 @@ Passed on 2026-07-26:
 - performance release-evaluator unit tests;
 - focused PR #39 verification on 2026-11-13: quickstart Docker/Podman lifecycle,
   UI namespace, login limiter, and namespace-scoped metric-query tests; Helm
-  rendering; and catalog-backed performance evidence checks;
+  rendering; catalog-backed performance evidence checks; UI type-check, lint,
+  tests, production build, and full dependency audit;
 - all retained pipeline CRD and engine configuration examples through
   `streamforge-validate`;
 - the source-built Podman-backed Minikube smoke, including Kafka 3.9,
@@ -272,12 +273,6 @@ Passed on 2026-07-26:
 - offline Cargo package creation;
 - local Markdown link validation;
 - `git diff --check`.
-
-Known non-production exception:
-
-- the full UI development dependency audit reports nine high-severity findings
-  in the Next 15 ESLint/minimatch 3.x toolchain. They are not present in the
-  production dependency audit. Owner: `track/ui`; removal milestone: `v1.4`.
 
 Pending verification:
 
