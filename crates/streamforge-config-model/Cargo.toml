@@ -1,0 +1,13 @@
+[package]
+name = "streamforge-config-model"
+version = "1.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Canonical StreamforgePipeline to StreamForge engine configuration projection"
+repository = "https://github.com/rahulbsw/streamforge"
+include = ["src/**", "Cargo.toml"]
+publish = false
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

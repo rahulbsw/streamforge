@@ -1,224 +1,40 @@
-# Benchmark Configurations
+# Benchmark configurations
 
-This directory contains StreamForge configurations optimized for different benchmarking scenarios.
+These three engine configurations are diagnostic inputs for the supported
+benchmark tooling. They do not define capacity targets or publication-eligible
+results.
 
-## Quick Start
+## Profiles
 
-**1. Start Kafka:**
-```bash
-podman compose -f ../../docker-compose.benchmark.yml up -d
-```
+- `throughput-8thread.yaml` — eight-thread passthrough with acknowledged
+  delivery, manual commit, and zstd compression.
+- `latency-optimized.yaml` — low-batching passthrough with auto commit.
+- `filter-transform.yaml` — four filtered/transformed destinations with manual
+  commit, retry, and DLQ.
 
-**2. Create topics:**
-```bash
-# 8 partition topics (for throughput tests)
-kafka-topics --create --topic test-8p-input --partitions 8 --replication-factor 1 --bootstrap-server localhost:9092
-kafka-topics --create --topic test-8p-output --partitions 8 --replication-factor 1 --bootstrap-server localhost:9092
-
-# Single partition topics (for latency tests)
-kafka-topics --create --topic test-input --partitions 1 --replication-factor 1 --bootstrap-server localhost:9092
-kafka-topics --create --topic test-output --partitions 1 --replication-factor 1 --bootstrap-server localhost:9092
-```
-
-**3. Run benchmark:**
-```bash
-cargo build --release
-./target/release/streamforge --config examples/benchmarks/throughput-8thread.yaml
-```
-
----
-
-## Configurations
-
-### throughput-8thread.yaml
-
-**Purpose:** Maximum throughput validation  
-**Success criterion:** exact input/output counts and a stable measured interval
-
-**Configuration:**
-- 8 threads on 8 partitions
-- Large batches (5000 messages)
-- Manual commit (5 second interval)
-- zstd compression
-- Passthrough routing (no filters)
-
-**Use when:**
-- Validating scaling performance
-- Stress testing the system
-- Measuring maximum capacity
-
-**Record with each run:**
-- Completed-message throughput from the validated timing window
-- CPU and memory utilization
-- End-to-end latency percentiles
-- Exact consumed, produced, delivered, and output counts
-
----
-
-### latency-optimized.yaml
-
-**Purpose:** Minimum latency validation  
-**Success criterion:** exact delivery counts with latency measured at the same
-message grain as the throughput run
-
-**Configuration:**
-- 2 threads (low contention)
-- Small batches (100 messages)
-- Per-message commit
-- No compression
-- Passthrough routing
-
-**Use when:**
-- Validating low-latency scenarios
-- Testing real-time data pipelines
-- SLA validation
-
-**Record with each run:**
-- Latency p50, p95, and p99
-- Completed-message throughput
-- Commit strategy and acknowledgement settings
-- Exact consumed, produced, delivered, and output counts
-
----
-
-### filter-transform.yaml
-
-**Purpose:** DSL performance validation  
-**Success criterion:** compare filter and transform variants against the same
-validated passthrough workload
-
-**Configuration:**
-- 4 threads
-- Moderate batches (2000 messages)
-- Time-based commit (1 second)
-- Multiple destinations with filters:
-  - Simple JSON path filter
-  - Complex AND filter with 3 conditions
-  - Regex filter
-  - Array filter
-- CONSTRUCT transforms
-
-**Use when:**
-- Validating DSL performance
-- Testing filter combinations
-- Benchmarking transforms
-
-**Record with each run:**
-- Filter and transform definition
-- Message shape and size distribution
-- Completed-message throughput and latency percentiles
-- Exact per-destination delivery and output counts
-
----
-
-## Legacy Configs (Pre-v1.0)
-
-The following configs use the old format and are kept for reference:
-
-- `at-least-once-config.yaml`
-- `test-8thread-config.yaml`
-- `test-8thread-fast-config.yaml`
-- `test-critical-fixes-config.yaml`
-- `test-simplify-config.yaml`
-- `test-values.yaml`
-
-**Note:** These configs use the pre-v1.0 format with `consumer_properties:` and `producer_properties:` blocks. They may not work with v1.0 without conversion.
-
-To convert to v1.0 format:
-1. Replace `consumer_properties:` and `producer_properties:` with `performance:` block
-2. Add `retry:` and `dlq:` blocks
-3. Update `routing:` to use `routing_type:` and `destinations:`
-4. Change `commit_strategy:` from object to string
-
-See the v1.0 configs above for examples.
-
----
-
-## Customizing Configs
-
-### For Higher Throughput
-
-```yaml
-threads: 16  # More parallelism
-performance:
-  batch_size: 10000  # Larger batches
-  linger_ms: 100     # More batching
-  compression: "zstd"
-commit_interval_ms: 10000  # Less frequent commits
-```
-
-### For Lower Latency
-
-```yaml
-threads: 1  # No contention
-performance:
-  batch_size: 10  # Tiny batches
-  linger_ms: 0    # Send immediately
-  compression: "none"
-commit_strategy: "per-message"
-```
-
-### For Testing Specific Filters
-
-```yaml
-routing:
-  routing_type: "filter"
-  destinations:
-    - output: "test-output"
-      filter: "/your/json/path,==,value"
-      transform: "CONSTRUCT:field1=/path1:field2=/path2"
-```
-
----
-
-## Monitoring
-
-### Metrics Endpoint
+Validate each profile before use:
 
 ```bash
-# View all metrics
-curl http://localhost:8080/metrics
-
-# Throughput
-curl -s http://localhost:8080/metrics | grep messages_consumed_total
-curl -s http://localhost:8080/metrics | grep messages_produced_total
-
-# Lag
-curl -s http://localhost:8080/metrics | grep consumer_lag
-
-# Errors
-curl -s http://localhost:8080/metrics | grep errors_total
+streamforge-validate examples/benchmarks/throughput-8thread.yaml
+streamforge-validate examples/benchmarks/latency-optimized.yaml
+streamforge-validate examples/benchmarks/filter-transform.yaml
 ```
 
-### Consumer Group
+Run an engine config with the stable entry point:
 
 ```bash
-kafka-consumer-groups --bootstrap-server localhost:9092 \
-  --describe --group benchmark-8thread
+CONFIG_FILE=examples/benchmarks/throughput-8thread.yaml streamforge
 ```
 
----
+Create isolated topics and consumer groups for every run. Record the exact
+commit, image digest, configuration, payload distribution, partitions,
+acknowledgement/commit modes, warm-up, timed window, exact ingress/consumed/
+produced/delivered/output counts, errors, latency percentiles, CPU, peak RSS,
+and teardown evidence.
 
-## Scripts
+The publication workflow and workload/mode catalog are under
+`scripts/benchmarks/`. Release results must pass
+`performance_release_gate.py`; ad hoc runs remain diagnostic.
 
-Automated benchmark scripts are in `../../scripts/benchmarks/`:
-
-| Script | Purpose |
-|--------|---------|
-| `run_throughput_test.sh` | Automated throughput testing |
-| `run_observability_test.sh` | Performance test with Prometheus monitoring |
-| `generate_json_test_data.sh` | Generate test data |
-| `quick_start.sh` | Quick start guide |
-
----
-
-## See Also
-
-- [BENCHMARKS.md](../../BENCHMARKS.md) - Complete benchmarking guide
-- [PERFORMANCE.md](../../docs/PERFORMANCE.md) - Measurement and tuning methodology
-- [OPERATIONS.md](../../docs/OPERATIONS.md) - Production operating guidance
-
----
-
-**Version:** 1.0.0  
-**Last Updated:** 2026-04-18
+See [Performance](../../docs/PERFORMANCE.md) and the canonical
+[benchmark guide](../../docs/benchmarks/README.md).

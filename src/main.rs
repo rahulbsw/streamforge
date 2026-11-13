@@ -14,7 +14,9 @@ use streamforge::filter_parser::{
 use streamforge::kafka::KafkaSink;
 use streamforge::metrics::{Stats, StatsReporter};
 use streamforge::observability::{
-    labels, register_metrics, start_lag_monitor, start_metrics_server_on, METRICS,
+    init_tracing_from_env, labels, register_metrics, start_kafka_readiness_monitor,
+    start_lag_monitor, start_observability_server_on, KafkaReadinessFailure, ReadinessState,
+    METRICS,
 };
 use streamforge::partition_pipeline::{
     parse_message_key, parse_message_value, PartitionOrderedExecutor, ProcessingCompletion,
@@ -31,48 +33,72 @@ use streamforge::{
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
+const CLI_HELP: &str = "\
+StreamForge Kafka selective replication engine
+
+Usage: streamforge
+
+Configuration:
+  CONFIG_FILE  YAML or JSON engine configuration (default: config.json)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+";
+
+fn metadata_argument(args: impl IntoIterator<Item = String>) -> Option<&'static str> {
+    match args.into_iter().next().as_deref() {
+        Some("-h" | "--help") => Some(CLI_HELP),
+        Some("-V" | "--version") => Some(env!("CARGO_PKG_VERSION")),
+        _ => None,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
-        .init();
+    if let Some(output) = metadata_argument(std::env::args().skip(1)) {
+        println!("{output}");
+        return Ok(());
+    }
 
-    info!("Starting Streamforge - High-performance Kafka streaming toolkit");
+    init_tracing_from_env().map_err(|error| {
+        MirrorMakerError::Config(format!("Failed to initialize logging: {error}"))
+    })?;
+
+    info!(version = env!("CARGO_PKG_VERSION"), "starting StreamForge");
 
     // Load configuration (from file or environment)
     let config = load_config()?;
-    info!("Loaded configuration: appid={}", config.appid);
+    info!(pipeline = %config.appid, "configuration loaded");
+
+    let readiness = ReadinessState::new();
 
     // Initialize observability (metrics)
     if config.observability.metrics_enabled {
         register_metrics()
             .map_err(|e| MirrorMakerError::Config(format!("Failed to register metrics: {}", e)))?;
-        info!("✅ Metrics registered successfully");
+        info!("metrics registered");
 
         // Start metrics HTTP server
         let metrics_port = config.observability.metrics_port;
         let metrics_bind_address = config.observability.metrics_bind_address;
+        let metrics_path = config.observability.metrics_path.clone();
+        let server_readiness = readiness.clone();
         tokio::spawn(async move {
-            start_metrics_server_on(metrics_bind_address, metrics_port).await;
+            start_observability_server_on(
+                metrics_bind_address,
+                metrics_port,
+                metrics_path,
+                server_readiness,
+            )
+            .await;
         });
     } else {
-        info!("⏭️  Metrics disabled in configuration");
+        info!("metrics disabled in configuration");
     }
 
     // Record service start time for uptime metric
     let start_time = std::time::Instant::now();
-    METRICS
-        .kafka_connections
-        .with_label_values(&[labels::CONNECTION_TYPE_CONSUMER])
-        .set(1.0);
-    METRICS
-        .kafka_connections
-        .with_label_values(&[labels::CONNECTION_TYPE_PRODUCER])
-        .set(1.0);
 
     // Create statistics
     let stats = Arc::new(Stats::new());
@@ -111,7 +137,7 @@ async fn main() -> Result<()> {
 
     // Build processor based on configuration
     let base_processor: Arc<dyn MessageProcessor> = if let Some(routing) = &config.routing {
-        info!("Multi-destination routing enabled");
+        info!(pipeline = %config.appid, "multi-destination routing enabled");
         build_multi_destination_processor(
             &config,
             routing,
@@ -121,7 +147,7 @@ async fn main() -> Result<()> {
         )
         .await?
     } else {
-        info!("Single-destination mode");
+        info!(pipeline = %config.appid, "single-destination mode enabled");
         build_single_destination_processor(
             &config,
             stats.clone(),
@@ -134,8 +160,9 @@ async fn main() -> Result<()> {
     let retry_policy = RetryPolicy::new(config.retry.clone());
     let dlq = if config.dlq.enabled {
         info!(
-            "DLQ enabled: topic={}, max_retries={}",
-            config.dlq.topic, config.dlq.max_dlq_retries
+            dlq_topic = %config.dlq.topic,
+            max_retries = config.dlq.max_dlq_retries,
+            "DLQ enabled"
         );
         Some(Arc::new(DeadLetterQueue::new(
             config.dlq.clone(),
@@ -145,6 +172,11 @@ async fn main() -> Result<()> {
         info!("DLQ disabled - terminal failures will halt the pipeline");
         None
     };
+    METRICS
+        .kafka_connections
+        .with_label_values(&[labels::CONNECTION_TYPE_PRODUCER])
+        .set(1.0);
+    readiness.mark_runtime_ready();
 
     info!(
         "Retry policy: max_attempts={}, initial_delay={}ms, max_delay={}ms",
@@ -196,13 +228,33 @@ async fn main() -> Result<()> {
     let topic_refs: Vec<&str> = topics.iter().map(String::as_str).collect();
     consumer.subscribe(&topic_refs)?;
     if is_topic_regex(&config.input) {
-        info!("Subscribed with regex pattern: {}", config.input);
+        info!(
+            pipeline = %config.appid,
+            subscription_type = "regex",
+            topic_count = topic_refs.len(),
+            "Kafka subscription configured"
+        );
     } else {
-        info!("Subscribed to topics: {:?}", topics);
+        info!(
+            pipeline = %config.appid,
+            subscription_type = "topics",
+            topic_count = topic_refs.len(),
+            "Kafka subscription configured"
+        );
     }
 
     // Wrap consumer in Arc for sharing
     let consumer = Arc::new(consumer);
+
+    // Readiness is based on an actual Kafka metadata request, not merely local
+    // consumer construction or subscription.
+    {
+        let readiness_consumer = consumer.clone();
+        let readiness_state = readiness.clone();
+        tokio::spawn(async move {
+            start_kafka_readiness_monitor(readiness_consumer, readiness_state, 10).await;
+        });
+    }
 
     // Start consumer lag monitoring
     if config.observability.lag_monitoring_enabled {
@@ -214,11 +266,11 @@ async fn main() -> Result<()> {
         });
 
         info!(
-            "✅ Consumer lag monitoring started (interval: {}s)",
-            lag_interval
+            interval_seconds = lag_interval,
+            "consumer lag monitoring started"
         );
     } else {
-        info!("⏭️  Consumer lag monitoring disabled");
+        info!("consumer lag monitoring disabled");
     }
 
     // Start statistics reporter
@@ -252,6 +304,7 @@ async fn main() -> Result<()> {
             consumer,
             processor.clone(),
             stats,
+            readiness,
             config.threads,
             config.performance.worker_queue_capacity,
             config.performance.consumer_batch_timeout_ms,
@@ -282,6 +335,7 @@ async fn main() -> Result<()> {
     }
 
     let mut message_stream = consumer.stream();
+    let pipeline_name = config.appid.clone();
 
     loop {
         // Collect batch of messages with single deadline
@@ -302,6 +356,7 @@ async fn main() -> Result<()> {
 
         if batch.is_empty() {
             if stream_ended {
+                readiness.mark_kafka_unready(KafkaReadinessFailure::StreamEnded);
                 info!("Consumer stream ended, shutting down");
                 break;
             }
@@ -319,10 +374,13 @@ async fn main() -> Result<()> {
             .map(|msg_result| {
                 let processor = processor.clone();
                 let stats = stats.clone();
+                let readiness = readiness.clone();
+                let pipeline = pipeline_name.clone();
 
                 async move {
                     match msg_result {
                         Ok(msg) => {
+                            readiness.mark_kafka_ready();
                             stats.processed();
                             METRICS.messages_consumed.inc();
 
@@ -331,15 +389,19 @@ async fn main() -> Result<()> {
                                 Ok(v) => v,
                                 Err(e) => {
                                     error!(
-                                        "Failed to parse message: {} (topic={}, partition={}, offset={}, key={:?})",
-                                        e,
-                                        msg.topic(),
-                                        msg.partition(),
-                                        msg.offset(),
-                                        msg.key().map(|k| String::from_utf8_lossy(k).to_string())
+                                        pipeline = %pipeline,
+                                        error_category = "parse",
+                                        topic = msg.topic(),
+                                        partition = msg.partition(),
+                                        offset = msg.offset(),
+                                        error = %e,
+                                        "message parsing failed"
                                     );
                                     stats.error();
-                                    METRICS.processing_errors.with_label_values(&[labels::ERROR_TYPE_PARSE]).inc();
+                                    METRICS
+                                        .processing_errors
+                                        .with_label_values(&[labels::ERROR_TYPE_PARSE])
+                                        .inc();
                                     return Err(e);
                                 }
                             };
@@ -354,7 +416,7 @@ async fn main() -> Result<()> {
                                 for header in headers.iter() {
                                     headers_map.insert(
                                         header.key.to_string(),
-                                        header.value.map(|v| v.to_vec()).unwrap_or_default()
+                                        header.value.map(|v| v.to_vec()).unwrap_or_default(),
                                     );
                                 }
                             }
@@ -375,19 +437,36 @@ async fn main() -> Result<()> {
                                 }
                                 Err(e) => {
                                     error!(
-                                        "Failed to process message: {} (topic={}, partition={}, offset={})",
-                                        e, msg.topic(), msg.partition(), msg.offset()
+                                        pipeline = %pipeline,
+                                        error_category = "processing",
+                                        topic = msg.topic(),
+                                        partition = msg.partition(),
+                                        offset = msg.offset(),
+                                        error = %e,
+                                        "message processing failed"
                                     );
                                     stats.error();
-                                    METRICS.processing_errors.with_label_values(&[labels::ERROR_TYPE_PROCESSING]).inc();
+                                    METRICS
+                                        .processing_errors
+                                        .with_label_values(&[labels::ERROR_TYPE_PROCESSING])
+                                        .inc();
                                     Err(e)
                                 }
                             }
                         }
                         Err(e) => {
-                            error!("Kafka consumer error: {}", e);
+                            readiness.mark_kafka_unready(KafkaReadinessFailure::ConsumerError);
+                            error!(
+                                pipeline = %pipeline,
+                                error_category = "kafka_consumer",
+                                error = %e,
+                                "Kafka consumer error"
+                            );
                             stats.error();
-                            METRICS.processing_errors.with_label_values(&[labels::ERROR_TYPE_KAFKA]).inc();
+                            METRICS
+                                .processing_errors
+                                .with_label_values(&[labels::ERROR_TYPE_KAFKA])
+                                .inc();
                             Err(MirrorMakerError::Kafka(e.to_string()))
                         }
                     }
@@ -569,6 +648,7 @@ fn create_default_config() -> MirrorMakerConfig {
         consumer_properties: Default::default(),
         producer_properties: Default::default(),
         security: None,
+        target_security: None,
         commit_strategy: Default::default(),
         cache: None,
         observability: Default::default(),
@@ -597,6 +677,7 @@ async fn run_partition_ordered_pipeline(
     consumer: Arc<StreamConsumer>,
     processor: Arc<dyn MessageProcessor>,
     stats: Arc<Stats>,
+    readiness: ReadinessState,
     worker_count: usize,
     worker_queue_capacity: usize,
     idle_flush_timeout_ms: u64,
@@ -629,9 +710,17 @@ async fn run_partition_ordered_pipeline(
             }
             message = message_stream.next() => {
                 match message {
-                    Some(Ok(message)) => executor.dispatch(message.detach()).await?,
+                    Some(Ok(message)) => {
+                        readiness.mark_kafka_ready();
+                        executor.dispatch(message.detach()).await?;
+                    }
                     Some(Err(kafka_error)) => {
-                        error!("Kafka consumer error: {}", kafka_error);
+                        readiness.mark_kafka_unready(KafkaReadinessFailure::ConsumerError);
+                        error!(
+                            error_category = "kafka_consumer",
+                            error = %kafka_error,
+                            "Kafka consumer error"
+                        );
                         stats.error();
                         METRICS
                             .processing_errors
@@ -639,6 +728,7 @@ async fn run_partition_ordered_pipeline(
                             .inc();
                     }
                     None => {
+                        readiness.mark_kafka_unready(KafkaReadinessFailure::StreamEnded);
                         info!("Consumer stream ended, draining partition workers");
                         break;
                     }
@@ -684,7 +774,7 @@ fn create_consumer(config: &MirrorMakerConfig) -> Result<StreamConsumer> {
     }
 
     // Apply security configuration
-    config.apply_security(&mut consumer_config);
+    config.try_apply_source_security(&mut consumer_config)?;
 
     // Apply user-provided consumer properties (can override security settings if needed)
     for (key, value) in &config.consumer_properties {
@@ -718,7 +808,11 @@ async fn build_single_destination_processor(
     // Preserve the native-only construction path exactly when no UDF is bound.
     if config.udfs.is_none() {
         if let Some(ref transform_expr) = config.transform {
-            info!("Value transform: {}", transform_expr);
+            info!(
+                destination = %output_topic,
+                transform_type = "value",
+                "destination transform configured"
+            );
             let transform = parse_transform_with_cache(transform_expr, Some(cache_manager))?;
             return Ok(Arc::new(
                 SingleDestinationProcessor::with_transform_for_destination(
@@ -740,7 +834,11 @@ async fn build_single_destination_processor(
         .expect("validated UDF branch requires top-level udfs");
     let native_transform: Option<Arc<dyn Transform>> =
         if let Some(ref transform_expr) = config.transform {
-            info!("Value transform: {}", transform_expr);
+            info!(
+                destination = %output_topic,
+                transform_type = "value",
+                "destination transform configured"
+            );
             Some(parse_transform_with_cache(
                 transform_expr,
                 Some(cache_manager),
@@ -792,7 +890,7 @@ async fn build_multi_destination_processor(
     let mut destinations = Vec::new();
 
     for dest in &routing.destinations {
-        info!("Setting up destination: {}", dest.output);
+        info!(destination = %dest.output, "setting up destination");
         validate_aggregation_destination(dest)?;
 
         // Create sink
@@ -801,7 +899,7 @@ async fn build_multi_destination_processor(
 
         // Create filter if specified
         let native_filter: Option<Arc<dyn Filter>> = if let Some(ref filter_expr) = dest.filter {
-            info!("  Filter: {}", filter_expr);
+            info!(destination = %dest.output, "destination filter configured");
             Some(parse_filter(filter_expr)?)
         } else {
             None
@@ -818,7 +916,11 @@ async fn build_multi_destination_processor(
         // CACHE_LOOKUP / CACHE_PUT expressions resolve named stores
         let native_transform: Option<Arc<dyn Transform>> =
             if let Some(ref transform_expr) = dest.transform {
-                info!("  Value transform: {}", transform_expr);
+                info!(
+                    destination = %dest.output,
+                    transform_type = "value",
+                    "destination transform configured"
+                );
                 Some(parse_transform_with_cache(
                     transform_expr,
                     Some(cache_manager.clone()),
@@ -855,7 +957,11 @@ async fn build_multi_destination_processor(
             let mut envelope_transforms: Vec<Arc<dyn EnvelopeTransform>> = Vec::new();
 
             if let Some(ref key_transform_expr) = dest.key_transform {
-                info!("  Key transform: {}", key_transform_expr);
+                info!(
+                    destination = %dest.output,
+                    transform_type = "key",
+                    "destination transform configured"
+                );
                 envelope_transforms.push(parse_key_transform(key_transform_expr)?);
             }
 
@@ -877,7 +983,11 @@ async fn build_multi_destination_processor(
             }
 
             if let Some(ref timestamp_expr) = dest.timestamp {
-                info!("  Timestamp transform: {}", timestamp_expr);
+                info!(
+                    destination = %dest.output,
+                    transform_type = "timestamp",
+                    "destination transform configured"
+                );
                 envelope_transforms.push(parse_timestamp_transform(timestamp_expr)?);
             }
             if let Some(transform) = build_wasm_envelope_transform(
@@ -1538,5 +1648,16 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn metadata_arguments_are_side_effect_free() {
+        assert_eq!(metadata_argument(["--help".to_string()]), Some(CLI_HELP));
+        assert_eq!(
+            metadata_argument(["--version".to_string()]),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(metadata_argument(["--unknown".to_string()]), None);
+        assert_eq!(metadata_argument(Vec::<String>::new()), None);
     }
 }

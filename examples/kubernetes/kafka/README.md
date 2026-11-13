@@ -1,8 +1,7 @@
 # Kafka Test Clusters
 
-This directory contains Kubernetes manifests for deploying test Kafka clusters for development and testing with Streamforge.
-
-## Files
+This directory contains the Kubernetes manifest used for StreamForge
+development and smoke testing.
 
 ### kafka-standalone.yaml
 A complete single-node Kafka cluster in KRaft mode (no Zookeeper) suitable for development and testing.
@@ -28,12 +27,6 @@ kubectl run kafka-test -n kafka --rm -it --image=apache/kafka:3.9.0 -- \
   /opt/kafka/bin/kafka-topics.sh --list \
   --bootstrap-server kafka.kafka.svc.cluster.local:9092
 ```
-
-### kafka-simple.yaml
-A minimal Kafka deployment (older version used in initial testing).
-
-### kafka-test-cluster.yaml
-Additional test cluster configuration.
 
 ## Using with Streamforge Pipelines
 

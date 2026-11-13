@@ -2,50 +2,39 @@
 
 Utility scripts for testing and managing Streamforge.
 
-## test_metrics.sh
+## quickstart.sh
 
-Quick verification script for observability metrics.
+Runs the supported local Docker/Podman lifecycle:
 
-**Usage:**
 ```bash
-# Start Streamforge with observability enabled
-CONFIG_FILE=examples/config.with-observability.yaml ./target/release/streamforge
-
-# In another terminal, run the test script
-./scripts/test_metrics.sh
+scripts/quickstart.sh up
+scripts/quickstart.sh verify
+scripts/quickstart.sh down
 ```
 
-**What it checks:**
-- ✅ Health endpoint is accessible
-- ✅ Metrics endpoint is accessible  
-- ✅ Key metrics are being exposed
-- ✅ Displays sample metrics output
+## tests/minikube_podman_smoke.sh
 
-**Environment variables:**
-- `METRICS_PORT` - Override metrics port (default: 9090)
+Runs the isolated source-built Kubernetes integration test with rootless
+Podman and Minikube `v1.38.1` or newer:
 
-**Example output:**
+```bash
+MINIKUBE_BIN=/path/to/minikube \
+  scripts/tests/minikube_podman_smoke.sh
 ```
-🧪 Testing Streamforge Observability Metrics
-==============================================
 
-1. Testing health endpoint...
-   ✅ Health endpoint: http://localhost:9090/health
-   Response: OK
+The harness refuses existing profiles, validates an exact replicated record,
+`Ready`, health/readiness/metrics, security contexts, bounded reconciliation,
+and owner garbage collection, and removes all isolated test resources.
 
-2. Testing metrics endpoint...
-   ✅ Metrics endpoint: http://localhost:9090/metrics
+## benchmarks/run_throughput_test.sh
 
-3. Checking for key metrics...
-   ✅ Messages consumed: streamforge_messages_consumed_total
-   ✅ Messages produced: streamforge_messages_produced_total
-   ✅ Consumer lag: streamforge_consumer_lag
-   ✅ Processing duration: streamforge_processing_duration_seconds
-   ...
+Runs the maintained Kafka-backed sustained throughput harness:
 
-📊 Summary:
-   Total metrics exposed: 45
-   Metrics endpoint: http://localhost:9090/metrics
-   
-✅ Observability metrics are working correctly!
+```bash
+podman compose -f docker-compose.benchmark.yml up -d
+scripts/benchmarks/run_throughput_test.sh
+podman compose -f docker-compose.benchmark.yml down -v
 ```
+
+See [`../docs/PERFORMANCE_TESTING.md`](../docs/PERFORMANCE_TESTING.md) for the
+measurement and publication contract.

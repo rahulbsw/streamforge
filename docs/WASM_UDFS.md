@@ -1,3 +1,7 @@
+---
+title: WebAssembly UDFs
+---
+
 # WebAssembly UDFs
 
 This document defines the StreamForge v1 WebAssembly UDF contract. The feature

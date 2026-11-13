@@ -1,6 +1,6 @@
 # AWS Sustained Passthrough Baseline
 
-**Status:** Publication eligible
+**Status:** Diagnostic baseline; not publication eligible
 
 **Measured:** 2026-07-25 UTC
 
@@ -23,7 +23,10 @@ throughput.
 | Median StreamForge mean CPU | 1.124 cores |
 | Median StreamForge peak RSS | 137.1 MiB |
 
-All three repetitions passed the schema-version-3 publication gates.
+All three repetitions passed the accounting and repeatability checks captured
+by this run. The result does not pass the current release publication gate
+because p99 latency was not captured and the payload was not normalized to
+exactly 1 KiB.
 
 | Repetition | Delivered records | Output records | Errors | Rate (msg/s) | Classification |
 |---:|---:|---:|---:|---:|---|
@@ -58,9 +61,10 @@ Startup, warm-up, drain, output validation, and teardown were excluded from the
 120-second measurement window. A persistent ingress worker, timed metrics and
 resource observer, and independent output validator ran as separate jobs.
 
-## Publication gates
+## Checks satisfied by this run
 
-The aggregate was accepted only after all of these conditions passed:
+The aggregate was retained as diagnostic evidence after these conditions
+passed:
 
 - schema version 3 and aggregate status `passed`;
 - three complete 120-second repetitions;
@@ -70,6 +74,10 @@ The aggregate was accepted only after all of these conditions passed:
 - all repetitions classified as engine-saturated;
 - bounded variance across repetitions;
 - source revision and environment recorded in the result manifest.
+
+This is not a complete v1.4 publication result. A publication-eligible rerun
+must also capture p99 latency and use the exact payload sizes required by the
+current measurement contract.
 
 ## Security and teardown
 

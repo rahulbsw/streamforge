@@ -1,4 +1,5 @@
 use crate::observability::METRICS;
+use crate::observability::{KafkaReadinessFailure, ReadinessState};
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::Offset;
 use std::sync::Arc;
@@ -6,11 +7,54 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
+/// Continuously verify that the Kafka dependency can answer metadata requests.
+///
+/// The probe uses a blocking worker because librdkafka's metadata call is
+/// synchronous. Readiness is intentionally independent of optional lag
+/// monitoring so disabling lag metrics does not disable dependency checks.
+pub async fn start_kafka_readiness_monitor(
+    consumer: Arc<StreamConsumer>,
+    readiness: ReadinessState,
+    interval_secs: u64,
+) {
+    let mut ticker = interval(Duration::from_secs(interval_secs.max(1)));
+
+    loop {
+        ticker.tick().await;
+
+        let probe_consumer = consumer.clone();
+        let probe = tokio::task::spawn_blocking(move || {
+            probe_consumer.fetch_metadata(None, Duration::from_secs(5))
+        })
+        .await;
+
+        match probe {
+            Ok(Ok(_)) => readiness.mark_kafka_ready(),
+            Ok(Err(error)) => {
+                readiness.mark_kafka_unready(KafkaReadinessFailure::ConsumerError);
+                warn!(
+                    error_category = "kafka_readiness",
+                    error = %error,
+                    "Kafka readiness probe failed"
+                );
+            }
+            Err(error) => {
+                readiness.mark_kafka_unready(KafkaReadinessFailure::ConsumerError);
+                error!(
+                    error_category = "kafka_readiness_task",
+                    error = %error,
+                    "Kafka readiness probe task failed"
+                );
+            }
+        }
+    }
+}
+
 /// Start monitoring Kafka consumer lag
 pub async fn start_lag_monitor(consumer: Arc<StreamConsumer>, interval_secs: u64) {
     info!(
-        "🔍 Starting consumer lag monitor (interval: {}s)",
-        interval_secs
+        interval_seconds = interval_secs,
+        "consumer lag monitor started"
     );
 
     let mut ticker = interval(Duration::from_secs(interval_secs));
@@ -21,11 +65,15 @@ pub async fn start_lag_monitor(consumer: Arc<StreamConsumer>, interval_secs: u64
         match monitor_lag(&consumer).await {
             Ok(total_lag) => {
                 if total_lag > 0 {
-                    debug!("Consumer lag: {} messages behind", total_lag);
+                    debug!(consumer_lag = total_lag, "consumer lag observed");
                 }
             }
-            Err(e) => {
-                warn!("Failed to monitor consumer lag: {}", e);
+            Err(error) => {
+                warn!(
+                    error_category = "kafka_lag",
+                    error = %error,
+                    "consumer lag monitor failed"
+                );
             }
         }
     }
@@ -51,16 +99,31 @@ async fn monitor_lag(consumer: &StreamConsumer) -> Result<i64, Box<dyn std::erro
             Some(tpl) => match tpl.offset() {
                 Offset::Offset(offset) => offset,
                 Offset::Invalid => {
-                    debug!("Invalid offset for {}-{}, skipping", topic, partition);
+                    debug!(
+                        topic,
+                        partition,
+                        error_category = "invalid_offset",
+                        "consumer lag sample skipped"
+                    );
                     continue;
                 }
                 _ => {
-                    debug!("Non-offset position for {}-{}, skipping", topic, partition);
+                    debug!(
+                        topic,
+                        partition,
+                        error_category = "non_offset_position",
+                        "consumer lag sample skipped"
+                    );
                     continue;
                 }
             },
             None => {
-                debug!("No position found for {}-{}, skipping", topic, partition);
+                debug!(
+                    topic,
+                    partition,
+                    error_category = "position_unavailable",
+                    "consumer lag sample skipped"
+                );
                 continue;
             }
         };
@@ -92,15 +155,22 @@ async fn monitor_lag(consumer: &StreamConsumer) -> Result<i64, Box<dyn std::erro
 
                 if lag > 10000 {
                     warn!(
-                        "High lag detected: topic={} partition={} lag={} (offset={} high={})",
-                        topic, partition, lag, position, high
+                        topic,
+                        partition,
+                        consumer_lag = lag,
+                        offset = position,
+                        high_watermark = high,
+                        "high consumer lag detected"
                     );
                 }
             }
-            Err(e) => {
+            Err(error) => {
                 error!(
-                    "Failed to fetch watermarks for {}-{}: {}",
-                    topic, partition, e
+                    error_category = "kafka_watermark",
+                    topic,
+                    partition,
+                    error = %error,
+                    "failed to fetch Kafka watermarks"
                 );
             }
         }

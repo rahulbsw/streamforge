@@ -6,196 +6,199 @@ parent: Operations
 
 # Security
 
-StreamForge maps its top-level `security` configuration to librdkafka for both
-the source consumer and destination producer. Secure the configuration file,
-Kafka authorization, network path, container, and observability endpoint as one
-system.
+StreamForge configures independent Kafka clients for its source consumer and
+target producer. Secure credentials, Kafka authorization, network paths,
+containers, logs, metrics, and release artifacts as one system.
 
-## Supported configuration
+## Supported protocols
 
-The runtime schema accepts:
+The runtime accepts:
 
 - `PLAINTEXT`
 - `SSL`
 - `SASL_PLAINTEXT`
 - `SASL_SSL`
-- SASL mechanisms `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, `GSSAPI`, and
+- SASL `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, `GSSAPI`, and
   `OAUTHBEARER`
 
-Actual availability also depends on the linked librdkafka build and broker
-configuration. Validate the mechanism in the target environment before
-production use.
+Availability also depends on the linked librdkafka build and broker. Use `SSL`
+or `SASL_SSL` on untrusted networks.
 
-Use `SSL` or `SASL_SSL` on untrusted networks. `PLAINTEXT` and
-`SASL_PLAINTEXT` do not protect message data in transit.
+## Direct runtime configuration
 
-## TLS
-
-Broker verification:
-
-```yaml
-security:
-  protocol: SSL
-  ssl:
-    ca_location: /run/streamforge/tls/ca.pem
-    endpoint_identification_algorithm: https
-```
-
-Mutual TLS:
-
-```yaml
-security:
-  protocol: SSL
-  ssl:
-    ca_location: /run/streamforge/tls/ca.pem
-    certificate_location: /run/streamforge/tls/client.pem
-    key_location: /run/streamforge/tls/client-key.pem
-    endpoint_identification_algorithm: https
-```
-
-Mount CA, certificate, and private-key files read-only. Restrict the private key
-to the StreamForge runtime identity. Do not disable hostname verification as a
-production workaround.
-
-## SASL over TLS
-
-SCRAM example:
+`security` configures the source. `target_security` configures the destination.
+For v1.x compatibility, omitting `target_security` applies `security` to both.
 
 ```yaml
 security:
   protocol: SASL_SSL
   ssl:
-    ca_location: /run/streamforge/tls/ca.pem
+    ca_location: /run/streamforge/source/ca.pem
     endpoint_identification_algorithm: https
   sasl:
     mechanism: SCRAM-SHA-512
-    username: rendered-at-runtime
-    password: rendered-at-runtime
+    username_file: /run/streamforge/source/username
+    password_file: /run/streamforge/source/password
+
+target_security:
+  protocol: SASL_SSL
+  ssl:
+    ca_location: /run/streamforge/target/ca.pem
+    endpoint_identification_algorithm: https
+  sasl:
+    mechanism: SCRAM-SHA-512
+    username_file: /run/streamforge/target/username
+    password_file: /run/streamforge/target/password
 ```
 
-PLAIN transmits credentials inside the TLS session and must not be used without
-TLS. GSSAPI requires a compatible librdkafka build and Kerberos environment.
-OAUTHBEARER token lifecycle must be tested for the exact client and broker; a
-static token in a long-running file is not a rotation strategy.
+File-backed username, password, and private-key password values are read when
+Kafka clients are created. One trailing line ending is removed; empty or
+unreadable files fail with a field-specific configuration error that does not
+include the credential value.
 
-## Secret injection
+Inline runtime fields remain accepted for v1.x compatibility, but protected
+file injection is preferred:
+
+- `ssl.key_password_file`
+- `sasl.username_file`
+- `sasl.password_file`
+
+Mount all CA, certificate, key, keytab, and credential files read-only. Do not
+disable hostname verification as a production workaround.
+
+## Kubernetes Secret references
+
+`StreamforgePipeline` resources must use Secret references for credential
+values. Inline `ssl.keyPassword`, `sasl.username`, and `sasl.password` values
+are rejected by the shared validator.
+
+```yaml
+apiVersion: streamforge.io/v1alpha1
+kind: StreamforgePipeline
+metadata:
+  name: secure-orders
+spec:
+  source:
+    brokers: source-kafka:9093
+    topic: orders
+    security:
+      protocol: SASL_SSL
+      ssl:
+        caSecret:
+          name: source-kafka-ca
+          key: ca.crt
+      sasl:
+        mechanism: SCRAM-SHA-512
+        usernameSecret:
+          name: source-kafka-auth
+          key: username
+        passwordSecret:
+          name: source-kafka-auth
+          key: password
+  destinations:
+    - brokers: target-kafka:9093
+      topic: orders-copy
+      security:
+        protocol: SSL
+        ssl:
+          caSecret:
+            name: target-kafka-tls
+            key: ca.crt
+          certificateSecret:
+            name: target-kafka-tls
+            key: tls.crt
+          keySecret:
+            name: target-kafka-tls
+            key: tls.key
+```
+
+The operator mounts referenced Secrets with mode `0440`. The generated
+ConfigMap contains only paths below `/etc/streamforge/secrets`, never credential
+values. Pipeline pods run as UID/GID `65532`, do not mount a service-account
+token by default, drop Linux capabilities, and use a read-only root filesystem.
+
+All destinations in one `v1alpha1` pipeline share one target client, so their
+broker and security settings must be identical. Use separate pipeline resources
+for different target clusters or credentials.
+
+Supported Secret references are:
+
+- `ssl.caSecret`
+- `ssl.certificateSecret`
+- `ssl.keySecret`
+- `ssl.keyPasswordSecret`
+- `sasl.usernameSecret`
+- `sasl.passwordSecret`
+- `sasl.keytabSecret`
+
+Secret names and keys are validated before paths are constructed. Unsafe path
+components are rejected.
+
+## Secret handling
 
 StreamForge does not interpolate `${ENVIRONMENT_VARIABLE}` placeholders in
-configuration values. A secret manager or entrypoint must render a protected
-configuration file before StreamForge starts.
-
-Safe patterns include:
-
-- mounting a complete secret-bearing configuration from a Kubernetes `Secret`;
-- rendering into a memory-backed volume from an approved secret sidecar;
-- mounting a protected host file into a container read-only;
-- rotating the rendered file and performing a controlled restart.
+configuration values. Use an approved secret store to mount protected files or
+Kubernetes Secrets.
 
 Do not:
 
-- commit credentials, tokens, private keys, or a rendered configuration;
-- put a secret-bearing configuration in a Kubernetes `ConfigMap`;
-- print the configuration in CI logs or diagnostics;
+- commit credentials, tokens, private keys, `.env` files, or rendered secrets;
+- put credential values in a Kubernetes custom resource or ConfigMap;
+- print configuration or Secret content in CI, logs, diagnostics, or handoffs;
 - pass passwords on a shell command line;
-- use example or default credentials.
+- retain default or example credentials in production.
 
-Ensure temporary rendered files are excluded from backups and removed according
-to the platform secret-handling policy.
-
-## Different source and destination credentials
-
-The top-level `security` block is applied to both Kafka clients. When the source
-and destination require different settings, explicit `consumer_properties` and
-`producer_properties` can override the generated librdkafka properties:
-
-```yaml
-security:
-  protocol: SASL_SSL
-  ssl:
-    ca_location: /run/streamforge/tls/ca.pem
-    endpoint_identification_algorithm: https
-
-consumer_properties:
-  sasl.mechanism: SCRAM-SHA-512
-  sasl.username: rendered-source-user
-  sasl.password: rendered-source-password
-
-producer_properties:
-  sasl.mechanism: SCRAM-SHA-512
-  sasl.username: rendered-destination-user
-  sasl.password: rendered-destination-password
-```
-
-These values are still secrets and require the same protected rendering process.
-Validate the full configuration without exposing it in logs.
-
-Do not copy Java callback-handler or JAAS properties into this Rust client.
-Provider-specific authentication is supported only when the linked librdkafka
-client and StreamForge configuration have been explicitly tested for that
-provider.
+Rotation requires updating the protected file or Secret and performing a
+controlled pipeline restart so Kafka clients reopen it.
 
 ## Kafka authorization
 
-Grant only the resources used by a pipeline:
+Grant only the resources used by the pipeline:
 
-- source topic `READ` and metadata access;
-- consumer group access for the configured `appid`;
-- destination topic `WRITE` and metadata access;
-- DLQ topic `WRITE` when enabled;
-- any additional permissions required by the broker's authorization model.
+- source topic read and metadata access;
+- consumer-group access for the configured `appid`;
+- destination topic write and metadata access;
+- DLQ topic write when enabled;
+- provider-specific metadata permissions that have been verified as necessary.
 
-Use a separate principal per environment and, where practical, per pipeline.
-Avoid wildcard topic and consumer-group grants.
+Prefer a separate principal per environment and pipeline. Avoid wildcard topic
+or group grants.
 
-## Network controls
+## Network and observability controls
 
-- Keep Kafka listeners on private subnets or cluster networks.
-- Restrict StreamForge egress to Kafka, DNS, secret services, and required
+- Keep Kafka listeners on private networks.
+- Restrict pipeline egress to Kafka, DNS, required secret services, and
   telemetry.
-- Do not create public broker listeners for troubleshooting.
-- Keep `/metrics` and `/health` private; they have no authentication or TLS.
-- Prefer loopback port forwarding or a private monitoring network for
-  diagnostics.
+- Keep `/metrics`, `/health`, and `/ready` private; they do not provide
+  authentication or TLS.
+- Use `ClusterIP`, restrictive `NetworkPolicy`, or loopback port forwarding.
+- Do not expose troubleshooting endpoints with public `NodePort`,
+  `LoadBalancer`, or unauthenticated ingress.
+- Structured logs redact payloads, headers, and credentials by default; verify
+  this with environment-specific tests before production.
 
-If temporary remote access is unavoidable, allow only the operator's verified
-IP at the network boundary and remove the rule immediately after use.
+## Release and container controls
 
-## Containers and Kubernetes
-
-- Run as a non-root identity.
-- Drop Linux capabilities and disable privilege escalation.
-- Use a read-only root filesystem with an explicit temporary filesystem.
-- Mount configuration and key material read-only.
-- Use `ClusterIP` services and restrictive `NetworkPolicy`.
-- Avoid `NodePort`, public `LoadBalancer`, and internet-facing `Ingress`.
-- Review service-account and operator RBAC from rendered manifests.
-
-The current Kubernetes operator mounts referenced secrets but does not emit CR
-security fields into its generated runtime configuration. Use a directly
-managed Deployment for secured Kafka connections until that path is implemented
-and verified. See [Kubernetes](KUBERNETES.md).
+- Pin exact StreamForge component versions and base-image digests.
+- Verify checksums, SBOMs, provenance, signatures, and vulnerability reports.
+- Run containers as non-root and drop all capabilities.
+- Keep root filesystems read-only except for explicit temporary volumes.
+- Review rendered service accounts and operator RBAC.
 
 ## Verification
 
 Before production:
 
-1. validate the rendered configuration without printing it;
-2. confirm the process identity can read only the required files;
-3. verify broker hostname validation and certificate chain;
-4. verify source read, group, destination write, and DLQ permissions separately;
-5. confirm an unauthorized topic access is denied;
+1. validate configuration without printing secret values;
+2. confirm the process identity can read only the required mounted files;
+3. verify broker hostname and certificate-chain validation;
+4. verify source read, group, destination write, and DLQ permissions
+   independently;
+5. confirm unauthorized topic access is denied;
 6. test credential and certificate rotation;
-7. confirm metrics and health are unreachable from outside the private network;
-8. inspect logs and diagnostic bundles for secret leakage.
+7. verify health and metrics are unreachable outside the private network;
+8. inspect logs, Kubernetes events, and diagnostics for secret leakage;
+9. test restart and rebalance behavior while credentials are valid and invalid.
 
-Useful certificate checks:
-
-```bash
-openssl x509 -in /run/streamforge/tls/ca.pem -noout -subject -issuer -dates
-openssl verify \
-  -CAfile /run/streamforge/tls/ca.pem \
-  /run/streamforge/tls/client.pem
-```
-
-Continue with [Docker](DOCKER.md), [Kubernetes](KUBERNETES.md), and
+Continue with [Kubernetes](KUBERNETES.md), [Docker](DOCKER.md), and
 [Deployment](DEPLOYMENT.md).

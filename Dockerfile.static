@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile using Chainguard - STATIC BUILD
 # This version creates a fully static binary for maximum security and minimal size
 # Stage 1: Builder - Compile static Rust binary
-FROM cgr.dev/chainguard/rust:latest AS builder
+FROM cgr.dev/chainguard/rust:latest@sha256:9403ae8340434a1c2a18b41fd55850a61c7851e6189905efe9f0813bdc8f083d AS builder
 
 # Install build dependencies for static linking
 USER root
@@ -24,6 +24,8 @@ RUN rustup target add x86_64-unknown-linux-musl
 
 # Copy dependency manifests
 COPY --chown=nonroot Cargo.toml Cargo.lock ./
+COPY --chown=nonroot crates/streamforge-config-model/Cargo.toml ./crates/streamforge-config-model/Cargo.toml
+COPY --chown=nonroot crates/streamforge-config-model/src ./crates/streamforge-config-model/src
 
 # Create dummy for dependency caching
 RUN mkdir -p src && \
@@ -46,7 +48,7 @@ RUN file /build/target/x86_64-unknown-linux-musl/release/streamforge && \
     ldd /build/target/x86_64-unknown-linux-musl/release/streamforge 2>&1 | grep "not a dynamic" || true
 
 # Stage 2: Ultra-minimal static runtime
-FROM cgr.dev/chainguard/static:latest
+FROM cgr.dev/chainguard/static:latest@sha256:399c8cb4858f05aaa33f43f02a2e75f28d40f016c0f86e5ba6075769e3303791
 
 # Copy only the static binary
 COPY --from=builder \

@@ -3,25 +3,123 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --ink: #10212d;
+  --ink-muted: #587080;
+  --paper: #f4f7f8;
+  --surface: #ffffff;
+  --line: #d8e2e7;
+  --signal: #087f8c;
+  --signal-dark: #075e69;
+  --pulse: #e86f51;
+  --success: #247b59;
+  --warning: #a66516;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  color: var(--ink);
+  background:
+    linear-gradient(rgba(8, 127, 140, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(8, 127, 140, 0.035) 1px, transparent 1px),
+    var(--paper);
+  background-size: 28px 28px;
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(8, 127, 140, 0.28);
+  outline-offset: 2px;
+}
+
+@layer components {
+  .sf-shell {
+    @apply min-h-screen;
+  }
+
+  .sf-header {
+    @apply border-b bg-white/95 backdrop-blur;
+    border-color: var(--line);
+  }
+
+  .sf-container {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .sf-card {
+    @apply rounded-xl border bg-white shadow-sm;
+    border-color: var(--line);
+  }
+
+  .sf-label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em];
+    color: var(--ink-muted);
+  }
+
+  .sf-input {
+    @apply w-full rounded-lg border bg-white px-3 py-2.5 text-sm transition;
+    border-color: var(--line);
+  }
+
+  .sf-input:focus {
+    border-color: var(--signal);
+    box-shadow: 0 0 0 3px rgba(8, 127, 140, 0.12);
+    outline: none;
+  }
+
+  .sf-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .sf-button-primary {
+    @apply sf-button text-white;
+    background: var(--signal);
+  }
+
+  .sf-button-primary:hover {
+    background: var(--signal-dark);
+  }
+
+  .sf-button-secondary {
+    @apply sf-button border bg-white;
+    border-color: var(--line);
+  }
+
+  .sf-button-secondary:hover {
+    background: #edf3f5;
+  }
+
+  .sf-kicker {
+    @apply font-mono text-[11px] font-bold uppercase tracking-[0.16em];
+    color: var(--signal);
+  }
+
+  .sf-status {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

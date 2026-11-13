@@ -1,35 +1,56 @@
 {
   "name": "streamforge-ui",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "lint": "next lint",
-    "type-check": "tsc --noEmit"
+    "lint": "eslint . --max-warnings=0",
+    "type-check": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "unused-deps": "knip --dependencies"
   },
   "dependencies": {
     "@kubernetes/client-node": "^1.4.0",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.1",
-    "js-yaml": "^4.3.0",
-    "jsonwebtoken": "^9.0.3",
+    "js-yaml": "^4.3.1",
     "lucide-react": "^0.460.0",
     "next": "^15.5.18",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.20",
-    "eslint": "^8.57.1",
-    "eslint-config-next": "^15.1.6",
+    "eslint": "^9.39.2",
+    "eslint-config-next": "^15.5.22",
+    "knip": "^6.29.0",
     "postcss": "^8.5.10",
     "tailwindcss": "^3.4.17",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "$postcss",
+    "sharp": "0.35.3",
+    "ip-address": "10.5.0",
+    "nanoid": "3.3.18",
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.18"
+    },
+    "minimatch@10.2.4": {
+      "brace-expansion": "5.0.9"
+    }
+  },
+  "knip": {
+    "ignoreDependencies": [
+      "eslint-config-next"
+    ]
   }
 }
