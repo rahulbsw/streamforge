@@ -177,6 +177,13 @@ or group grants.
 - Structured logs redact payloads, headers, and credentials by default; verify
   this with environment-specific tests before production.
 
+The UI login route limits failed attempts to five per normalized account in a
+15-minute window and 300 failures per process per minute. The limiter is
+process-local and does not trust forwarded client-IP headers. For a public UI
+or a deployment with multiple UI replicas, also configure a trusted
+ingress-wide or shared rate limiter; requests distributed across replicas do
+not share the in-process counters.
+
 ## Release and container controls
 
 - Pin exact StreamForge component versions and base-image digests.

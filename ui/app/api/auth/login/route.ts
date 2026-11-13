@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, AuthConfigurationError, createToken } from '@/lib/auth';
 import { ApiError, readJsonBody } from '@/lib/api';
 import { cookies } from 'next/headers';
+import { tryStartLoginAttempt } from '@/lib/login-rate-limit';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,7 +15,25 @@ export async function POST(request: NextRequest) {
       throw new ApiError('Username and password are required', 400);
     }
 
-    const user = await authenticate(username, password);
+    const attempt = tryStartLoginAttempt(username);
+    if (!attempt.allowed) {
+      return NextResponse.json(
+        { error: 'Too many login attempts. Try again later.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(attempt.retryAfterSeconds) },
+        },
+      );
+    }
+
+    let user;
+    try {
+      user = await authenticate(username, password);
+    } catch (error) {
+      attempt.finish('neutral');
+      throw error;
+    }
+    attempt.finish(user ? 'success' : 'failed');
 
     if (!user) {
       return NextResponse.json(

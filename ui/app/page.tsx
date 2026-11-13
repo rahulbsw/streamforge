@@ -39,7 +39,6 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [loading, setLoading] = useState(true);
-  const [namespace, setNamespace] = useState('streamforge-system');
   const [error, setError] = useState<string | null>(null);
   const [selectedPipeline, setSelectedPipeline] = useState<Pipeline | null>(null);
 
@@ -59,7 +58,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/pipelines?namespace=${namespace}`);
+      const response = await fetch('/api/pipelines');
       if (!response.ok) {
         if (response.status === 401) {
           router.push('/login');
@@ -74,7 +73,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [namespace, router]);
+  }, [router]);
 
   useEffect(() => {
     fetchUser();
@@ -96,13 +95,14 @@ export default function Home() {
     }
   };
 
-  const deletePipeline = async (name: string) => {
+  const deletePipeline = async (name: string, namespace: string) => {
     if (!confirm(`Are you sure you want to delete pipeline "${name}"?`)) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/pipelines?name=${name}&namespace=${namespace}`, {
+      const query = new URLSearchParams({ name, namespace });
+      const response = await fetch(`/api/pipelines?${query}`, {
         method: 'DELETE',
       });
       if (!response.ok) {
@@ -171,20 +171,10 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Filters */}
+        {/* Pipeline namespace */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
           <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">Namespace:</span>
-              <select
-                value={namespace}
-                onChange={(e) => setNamespace(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="default">default</option>
-                <option value="streamforge-system">streamforge-system</option>
-              </select>
-            </label>
+            <span className="text-sm text-gray-600">Showing pipelines watched by this operator.</span>
             <button
               onClick={fetchPipelines}
               disabled={loading}
@@ -304,7 +294,7 @@ export default function Home() {
                         </button>
                         {user?.role === 'admin' && (
                           <button
-                            onClick={() => deletePipeline(pipeline.metadata.name)}
+                            onClick={() => deletePipeline(pipeline.metadata.name, pipeline.metadata.namespace)}
                             className="text-red-600 hover:text-red-900 inline-flex items-center gap-1"
                           >
                             <Trash2 className="w-4 h-4" />

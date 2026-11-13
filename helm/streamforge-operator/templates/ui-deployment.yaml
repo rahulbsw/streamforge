@@ -40,9 +40,19 @@ spec:
             - name: NODE_ENV
               value: {{ ternary "development" "production" .Values.ui.auth.developmentMode | quote }}
             {{- range .Values.ui.env }}
+            {{- if and (eq .name "OPERATOR_NAMESPACE") (ne .value $.Release.Namespace) }}
+            {{- fail "ui.env.OPERATOR_NAMESPACE must match the Helm release namespace" }}
+            {{- end }}
+            {{- if ne .name "OPERATOR_NAMESPACE" }}
             - name: {{ .name }}
               value: {{ .value | quote }}
             {{- end }}
+            {{- end }}
+            {{/* Keep UI requests scoped to the namespace watched by this release's operator. */}}
+            - name: OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:

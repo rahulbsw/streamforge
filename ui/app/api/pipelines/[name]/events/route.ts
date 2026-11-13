@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { apiErrorResponse, requireKubernetesName } from '@/lib/api';
+import { apiErrorResponse, requireKubernetesName, requireOperatorNamespace } from '@/lib/api';
 import { requireAuth } from '@/lib/auth';
 import { coreApi } from '@/lib/kubernetes';
 
@@ -10,10 +10,7 @@ export async function GET(
   try {
     await requireAuth();
     const name = requireKubernetesName((await params).name, 'pipeline name');
-    const namespace = requireKubernetesName(
-      request.nextUrl.searchParams.get('namespace') || 'streamforge-system',
-      'namespace',
-    );
+    const namespace = requireOperatorNamespace(request.nextUrl.searchParams.get('namespace'));
     const response = await coreApi.listNamespacedEvent({
       namespace,
       fieldSelector: `involvedObject.name=${name}`,

@@ -99,7 +99,7 @@ export default function PipelineDetailPage() {
   const params = useParams<{ name: string }>();
   const searchParams = useSearchParams();
   const name = params.name;
-  const namespace = searchParams.get('namespace') || 'streamforge-system';
+  const namespace = searchParams.get('namespace') || '';
   const [timeWindow, setTimeWindow] = useState<Window>('1h');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [events, setEvents] = useState<EventItem[]>([]);
@@ -145,7 +145,7 @@ export default function PipelineDetailPage() {
         <div className="sf-container flex flex-wrap items-center justify-between gap-4 py-4">
           <div className="flex items-center gap-3">
             <Link href="/" className="sf-button-secondary !p-2" aria-label="Back to pipelines"><ArrowLeft className="h-5 w-5" /></Link>
-            <div><p className="sf-kicker">{namespace} / pipeline</p><h1 className="text-2xl font-bold">{name}</h1></div>
+            <div><p className="sf-kicker">{namespace || summary?.pipeline.metadata?.namespace || 'operator namespace'} / pipeline</p><h1 className="text-2xl font-bold">{name}</h1></div>
           </div>
           <div className="flex gap-2">
             <button className="sf-button-secondary" onClick={() => setShowLogs(true)}><Terminal className="h-4 w-4" /> Logs</button>

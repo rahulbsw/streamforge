@@ -221,6 +221,12 @@ Production mode contains no default credentials. Viewer accounts are
 read-only; admin accounts can validate and mutate pipelines. Keep the UI on a
 private `ClusterIP` or approved authenticated ingress.
 
+The chart scopes the UI to the same namespace as its operator. Pipelines
+created through the UI are written only to the chart release namespace;
+namespace parameters for another namespace are rejected. Apply custom
+`StreamforgePipeline` resources in that same namespace for the installed
+operator to reconcile them.
+
 ## Optional monitoring
 
 Enable the metrics Service and alert rules:

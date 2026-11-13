@@ -34,7 +34,12 @@ and teardown evidence.
 
 The publication workflow and workload/mode catalog are under
 `scripts/benchmarks/`. Release results must pass
-`performance_release_gate.py`; ad hoc runs remain diagnostic.
+`performance_release_gate.py`; ad hoc runs remain diagnostic. Each normalized
+evidence record must identify its catalog profile, exact payload size, modes,
+and destination count, plus a dedicated host ID, completed teardown evidence,
+and cost amount/currency/evidence. The evaluator reads
+`workload_catalog.json` by default; `publication_eligible` is descriptive and
+does not replace these checks.
 
 See [Performance](../../docs/PERFORMANCE.md) and the canonical
 [benchmark guide](../../docs/benchmarks/README.md).

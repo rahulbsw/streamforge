@@ -321,10 +321,9 @@ export default function NewPipeline() {
             <div className="max-w-3xl">
               <p className="sf-kicker">01 / Identity</p>
               <h2 className="mt-2 text-2xl font-bold">Name the data route</h2>
-              <p className="mt-2 text-sm text-slate-600">Choose the Kubernetes identity and the namespace that will own this pipeline.</p>
+              <p className="mt-2 text-sm text-slate-600">Choose the Kubernetes identity. The namespace is set by the installed operator.</p>
               <div className="mt-7 grid gap-5 md:grid-cols-2">
                 <label><span className="sf-label">Pipeline name</span><input className="sf-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })} placeholder="orders-to-analytics" /></label>
-                <label><span className="sf-label">Namespace</span><input className="sf-input" value={form.namespace} onChange={(e) => setForm({ ...form, namespace: e.target.value.toLowerCase() })} /></label>
                 <label><span className="sf-label">Application ID</span><input className="sf-input" value={form.appid} onChange={(e) => setForm({ ...form, appid: e.target.value })} placeholder="Defaults to pipeline name" /></label>
                 <div>
                   <span className="sf-label">Starting point</span>

@@ -63,15 +63,75 @@ network_exists() {
   "${RUNTIME}" network inspect "${NETWORK_NAME}" >/dev/null 2>&1
 }
 
+network_id() {
+  local template id
+  for template in '{{.Id}}' '{{.ID}}' '{{.id}}'; do
+    if id="$("${RUNTIME}" network inspect --format "${template}" "${NETWORK_NAME}" 2>/dev/null)" &&
+      [[ -n "${id}" && "${id}" != "<no value>" && "${id}" != "<nil>" ]]; then
+      printf '%s\n' "${id}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+network_owner_token() {
+  local token
+  if ! token="$("${RUNTIME}" network inspect \
+    --format '{{ index .Labels "com.streamforge.quickstart.owner" }}' \
+    "${NETWORK_NAME}" 2>/dev/null)"; then
+    return 1
+  fi
+  [[ -n "${token}" && "${token}" != "<no value>" && "${token}" != "<nil>" ]] || return 2
+  printf '%s\n' "${token}"
+}
+
 cleanup_resources() {
+  local cleanup_failed=0 expected_network_id expected_owner_token actual_network_id actual_owner_token
   if container_exists "${ENGINE_NAME}"; then
     "${RUNTIME}" rm --force "${ENGINE_NAME}" >/dev/null 2>&1 || true
   fi
   if container_exists "${BROKER_NAME}"; then
     "${RUNTIME}" rm --force "${BROKER_NAME}" >/dev/null 2>&1 || true
   fi
-  if network_exists; then
-    "${RUNTIME}" network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
+  if [[ -f "${NETWORK_OWNERSHIP_FILE}" ]]; then
+    expected_network_id="$(sed -n '1p' "${NETWORK_OWNERSHIP_FILE}")"
+    expected_owner_token="$(sed -n '2p' "${NETWORK_OWNERSHIP_FILE}")"
+    if network_exists; then
+      if ! actual_network_id="$(network_id)"; then
+        printf 'quickstart: could not inspect network %s; ownership record retained\n' \
+          "${NETWORK_NAME}" >&2
+        cleanup_failed=1
+      elif actual_owner_token="$(network_owner_token)"; then
+        if [[ "${actual_owner_token}" == "${expected_owner_token}" &&
+          ( "${expected_network_id}" == "pending" ||
+            "${actual_network_id}" == "${expected_network_id}" ) ]]; then
+          if ! "${RUNTIME}" network rm "${actual_network_id}" >/dev/null 2>&1; then
+            printf 'quickstart: failed to remove owned network %s; ownership record retained\n' \
+              "${NETWORK_NAME}" >&2
+            cleanup_failed=1
+          else
+            rm -f "${NETWORK_OWNERSHIP_FILE}"
+          fi
+        else
+          printf 'quickstart: network %s no longer matches its ownership record; leaving it in place\n' \
+            "${NETWORK_NAME}" >&2
+          rm -f "${NETWORK_OWNERSHIP_FILE}"
+        fi
+      else
+        if [[ "$?" == "2" ]]; then
+          printf 'quickstart: network %s has no ownership label; leaving it in place\n' \
+            "${NETWORK_NAME}" >&2
+          rm -f "${NETWORK_OWNERSHIP_FILE}"
+        else
+          printf 'quickstart: could not verify network %s; ownership record retained\n' \
+            "${NETWORK_NAME}" >&2
+          cleanup_failed=1
+        fi
+      fi
+    else
+      rm -f "${NETWORK_OWNERSHIP_FILE}"
+    fi
   fi
   if [[ -f "${CONFIG_FILE}" ]]; then
     rm -f "${CONFIG_FILE}"
@@ -79,6 +139,7 @@ cleanup_resources() {
   if [[ -d "${STATE_DIR}" ]]; then
     rmdir "${STATE_DIR}" 2>/dev/null || true
   fi
+  return "${cleanup_failed}"
 }
 
 wait_for_broker() {
@@ -115,17 +176,42 @@ EOF
 }
 
 up() {
-  local up_complete=0
+  local up_complete=0 created_network_id create_result owner_token current_owner_token current_network_id
 
   if container_exists "${BROKER_NAME}" || container_exists "${ENGINE_NAME}"; then
     die "quickstart resources already exist; run '$0 down' first"
   fi
+  if network_exists; then
+    die "quickstart network already exists; remove it or choose a different prefix"
+  fi
 
   trap 'if [[ "${up_complete}" != "1" ]]; then cleanup_resources; fi' EXIT
   write_config
-  if ! network_exists; then
-    "${RUNTIME}" network create "${NETWORK_NAME}" >/dev/null
+  owner_token="${UID}-${BASHPID}-${RANDOM}-${RANDOM}-$(date +%s)"
+  # Save the token first so EXIT cleanup can recover the network even if the
+  # runtime creates it but the CLI then exits unsuccessfully.
+  printf '%s\n%s\n' "pending" "${owner_token}" >"${NETWORK_OWNERSHIP_FILE}"
+  if ! create_result="$("${RUNTIME}" network create \
+    --label "com.streamforge.quickstart.owner=${owner_token}" "${NETWORK_NAME}")"; then
+    die "network create failed; ownership record retained for cleanup"
   fi
+  if [[ "${create_result}" =~ ^[[:xdigit:]]{12,64}$ ]]; then
+    created_network_id="${create_result}"
+  else
+    # Podman returns the name rather than the ID. Record a pending ID so the
+    # EXIT cleanup can recover it by verifying this run's unique owner label.
+    created_network_id="pending"
+  fi
+  printf '%s\n%s\n' "${created_network_id}" "${owner_token}" >"${NETWORK_OWNERSHIP_FILE}"
+  if [[ "${created_network_id}" == "pending" ]] &&
+    ! created_network_id="$(network_id)"; then
+    die "could not inspect the created network; ownership record retained for cleanup"
+  fi
+  if ! current_network_id="$(network_id)" || [[ "${current_network_id}" != "${created_network_id}" ]] ||
+    ! current_owner_token="$(network_owner_token)" || [[ "${current_owner_token}" != "${owner_token}" ]]; then
+    die "created network identity could not be verified; ownership record retained for cleanup"
+  fi
+  printf '%s\n%s\n' "${created_network_id}" "${owner_token}" >"${NETWORK_OWNERSHIP_FILE}"
 
   log "Starting Redpanda with ${RUNTIME}"
   "${RUNTIME}" run --detach \
@@ -252,6 +338,7 @@ readonly BROKER_NAME="${PREFIX}-redpanda"
 readonly ENGINE_NAME="${PREFIX}-engine"
 readonly STATE_DIR="${STREAMFORGE_QUICKSTART_STATE_DIR:-${TMPDIR:-/tmp}/${PREFIX}-${UID}}"
 readonly CONFIG_FILE="${STATE_DIR}/streamforge.yaml"
+readonly NETWORK_OWNERSHIP_FILE="${STATE_DIR}/.network-created-by-quickstart"
 readonly VERSION="${STREAMFORGE_VERSION:-${DEFAULT_VERSION}}"
 readonly ENGINE_IMAGE="${STREAMFORGE_IMAGE:-ghcr.io/rahulbsw/streamforge:${VERSION}}"
 readonly BROKER_IMAGE="${STREAMFORGE_BROKER_IMAGE:-${DEFAULT_BROKER_IMAGE}}"

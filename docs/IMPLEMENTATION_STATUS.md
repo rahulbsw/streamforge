@@ -34,7 +34,8 @@ Implemented:
 - digest-pinned release base images;
 - non-root engine, operator, and pipeline workload identities;
 - `scripts/quickstart.sh up|verify|down` with Docker/Podman selection, topic
-  creation, real record verification, and cleanup;
+  creation, real record verification, and cleanup limited to networks whose
+  current ID and per-run ownership label match the stored ownership record;
 - release preflight that validates component versions and container builds;
 - side-effect-free `streamforge --help` and `--version`;
 - a bounded Docker build context that excludes nested build/dependency state.
@@ -134,6 +135,11 @@ Implemented:
 - bounded no-shell validation, Kubernetes server-side dry-run, and creation;
 - pipeline summary, predefined metrics windows, events, and bounded log APIs;
 - viewer/admin enforcement and explicit production UI authentication;
+- UI pipeline APIs scoped to the Helm operator's namespace, with unsupported
+  namespace requests rejected;
+- pipeline Prometheus queries scoped to both namespace and pod;
+- bounded process-local login throttling; public or multi-replica UI deployments
+  also require a trusted ingress-wide or shared limiter;
 - a UI image definition that builds the matching validator architecture;
 - idempotent status writes with stable transition timestamps, Deployment-owned
   reconciliation events, a workload-backed `Ready` condition, and controller
@@ -219,8 +225,10 @@ Implemented:
 - processing/delivery-mode matrix and unsafe-combination record;
 - normalized schema-v3 record for the canonical 2026-07-25 AWS passthrough
   baseline;
-- release evaluator for exact accounting, zero errors, repetitions,
-  coefficient of variation, throughput, p99 latency, and peak RSS;
+- release evaluator validates catalog profile, payload size, processing and
+  delivery modes, destination count, dedicated-host identity, teardown and cost
+  evidence, accounting, errors, repetition count, coefficient of variation,
+  throughput, p99 latency, and peak RSS;
 - explicit exception owner, reason, and removal-milestone fields;
 - removal of the obsolete observability benchmark wrapper/guide and its
   unsupported fixed throughput targets;
@@ -232,7 +240,8 @@ example suites that the current validator could not execute. Current examples
 now use one supported configuration document per file.
 
 The existing passthrough baseline lacks p99 and exact 1 KiB normalization and
-cannot pass the new publication gate without an explicit exception. The Kafka
+cannot pass the publication gate without an explicit exception. A
+`publication_eligible` field is not proof of catalog compliance. The Kafka
 runner does not yet execute every catalog profile. Historical evidence remains
 under `docs/benchmarks/results/` and must not be represented as current
 capacity guidance.
@@ -252,6 +261,9 @@ Passed on 2026-07-26:
 - Helm lint and representative template rendering;
 - workflow YAML, dashboard JSON, and benchmark workload/catalog parsing;
 - performance release-evaluator unit tests;
+- focused PR #39 verification on 2026-11-13: quickstart Docker/Podman lifecycle,
+  UI namespace, login limiter, and namespace-scoped metric-query tests; Helm
+  rendering; and catalog-backed performance evidence checks;
 - all retained pipeline CRD and engine configuration examples through
   `streamforge-validate`;
 - the source-built Podman-backed Minikube smoke, including Kafka 3.9,
@@ -269,8 +281,10 @@ Known non-production exception:
 
 Pending verification:
 
+- full Rust tests on the current SDK, blocked by the installed linker rejecting
+  the SDK's `arm64e.x1` architecture metadata;
 - live Kafka failure/recovery, Prometheus, UI, and browser release gates;
 - published multi-architecture artifacts;
 - dedicated v1.4 workload matrix, p99 evidence, and capacity guidance.
 
-**Last updated:** 2026-07-26
+**Last updated:** 2026-11-13

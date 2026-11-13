@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ApiError, requireOperatorNamespace } from '../lib/api-namespace.ts';
 import {
   defaultPipelineForm,
   emptyDestination,
@@ -78,4 +79,28 @@ test('validates step-specific required fields and DLQ topic', () => {
   form.destinations[0].topic = 'orders-copy';
   form.dlq.enabled = true;
   assert.match(validateStep(form, 4) || '', /DLQ topic/);
+});
+
+test('pipeline resources leave namespace to the operator deployment', () => {
+  const resource = toPipelineResource(defaultPipelineForm());
+  assert.equal('namespace' in resource.metadata, false);
+});
+
+test('operator namespace defaults from the deployment and rejects unsupported namespaces', () => {
+  const originalNamespace = process.env.OPERATOR_NAMESPACE;
+  process.env.OPERATOR_NAMESPACE = 'streamforge-production';
+  try {
+    assert.equal(requireOperatorNamespace(null), 'streamforge-production');
+    assert.equal(requireOperatorNamespace('streamforge-production'), 'streamforge-production');
+    assert.throws(
+      () => requireOperatorNamespace('default'),
+      (error: unknown) => error instanceof ApiError && error.status === 400,
+    );
+  } finally {
+    if (originalNamespace === undefined) {
+      delete process.env.OPERATOR_NAMESPACE;
+    } else {
+      process.env.OPERATOR_NAMESPACE = originalNamespace;
+    }
+  }
 });

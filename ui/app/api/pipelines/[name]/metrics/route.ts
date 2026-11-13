@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { apiErrorResponse, ApiError, requireKubernetesName } from '@/lib/api';
+import { apiErrorResponse, ApiError, requireKubernetesName, requireOperatorNamespace } from '@/lib/api';
 import { requireAuth } from '@/lib/auth';
+import { metricQueries } from '@/lib/metrics';
 
 const WINDOWS = {
   '15m': { seconds: 15 * 60, step: '15s' },
@@ -10,18 +11,6 @@ const WINDOWS = {
 } as const;
 
 type Window = keyof typeof WINDOWS;
-
-function metricQueries(name: string) {
-  const pod = `${name.replaceAll('-', '\\-')}-.*`;
-  const selector = `{pod=~"${pod}"}`;
-  return {
-    deliveryRate: `sum(rate(streamforge_messages_delivered_total${selector}[5m]))`,
-    processingRate: `sum(streamforge_processing_rate_mps${selector})`,
-    errorRate: `sum(rate(streamforge_processing_errors_total${selector}[5m]))`,
-    consumerLag: `sum(streamforge_consumer_lag${selector})`,
-    p99Latency: `histogram_quantile(0.99, sum by (le) (rate(streamforge_processing_duration_seconds_bucket${selector}[5m])))`,
-  };
-}
 
 async function queryRange(
   baseUrl: URL,
@@ -63,10 +52,7 @@ export async function GET(
   try {
     await requireAuth();
     const name = requireKubernetesName((await params).name, 'pipeline name');
-    requireKubernetesName(
-      request.nextUrl.searchParams.get('namespace') || 'streamforge-system',
-      'namespace',
-    );
+    const namespace = requireOperatorNamespace(request.nextUrl.searchParams.get('namespace'));
     const window = (request.nextUrl.searchParams.get('window') || '1h') as Window;
     if (!(window in WINDOWS)) {
       throw new ApiError('window must be 15m, 1h, 6h, or 24h', 400);
@@ -87,7 +73,7 @@ export async function GET(
     const end = Math.floor(Date.now() / 1000);
     const settings = WINDOWS[window];
     const start = end - settings.seconds;
-    const entries = Object.entries(metricQueries(name));
+    const entries = Object.entries(metricQueries(name, namespace));
     const results = await Promise.all(
       entries.map(async ([key, query]) => [
         key,

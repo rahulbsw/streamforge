@@ -23,7 +23,6 @@ export interface DestinationForm {
 
 export interface PipelineForm {
   name: string;
-  namespace: string;
   appid: string;
   source: {
     brokers: string;
@@ -75,7 +74,6 @@ export const emptyDestination = (id = crypto.randomUUID()): DestinationForm => (
 
 export const defaultPipelineForm = (): PipelineForm => ({
   name: '',
-  namespace: 'streamforge-system',
   appid: '',
   source: {
     brokers: '',
@@ -141,7 +139,6 @@ export function toPipelineResource(form: PipelineForm) {
     kind: 'StreamforgePipeline',
     metadata: {
       name,
-      namespace: form.namespace,
     },
     spec: {
       appid: form.appid.trim() || name,

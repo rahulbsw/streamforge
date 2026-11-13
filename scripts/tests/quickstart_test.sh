@@ -57,11 +57,63 @@ case "${command_name}" in
     ;;
   network)
     operation="${1:-}"
-    name="${2:-}"
     case "${operation}" in
-      inspect) [[ -f "${FAKE_RUNTIME_STATE}/network-${name}" ]] ;;
-      create) touch "${FAKE_RUNTIME_STATE}/network-${name}" ;;
-      rm) rm -f "${FAKE_RUNTIME_STATE}/network-${name}" ;;
+      inspect)
+        name="${@: -1}"
+        if [[ "$*" == *"--format"* ]]; then
+          [[ -f "${FAKE_RUNTIME_STATE}/network-${name}" ]] || exit 1
+          if [[ "$*" == *".Labels"* ]]; then
+            [[ -f "${FAKE_RUNTIME_STATE}/network-label-${name}" ]] || printf '<no value>\n'
+            [[ ! -f "${FAKE_RUNTIME_STATE}/network-label-${name}" ]] ||
+              cat "${FAKE_RUNTIME_STATE}/network-label-${name}"
+          else
+            if [[ "${FAKE_NETWORK_ID_INSPECT_FAILURES:-0}" -gt 0 ]]; then
+              inspect_count=0
+              [[ ! -f "${FAKE_RUNTIME_STATE}/network-id-inspect-count" ]] ||
+                inspect_count="$(cat "${FAKE_RUNTIME_STATE}/network-id-inspect-count")"
+              inspect_count=$((inspect_count + 1))
+              printf '%s\n' "${inspect_count}" >"${FAKE_RUNTIME_STATE}/network-id-inspect-count"
+              if [[ "${inspect_count}" -le "${FAKE_NETWORK_ID_INSPECT_FAILURES}" ]]; then
+                exit 1
+              fi
+            fi
+            cat "${FAKE_RUNTIME_STATE}/network-${name}"
+          fi
+        else
+          [[ -f "${FAKE_RUNTIME_STATE}/network-${name}" ]]
+        fi
+        ;;
+      create)
+        name="${@: -1}"
+        label="${3#*=}"
+        printf '0123456789abcdef01234567\n' >"${FAKE_RUNTIME_STATE}/network-${name}"
+        printf '%s\n' "${label}" >"${FAKE_RUNTIME_STATE}/network-label-${name}"
+        if [[ "${0##*/}" == "podman" ]]; then
+          printf '%s\n' "${name}"
+        else
+          printf '0123456789abcdef01234567\n'
+        fi
+        [[ "${FAKE_NETWORK_CREATE_FAILURE_AFTER_CREATE:-0}" != "1" ]] || exit 1
+        ;;
+      rm)
+        [[ "${FAKE_NETWORK_REMOVE_FAILURE:-0}" != "1" ]] || exit 1
+        target="${2:-}"
+        name="${target}"
+        if [[ -f "${FAKE_RUNTIME_STATE}/network-${name}" ]]; then
+          rm -f "${FAKE_RUNTIME_STATE}/network-${name}"
+          rm -f "${FAKE_RUNTIME_STATE}/network-label-${name}"
+        else
+          for network_file in "${FAKE_RUNTIME_STATE}"/network-*; do
+            [[ "${network_file}" == *"network-label-"* ]] && continue
+            [[ -f "${network_file}" ]] || continue
+            if [[ "$(cat "${network_file}")" == "${name}" ]]; then
+              network_name="${network_file##*/network-}"
+              rm -f "${network_file}"
+              rm -f "${FAKE_RUNTIME_STATE}/network-label-${network_name}"
+            fi
+          done
+        fi
+        ;;
       *) exit 1 ;;
     esac
     ;;
@@ -152,6 +204,120 @@ for runtime in docker podman; do
   [[ ! -e "${runtime_state}/network-test-${runtime}-network" ]] ||
     fail "${runtime}: network was not removed"
 done
+
+# A runtime may create the network and still return an error. The ownership
+# token is written first so the failure trap can safely identify and clean it.
+for runtime in docker podman; do
+  create_failure_root="${TEST_ROOT}/create-failure-${runtime}"
+  mkdir -p "${create_failure_root}/runtime"
+  : >"${create_failure_root}/runtime.log"
+  make_fake_runtime "${runtime}" "${create_failure_root}/bin"
+  export PATH="${create_failure_root}/bin:${PATH}"
+  export FAKE_RUNTIME_LOG="${create_failure_root}/runtime.log"
+  export FAKE_RUNTIME_STATE="${create_failure_root}/runtime"
+  export STREAMFORGE_CONTAINER_RUNTIME="${runtime}"
+  export STREAMFORGE_QUICKSTART_PREFIX="test-create-failure-${runtime}"
+  export STREAMFORGE_QUICKSTART_STATE_DIR="${create_failure_root}/quickstart"
+  export FAKE_NETWORK_CREATE_FAILURE_AFTER_CREATE=1
+  if "${QUICKSTART}" up >/dev/null 2>&1; then
+    fail "${runtime}: up unexpectedly succeeded after network create returned an error"
+  fi
+  [[ ! -e "${create_failure_root}/runtime/network-test-create-failure-${runtime}-network" ]] ||
+    fail "${runtime}: failed network create left the created network behind"
+  unset FAKE_NETWORK_CREATE_FAILURE_AFTER_CREATE
+done
+
+# If post-create inspection fails, the ownership record must still let EXIT
+# cleanup recover and remove the network created by this invocation.
+for runtime in docker podman; do
+  inspect_failure_root="${TEST_ROOT}/inspect-failure-${runtime}"
+  mkdir -p "${inspect_failure_root}/runtime"
+  : >"${inspect_failure_root}/runtime.log"
+  make_fake_runtime "${runtime}" "${inspect_failure_root}/bin"
+  export PATH="${inspect_failure_root}/bin:${PATH}"
+  export FAKE_RUNTIME_LOG="${inspect_failure_root}/runtime.log"
+  export FAKE_RUNTIME_STATE="${inspect_failure_root}/runtime"
+  export STREAMFORGE_CONTAINER_RUNTIME="${runtime}"
+  export STREAMFORGE_QUICKSTART_PREFIX="test-inspect-failure-${runtime}"
+  export STREAMFORGE_QUICKSTART_STATE_DIR="${inspect_failure_root}/quickstart"
+  export FAKE_NETWORK_ID_INSPECT_FAILURES=3
+  if "${QUICKSTART}" up >/dev/null 2>&1; then
+    fail "${runtime}: up unexpectedly passed after network ID inspection failure"
+  fi
+  [[ ! -e "${inspect_failure_root}/runtime/network-test-inspect-failure-${runtime}-network" ]] ||
+    fail "${runtime}: failed inspection left the created network behind"
+  [[ ! -e "${inspect_failure_root}/quickstart/.network-created-by-quickstart" ]] ||
+    fail "${runtime}: successful failure cleanup retained the ownership record"
+  unset FAKE_NETWORK_ID_INSPECT_FAILURES
+done
+
+# An unrelated network with the configured name must not be adopted or
+# removed by a failed up/down cleanup cycle.
+existing_root="${TEST_ROOT}/existing-network"
+mkdir -p "${existing_root}/runtime" "${existing_root}/quickstart"
+: >"${existing_root}/runtime.log"
+make_fake_runtime docker "${existing_root}/bin"
+printf 'unrelated-network-id\n' >"${existing_root}/runtime/network-test-existing-network-network"
+export PATH="${existing_root}/bin:${PATH}"
+export FAKE_RUNTIME_LOG="${existing_root}/runtime.log"
+export FAKE_RUNTIME_STATE="${existing_root}/runtime"
+export STREAMFORGE_CONTAINER_RUNTIME=docker
+export STREAMFORGE_QUICKSTART_PREFIX=test-existing-network
+export STREAMFORGE_QUICKSTART_STATE_DIR="${existing_root}/quickstart"
+if "${QUICKSTART}" up >/dev/null 2>&1; then
+  fail "up unexpectedly reused a pre-existing network"
+fi
+[[ -f "${existing_root}/runtime/network-test-existing-network-network" ]] ||
+  fail "failed up removed the pre-existing network"
+if grep -F 'network rm test-existing-network-network' "${existing_root}/runtime.log" >/dev/null; then
+  fail "failed up attempted to remove the pre-existing network"
+fi
+"${QUICKSTART}" down >/dev/null
+[[ -f "${existing_root}/runtime/network-test-existing-network-network" ]] ||
+  fail "down removed a network not owned by quickstart"
+
+# If an owned network is replaced under the same name, cleanup must preserve
+# the replacement instead of trusting the old ownership marker.
+replacement_root="${TEST_ROOT}/replacement-network"
+mkdir -p "${replacement_root}/runtime"
+: >"${replacement_root}/runtime.log"
+make_fake_runtime docker "${replacement_root}/bin"
+export PATH="${replacement_root}/bin:${PATH}"
+export FAKE_RUNTIME_LOG="${replacement_root}/runtime.log"
+export FAKE_RUNTIME_STATE="${replacement_root}/runtime"
+export STREAMFORGE_CONTAINER_RUNTIME=docker
+export STREAMFORGE_QUICKSTART_PREFIX=test-replacement-network
+export STREAMFORGE_QUICKSTART_STATE_DIR="${replacement_root}/quickstart"
+unset FAKE_BROKER_FAILURE
+"${QUICKSTART}" up >/dev/null
+printf 'replacement-network-id\n' >"${replacement_root}/runtime/network-test-replacement-network-network"
+rm -f "${replacement_root}/runtime/network-label-test-replacement-network-network"
+"${QUICKSTART}" down >/dev/null 2>&1
+[[ -f "${replacement_root}/runtime/network-test-replacement-network-network" ]] ||
+  fail "down removed a same-name replacement network"
+
+# A transient removal failure must keep the ownership ID so cleanup can retry.
+retry_root="${TEST_ROOT}/network-removal-retry"
+mkdir -p "${retry_root}/runtime"
+: >"${retry_root}/runtime.log"
+make_fake_runtime docker "${retry_root}/bin"
+export PATH="${retry_root}/bin:${PATH}"
+export FAKE_RUNTIME_LOG="${retry_root}/runtime.log"
+export FAKE_RUNTIME_STATE="${retry_root}/runtime"
+export STREAMFORGE_CONTAINER_RUNTIME=docker
+export STREAMFORGE_QUICKSTART_PREFIX=test-network-removal-retry
+export STREAMFORGE_QUICKSTART_STATE_DIR="${retry_root}/quickstart"
+"${QUICKSTART}" up >/dev/null
+export FAKE_NETWORK_REMOVE_FAILURE=1
+if "${QUICKSTART}" down >/dev/null 2>&1; then
+  fail "down unexpectedly succeeded after network removal failure"
+fi
+[[ -f "${retry_root}/quickstart/.network-created-by-quickstart" ]] ||
+  fail "failed network removal discarded the ownership ID"
+unset FAKE_NETWORK_REMOVE_FAILURE
+"${QUICKSTART}" down >/dev/null
+[[ ! -e "${retry_root}/runtime/network-test-network-removal-retry-network" ]] ||
+  fail "retry did not remove the owned network"
 
 # A failed startup must clean up everything created by that invocation.
 failure_root="${TEST_ROOT}/failure"
