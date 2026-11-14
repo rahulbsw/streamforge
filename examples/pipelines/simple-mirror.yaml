@@ -11,7 +11,6 @@ spec:
     brokers: "kafka.kafka.svc.cluster.local:9092"
     topic: "input-topic"
     offset: "latest"  # Start from latest messages
-    groupId: "simple-mirror-group"
 
   # Destination Kafka configuration
   destinations:

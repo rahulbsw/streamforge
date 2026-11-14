@@ -97,8 +97,8 @@ docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
 docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
   rpk topic consume pii-safe-orders -n 1 --offset start
 
-curl http://localhost:8080/health
-curl http://localhost:8080/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
+curl http://localhost:9090/health
+curl http://localhost:9090/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
 ```
 
 Cleanup:
@@ -192,7 +192,8 @@ kubectl get nodes
 helm lint ./helm/streamforge-operator
 helm template streamforge-operator ./helm/streamforge-operator \
   --namespace streamforge-system \
-  --set ui.enabled=true | rg 'apiGroups: \["streamforge.io"\]'
+  --set ui.enabled=true \
+  --set ui.auth.developmentMode=true | rg 'apiGroups: \["streamforge.io"\]'
 ```
 
 Build and load the current StreamForge pipeline image before recording. This is required for the v2 filter and transform syntax used in the demo form:
@@ -203,10 +204,12 @@ docker save streamforge:local -o /private/tmp/streamforge-local.tar
 minikube image load /private/tmp/streamforge-local.tar
 ```
 
-On Apple Silicon Minikube, also build and load a local UI image because the published `ghcr.io/rahulbsw/streamforge-ui:latest` image may not include a `linux/arm64` manifest:
+The `1.1.0` release definition publishes the UI for both Linux amd64 and arm64.
+For an unreleased local UI change, build and load the image from the repository
+root:
 
 ```bash
-docker build -f ui/Dockerfile -t streamforge-ui:local ui
+docker build -f ui/Dockerfile -t streamforge-ui:local .
 docker save streamforge-ui:local -o /private/tmp/streamforge-ui-local.tar
 minikube image load /private/tmp/streamforge-ui-local.tar
 ```
@@ -221,6 +224,7 @@ helm upgrade --install streamforge-operator ./helm/streamforge-operator \
   --set defaults.image.tag=local \
   --set defaults.image.pullPolicy=IfNotPresent \
   --set ui.enabled=true \
+  --set ui.auth.developmentMode=true \
   --set ui.image.repository=streamforge-ui \
   --set ui.image.tag=local \
   --set ui.image.pullPolicy=IfNotPresent
@@ -235,7 +239,8 @@ helm upgrade --install streamforge-operator ./helm/streamforge-operator \
   --set defaults.image.repository=streamforge \
   --set defaults.image.tag=local \
   --set defaults.image.pullPolicy=IfNotPresent \
-  --set ui.enabled=true
+  --set ui.enabled=true \
+  --set ui.auth.developmentMode=true
 ```
 
 Verify operator, UI, service, CRD, and RBAC:
@@ -290,7 +295,6 @@ UI values for the pipeline form:
 - Application ID: `ui-orders-demo`
 - Source bootstrap: `redpanda.redpanda.svc.cluster.local:9092`
 - Source topic: `raw-orders-ui-demo`
-- Consumer group: `streamforge-ui-demo`
 - Offset: `earliest`
 - Destination bootstrap: `redpanda.redpanda.svc.cluster.local:9092`
 - Destination topic: `analytics-orders-ui-demo`
@@ -319,7 +323,9 @@ kubectl exec -n redpanda deployment/redpanda -- \
   rpk topic consume analytics-orders-ui-demo -n 1 --offset start
 ```
 
-The pipeline pod should use `streamforge:local` in this recording so the current v2 DSL support is present. If the pod falls back to `ghcr.io/rahulbsw/streamforge:0.3.0`, stop and fix the image override before recording transform verification.
+The pipeline pod should use `streamforge:local` in this recording so the
+current DSL support is present. If it falls back to an obsolete pre-1.0 image,
+stop and fix the image override before recording transform verification.
 
 Cleanup:
 
@@ -338,7 +344,7 @@ kubectl delete namespace redpanda
 - Generated YAML is visible before deploy.
 - Pipeline becomes Kubernetes state.
 - Kafka output verifies that the deployed pipeline is consuming, filtering, transforming, and producing.
-- Pipeline pod image is `streamforge:local`, not the chart default `ghcr.io/rahulbsw/streamforge:0.3.0`.
+- Pipeline pod image is `streamforge:local`, not an obsolete chart default.
 
 **Human Audio Script:**
 
@@ -368,17 +374,20 @@ kubectl delete namespace redpanda
 - Helm rendering initially exposed a UI RBAC bug: the UI ClusterRole granted `streaming.streamforge.dev`, while the CRD and UI API use `streamforge.io`.
 - Patched `helm/streamforge-operator/templates/ui-rbac.yaml` to grant `streamforge.io`.
 - `kubectl auth can-i list streamforgepipelines.streamforge.io --as=system:serviceaccount:streamforge-system:streamforge-ui -n streamforge-system` changed from `no` to `yes`.
-- On Apple Silicon Minikube, `ghcr.io/rahulbsw/streamforge-ui:latest` failed with `no matching manifest for linux/arm64/v8`.
+- The then-current moving UI tag lacked a Linux arm64 manifest. The `1.1.0`
+  release definition now publishes amd64 and arm64.
 - Built `streamforge-ui:local`, exported it to `/private/tmp/streamforge-ui-local.tar`, loaded it into Minikube, and installed the chart with the local UI image override.
 - Operator and UI pods reached `Running`.
-- UI login worked with `admin` / `admin`.
+- The historical pre-1.1 development login worked with its then-default demo
+  credential. Current development mode generates credentials; production
+  requires an existing authentication Secret.
 - UI pipeline listing worked after the RBAC fix.
 - The repo's `examples/kubernetes/kafka/kafka-standalone.yaml` did not work cleanly in this dry run; the Kafka container failed with an `advertised.listeners` error.
 - An in-cluster Redpanda broker worked when deployed through `/entrypoint.sh redpanda start ...`.
 - Created `raw-orders-ui-demo` and `analytics-orders-ui-demo`.
 - Created `ui-orders-demo` through the UI form and previewed the generated YAML.
 - `StreamforgePipeline` resource was created in `streamforge-system`.
-- Pipeline pod reached `Running` with `ghcr.io/rahulbsw/streamforge:0.3.0`.
+- Pipeline pod reached `Running` with an obsolete pre-1.0 image.
 - Produced one event to `raw-orders-ui-demo`.
 - Consumed one event from `analytics-orders-ui-demo`.
 - The consumed event verified runtime deployment and Kafka output, but it was a raw mirrored event with the chart default `0.3.0` image.
@@ -456,8 +465,8 @@ docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
 docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
   rpk topic consume user-events-compliance -n 1 --offset start
 
-curl http://localhost:8080/health
-curl http://localhost:8080/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
+curl http://localhost:9090/health
+curl http://localhost:9090/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
 ```
 
 Cleanup:
@@ -618,8 +627,8 @@ docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
 docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
   rpk topic consume datalake-schema-changes -n 1 --offset start
 
-curl http://localhost:8080/health
-curl http://localhost:8080/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
+curl http://localhost:9090/health
+curl http://localhost:9090/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
 ```
 
 Cleanup:
@@ -763,8 +772,8 @@ docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
 docker compose -f examples/redpanda/docker-compose.yml exec -T redpanda \
   rpk topic consume model-monitoring-events -n 1 --offset start
 
-curl http://localhost:8080/health
-curl http://localhost:8080/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
+curl http://localhost:9090/health
+curl http://localhost:9090/metrics | rg "streamforge_messages_(consumed|produced)|streamforge_consumer_lag"
 ```
 
 Cleanup:
@@ -938,7 +947,7 @@ eksctl delete cluster --name streamforge-demo --region us-west-2
 - The named profile did not have a region configured.
 - kubectl had no current context, so no EKS cluster was reachable from this machine.
 - `helm lint ./helm/streamforge-operator` passed.
-- `helm template streamforge ./helm/streamforge-operator --namespace streamforge --create-namespace --set ui.enabled=true` rendered successfully.
+- `helm template streamforge ./helm/streamforge-operator --namespace streamforge --set ui.enabled=true --set ui.auth.developmentMode=true` rendered successfully.
 - The Helm chart CRD schema was updated so the documented secure Kafka fields `caSecret`, `usernameSecret`, and `passwordSecret` are accepted by the Kubernetes API schema instead of relying only on the operator model.
 - Next live recording prerequisites: install `eksctl`, refresh AWS credentials for the recording profile, set the profile region, confirm budget/cost controls, then run the EKS/MSK provisioning flow and cleanup in one recording session.
 

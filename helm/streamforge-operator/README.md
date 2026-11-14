@@ -1,171 +1,59 @@
-# Streamforge Operator Helm Chart
+# StreamForge Operator Helm Chart
 
-Kubernetes Operator for managing Streamforge pipelines using Custom Resource Definitions (CRDs).
+This chart installs the StreamForge Kubernetes operator, its
+`streamforge.io/v1alpha1` custom resource, RBAC, optional control UI, and
+optional Prometheus/Grafana assets.
 
-## Architecture
+Chart and component versions are released together. Pin an exact version in
+production; moving tags are not supported release artifacts.
 
-The Streamforge Operator follows the Kubernetes Operator pattern:
+## Prerequisites
 
-1. **CRD (Custom Resource Definition)**: Defines `StreamforgePipeline` resource
-2. **Operator**: Watches CRD changes and reconciles state
-3. **Dynamic Pipelines**: Each pipeline gets its own Deployment + ConfigMap
-4. **Independent Lifecycle**: Adding/updating/deleting pipelines doesn't affect others
+- Kubernetes 1.28 or newer
+- Helm 3
+- access to the versioned engine, operator, and optional UI images
+- Kafka-compatible source and destination brokers
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Kubernetes Cluster                        │
-│                                                               │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │             Streamforge Operator                      │   │
-│  │  - Watches StreamforgePipeline CRDs                  │   │
-│  │  - Reconciles desired vs actual state                │   │
-│  │  - Creates/Updates/Deletes pipeline resources        │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                          │                                    │
-│                          │ manages                            │
-│                          ▼                                    │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │  Pipeline 1  │  │  Pipeline 2  │  │  Pipeline 3  │         │
-│  │              │  │              │  │              │         │
-│  │ Deployment   │  │ Deployment   │  │ Deployment   │         │
-│  │ ConfigMap    │  │ ConfigMap    │  │ ConfigMap    │         │
-│  │ (independent)│  │ (independent)│  │ (independent)│         │
-│  └─────────────┘  └─────────────┘  └─────────────┘         │
-└─────────────────────────────────────────────────────────────┘
-```
+Prometheus Operator and Grafana are optional external dependencies. The chart
+does not install them.
 
-## Features
-
-✅ **Dynamic Pipeline Management**: Add/update/delete pipelines without affecting others
-✅ **Declarative Configuration**: Define pipelines as Kubernetes resources
-✅ **Auto-scaling**: Scales with Kubernetes HPA
-✅ **Self-healing**: Operator reconciles on failures
-✅ **ConfigMap Management**: Automatic config generation and mounting
-✅ **Secret Integration**: Secure credential management
-✅ **Resource Limits**: Per-pipeline resource controls
-✅ **Multi-destination**: Route to multiple Kafka clusters
-✅ **Security**: Full SSL/TLS and SASL support
-
-## Installation
-
-### Prerequisites
-
-- Kubernetes 1.19+
-- Helm 3.0+
-- kubectl configured
-
-### Install CRDs and Operator
+## Install the published OCI chart
 
 ```bash
-# Add Helm repository (when published)
-helm repo add streamforge https://rahulbsw.github.io/streamforge
-helm repo update
+export STREAMFORGE_VERSION=1.1.0
 
-# Install operator with CRDs
-helm install streamforge-operator streamforge/streamforge-operator \
+helm upgrade --install streamforge \
+  oci://ghcr.io/rahulbsw/charts/streamforge-operator \
+  --version "${STREAMFORGE_VERSION}" \
   --namespace streamforge-system \
-  --create-namespace
+  --create-namespace \
+  --wait
 ```
 
-### Install from Source
+The default engine, operator, and UI tags resolve from `Chart.appVersion`.
+Override repositories for mirrors, private registries, or local kind/minikube
+images:
 
 ```bash
-# Clone repository
-git clone https://github.com/rahulbsw/streamforge
-cd streamforge/helm/streamforge-operator
-
-# Install
-helm install streamforge-operator . \
+helm upgrade --install streamforge ./helm/streamforge-operator \
   --namespace streamforge-system \
-  --create-namespace
+  --create-namespace \
+  --set operator.image.repository=registry.example.com/streamforge-operator \
+  --set defaults.image.repository=registry.example.com/streamforge \
+  --set ui.image.repository=registry.example.com/streamforge-ui
 ```
 
-## Quick Start
+## Pipeline defaults
 
-### 1. Create a Simple Pipeline
-
-```bash
-kubectl apply -f - <<EOF
-apiVersion: streamforge.io/v1alpha1
-kind: StreamforgePipeline
-metadata:
-  name: my-first-pipeline
-spec:
-  appid: my-first-pipeline
-  source:
-    brokers: "kafka:9092"
-    topic: "source-topic"
-    groupId: "streamforge"
-  destinations:
-    - brokers: "kafka:9092"
-      topic: "target-topic"
-  replicas: 2
-EOF
-```
-
-### 2. Check Pipeline Status
-
-```bash
-# List pipelines
-kubectl get streamforgepipeline
-# or short form
-kubectl get sfp
-
-# Get details
-kubectl describe sfp my-first-pipeline
-
-# Check pods
-kubectl get pods -l streamforge.io/pipeline=my-first-pipeline
-```
-
-### 3. View Logs
-
-```bash
-# Get logs from all pipeline pods
-kubectl logs -l streamforge.io/pipeline=my-first-pipeline -f
-
-# Or specific pod
-kubectl logs my-first-pipeline-5f7b9c8d4-xk2m9 -f
-```
-
-### 4. Scale Pipeline
-
-```bash
-# Update replicas
-kubectl patch sfp my-first-pipeline -p '{"spec":{"replicas":4}}' --type=merge
-
-# Or edit directly
-kubectl edit sfp my-first-pipeline
-```
-
-### 5. Delete Pipeline
-
-```bash
-kubectl delete sfp my-first-pipeline
-```
-
-## Configuration
-
-### Operator Values
+The chart passes the following defaults to the operator. They apply only when a
+`StreamforgePipeline` omits the corresponding field:
 
 ```yaml
-operator:
-  image:
-    repository: ghcr.io/rahulbsw/streamforge-operator
-    tag: "0.1.0"
-  replicas: 1
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
-
 defaults:
   image:
     repository: ghcr.io/rahulbsw/streamforge
-    tag: "0.3.0"
+    tag: "" # Chart.appVersion
+    pullPolicy: IfNotPresent
   resources:
     requests:
       cpu: 100m
@@ -176,215 +64,136 @@ defaults:
   replicas: 1
   threads: 4
   logLevel: info
+  serviceAccount:
+    create: true
+    name: streamforge-pipeline
 ```
 
-### Custom Values
+An explicit CR value always wins. Objects created by older CRD revisions may
+already contain API-server defaults; remove or update those stored fields if
+you intend to adopt new Helm defaults.
 
-```bash
-helm install streamforge-operator . \
-  --namespace streamforge-system \
-  --set operator.replicas=2 \
-  --set defaults.image.tag=0.3.1 \
-  --set monitoring.enabled=true \
-  --set ui.enabled=true
-```
+Each pipeline becomes one configuration `ConfigMap` and one `Deployment`.
+Kafka credentials remain in referenced Kubernetes `Secret` objects and are
+mounted read-only. Engine containers run as UID/GID `65532`, drop Linux
+capabilities, use a read-only root filesystem, and do not mount a service
+account token by default.
 
-### UI Configuration
-
-Enable the web UI for managing pipelines:
-
-```yaml
-ui:
-  enabled: true  # Enable UI deployment
-  
-  image:
-    repository: ghcr.io/rahulbsw/streamforge-ui
-    tag: "latest"
-  
-  replicas: 1
-  
-  service:
-    type: NodePort  # or LoadBalancer, ClusterIP
-    port: 3001
-    nodePort: 30001
-  
-  # JWT secret for authentication (change in production!)
-  jwtSecret: "your-secure-random-secret-here"
-  
-  # Ingress configuration
-  ingress:
-    enabled: false
-    className: nginx
-    hosts:
-      - host: streamforge.example.com
-        paths:
-          - path: /
-            pathType: Prefix
-```
-
-**Install with UI:**
-```bash
-helm install streamforge-operator . \
-  --namespace streamforge-system \
-  --create-namespace \
-  --set ui.enabled=true
-```
-
-**Access UI:**
-```bash
-# Minikube
-minikube service streamforge-operator-ui -n streamforge-system
-
-# Port-forward
-kubectl port-forward -n streamforge-system svc/streamforge-operator-ui 3001:3001
-```
-
-**Default credentials:**
-- Username: `admin`
-- Password: `admin`
-
-⚠️ **Change in production!**
-
-## Pipeline Examples
-
-See [examples/k8s/pipelines/](../../examples/k8s/pipelines/) for complete examples:
-
-- **01-simple-mirror.yaml**: Basic topic-to-topic mirroring
-- **02-filtered-routing.yaml**: Multi-destination with filters
-- **03-secure-transform.yaml**: SSL/SASL with transformations
-
-### Apply Examples
-
-```bash
-kubectl apply -f examples/k8s/pipelines/
-```
-
-## Pipeline Specification
-
-### Full CRD Spec
+## Create a pipeline
 
 ```yaml
 apiVersion: streamforge.io/v1alpha1
 kind: StreamforgePipeline
 metadata:
-  name: pipeline-name
+  name: orders
+  namespace: streamforge-system
 spec:
-  appid: unique-app-id
-
-  # Source configuration
+  appid: orders-replication
   source:
-    brokers: "broker1:9092,broker2:9092"
-    topic: "source-topic"
-    groupId: "consumer-group"
-    offset: "latest"  # or "earliest"
-    security:
-      protocol: "SASL_SSL"  # PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL
-      ssl:
-        caLocation: "/path/to/ca.crt"
-        certificateLocation: "/path/to/client.crt"
-        keyLocation: "/path/to/client.key"
-      sasl:
-        mechanism: "SCRAM-SHA-256"
-        username: "user"
-        password: "pass"
-
-  # Destinations (multiple allowed)
+    brokers: source-kafka:9092
+    topic: orders
+    offset: latest
   destinations:
-    - brokers: "target:9092"
-      topic: "target-topic"
-      filter: "/field,==,value"  # Optional
-      transform: "EXTRACT:/path,field"  # Optional
-      partitioner: "field"  # default, random, hash, field
-      partitionerField: "/userId"  # Required if partitioner=field
-      compression: "snappy"  # none, gzip, snappy, lz4, zstd
-      security:
-        protocol: "SSL"
-        ssl:
-          caLocation: "/path/to/ca.crt"
-
-  # Resources
-  resources:
-    requests:
-      cpu: "200m"
-      memory: "256Mi"
-    limits:
-      cpu: "1000m"
-      memory: "512Mi"
-
-  # Scaling
-  replicas: 2
+    - brokers: target-kafka:9092
+      topic: orders-analytics
+      filter: "and($region == 'us', $amount >= 100)"
+    - brokers: target-kafka:9092
+      topic: orders-redacted
+      transform: "construct(order_id=$order_id, region=$region)"
+  replicas: 1
   threads: 4
-
-  # Logging
-  logLevel: "info"  # trace, debug, info, warn, error
-
-  # Image override (optional)
-  image:
-    repository: ghcr.io/rahulbsw/streamforge
-    tag: "0.3.0"
-    pullPolicy: IfNotPresent
-
-  # Pod scheduling (optional)
-  serviceAccount: streamforge-pipeline
-  nodeSelector:
-    disktype: ssd
-  tolerations:
-    - key: "key1"
-      operator: "Equal"
-      value: "value1"
-      effect: "NoSchedule"
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-          - matchExpressions:
-              - key: topology.kubernetes.io/zone
-                operator: In
-                values:
-                  - us-west-1a
 ```
 
-## Filter DSL Syntax
+All destinations in one v1alpha1 resource currently use one target broker set.
+`spec.appid` controls the Kafka consumer identity and defaults to
+`metadata.name`. The compatibility field `spec.source.groupId` remains accepted
+but is not used by the engine.
+
+Validate and apply:
+
+```bash
+streamforge-validate \
+  --input-format pipeline-crd \
+  --output json \
+  pipeline.yaml
+
+kubectl apply --server-side --dry-run=server -f pipeline.yaml
+kubectl apply -f pipeline.yaml
+kubectl wait \
+  --namespace streamforge-system \
+  --for=condition=Available \
+  deployment/orders \
+  --timeout=120s
+```
+
+See [`../../docs/KUBERNETES.md`](../../docs/KUBERNETES.md) for TLS/SASL,
+WebAssembly UDF artifact mounts, operations, and troubleshooting.
+
+## Production UI authentication
+
+The UI is disabled by default. A production deployment requires an existing
+Secret containing:
+
+- `jwt-secret`: a JWT signing key of at least 32 characters;
+- `users.json`: a JSON array with `username`, bcrypt `passwordHash`, and
+  `admin` or `viewer` role.
+
+Create the values in an approved secret store, materialize temporary local
+files with restrictive permissions, and create the Kubernetes Secret without
+checking either value into Git:
+
+```bash
+kubectl create secret generic streamforge-ui-auth \
+  --namespace streamforge-system \
+  --from-file=jwt-secret=/secure/path/jwt-secret \
+  --from-file=users.json=/secure/path/users.json
+
+helm upgrade --install streamforge ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --set ui.enabled=true \
+  --set ui.auth.existingSecret=streamforge-ui-auth
+```
+
+Custom key names are supported:
 
 ```yaml
-# Simple comparison
-filter: "/status,==,active"
-
-# Boolean logic
-filter: "AND:/amount,>,100:/country,==,US"
-filter: "OR:/priority,==,high:/priority,==,urgent"
-filter: "NOT:/status,==,inactive"
-
-# Regular expressions
-filter: "REGEX:/email,^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$"
-
-# Array operations
-filter: "ARRAY_ALL:/orders,/status,==,completed"
-filter: "ARRAY_ANY:/tags,/name,==,important"
+ui:
+  auth:
+    existingSecret: streamforge-ui-auth
+    secretKey: jwt-secret
+    usersKey: users.json
 ```
 
-## Transform DSL Syntax
+The chart does not contain production usernames, passwords, or signing keys.
 
-```yaml
-# Extract fields
-transform: "EXTRACT:/user/email,userEmail"
+### Explicit development mode
 
-# Construct object
-transform: "CONSTRUCT:output,/id:userId,/name:userName,/email:userEmail"
+For a disposable local cluster only:
 
-# Array map
-transform: "ARRAY_MAP:/items,/price,itemPrices"
-
-# Arithmetic
-transform: "ADD:/price,/tax,totalPrice"
-transform: "MUL:/quantity,/price,totalCost"
+```bash
+helm upgrade --install streamforge ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --create-namespace \
+  --set ui.enabled=true \
+  --set ui.auth.developmentMode=true
 ```
+
+This mode creates and retains random JWT, admin-password, and viewer-password
+values. It sets `NODE_ENV=development` and enables only the two demo roles.
+Do not combine it with `ui.auth.existingSecret`, and do not use it in
+production.
 
 ## Monitoring
 
-### Prometheus Metrics
+Enable the metrics Service and PrometheusRule:
 
-Enable ServiceMonitor for Prometheus Operator:
+```bash
+helm upgrade --install streamforge ./helm/streamforge-operator \
+  --namespace streamforge-system \
+  --set monitoring.enabled=true
+```
+
+Enable optional integrations when their controllers are installed:
 
 ```yaml
 monitoring:
@@ -392,117 +201,74 @@ monitoring:
   serviceMonitor:
     enabled: true
     interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      release: kube-prometheus-stack
+  prometheusRule:
+    labels:
+      release: kube-prometheus-stack
+  grafanaDashboard:
+    enabled: true
+    namespace: monitoring
 ```
 
-### Grafana Dashboard
+`monitoring.enabled` is the parent gate. The ServiceMonitor and Grafana
+dashboard require both the parent and their own `enabled` value.
+
+See [`../../docs/OBSERVABILITY_QUICKSTART.md`](../../docs/OBSERVABILITY_QUICKSTART.md)
+for the metric catalog and signal-path release checks.
+
+## Verify, upgrade, and roll back
 
 ```bash
-helm install streamforge-operator . \
-  --set monitoring.grafanaDashboard.enabled=true \
-  --set monitoring.grafanaDashboard.namespace=monitoring
+helm lint helm/streamforge-operator
+helm template streamforge helm/streamforge-operator
+kubectl get streamforgepipelines,deployments,pods \
+  --namespace streamforge-system
+
+helm history streamforge --namespace streamforge-system
+helm rollback streamforge <revision> --namespace streamforge-system --wait
 ```
 
-## Troubleshooting
+Roll back the chart, operator, engine, and UI versions together. Preserve
+production authentication Secrets and pipeline CRs during rollback.
 
-### Check Operator Logs
+## Uninstall
 
 ```bash
-kubectl logs -n streamforge-system deployment/streamforge-operator -f
+helm uninstall streamforge --namespace streamforge-system
+kubectl delete namespace streamforge-system
 ```
 
-### Check Pipeline Status
+Helm installs files under `crds/` before templates and does not automatically
+delete CRDs. After confirming that no pipeline CRs or rollback requirements
+remain:
 
 ```bash
-kubectl describe sfp pipeline-name
-```
-
-### Common Issues
-
-**Pipeline not starting:**
-```bash
-# Check events
-kubectl get events --sort-by='.lastTimestamp' | grep pipeline-name
-
-# Check operator logs
-kubectl logs -n streamforge-system -l app.kubernetes.io/name=streamforge-operator
-```
-
-**Connection errors:**
-- Verify Kafka broker addresses
-- Check security credentials in secrets
-- Verify network policies allow pod-to-Kafka communication
-
-**High memory usage:**
-- Reduce `threads` value
-- Lower `resources.limits.memory`
-- Check for large messages
-
-## Upgrading
-
-### Upgrade Operator
-
-```bash
-helm upgrade streamforge-operator . \
-  --namespace streamforge-system \
-  --reuse-values
-```
-
-### Upgrade Pipeline Images
-
-```bash
-# Update all pipelines to new image
-kubectl get sfp -o name | xargs -I {} kubectl patch {} \
-  -p '{"spec":{"image":{"tag":"0.3.1"}}}' --type=merge
-```
-
-## Uninstallation
-
-```bash
-# Delete all pipelines first
-kubectl delete sfp --all
-
-# Uninstall operator
-helm uninstall streamforge-operator -n streamforge-system
-
-# Delete CRDs (if desired)
 kubectl delete crd streamforgepipelines.streamforge.io
 ```
 
-## Development
+Deleting the CRD deletes the corresponding custom resources. Treat that as a
+separate destructive operation.
 
-### Build Operator
+## Release checks
 
-```bash
-cd operator
-cargo build --release
-docker build -t streamforge-operator:dev .
-```
-
-### Testing
+Before publishing the chart:
 
 ```bash
-# Install in test cluster
-kind create cluster --name streamforge-test
-helm install streamforge-operator . --namespace streamforge-system --create-namespace
-
-# Apply test pipeline
-kubectl apply -f examples/k8s/pipelines/01-simple-mirror.yaml
-
-# Cleanup
-kind delete cluster --name streamforge-test
+helm lint helm/streamforge-operator
+helm template streamforge helm/streamforge-operator
+helm template streamforge helm/streamforge-operator \
+  --set ui.enabled=true \
+  --set ui.auth.existingSecret=streamforge-ui-auth
+helm template streamforge helm/streamforge-operator \
+  --set ui.enabled=true \
+  --set ui.auth.developmentMode=true
+helm template streamforge helm/streamforge-operator \
+  --set monitoring.enabled=true \
+  --set monitoring.serviceMonitor.enabled=true
 ```
 
-## Contributing
-
-See [CONTRIBUTING.md](../../CONTRIBUTING.md) for development guidelines.
-
-## License
-
-Apache License 2.0 - see [LICENSE](../../LICENSE)
-
-## Links
-
-- **GitHub**: https://github.com/rahulbsw/streamforge
-- **crates.io**: https://crates.io/crates/streamforge
-- **Documentation**: http://github.rahuljain.info/streamforge/
-- **Issues**: https://github.com/rahulbsw/streamforge/issues
+The release workflow also verifies matching component versions, builds every
+image before publication, loads the published operator image into kind, and
+checks rollout and cleanup.

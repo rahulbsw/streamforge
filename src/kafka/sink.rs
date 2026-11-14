@@ -122,7 +122,7 @@ impl KafkaSink {
         }
 
         // Apply security configuration
-        config.apply_security(&mut producer_config);
+        config.try_apply_target_security(&mut producer_config)?;
 
         // Apply user-provided producer properties
         for (key, value) in &config.producer_properties {

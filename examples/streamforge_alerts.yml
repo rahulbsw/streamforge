@@ -1,191 +1,70 @@
-# Streamforge Alerting Rules for Prometheus
+# StreamForge recording and alerting rules for Prometheus.
 #
-# Add to prometheus.yml:
-#   rule_files:
-#     - "streamforge_alerts.yml"
-#
-# These rules define common operational alerts for Streamforge
+# Add this file under `rule_files` in prometheus.yml when the Prometheus
+# Operator and the Helm `PrometheusRule` integration are not used.
 
 groups:
-  - name: streamforge_critical
+  - name: streamforge.recording
     interval: 30s
     rules:
-      # Service is down
-      - alert: StreamforgeDown
-        expr: up{job="streamforge"} == 0
+      - record: streamforge:delivery_rate:5m
+        expr: sum by (destination) (rate(streamforge_messages_delivered_total[5m]))
+      - record: streamforge:processing_error_rate:5m
+        expr: sum by (type) (rate(streamforge_processing_errors_total[5m]))
+      - record: streamforge:consumer_lag:max
+        expr: max by (topic, partition) (streamforge_consumer_lag)
+      - record: streamforge:processing_latency_seconds:p99_5m
+        expr: histogram_quantile(0.99, sum by (destination, le) (rate(streamforge_processing_duration_seconds_bucket[5m])))
+
+  - name: streamforge.alerts
+    interval: 30s
+    rules:
+      - alert: StreamForgeDown
+        expr: up{job=~".*streamforge.*"} == 0
         for: 1m
         labels:
           severity: critical
           service: streamforge
         annotations:
-          summary: "Streamforge service is down"
-          description: "Streamforge has been down for more than 1 minute. Check service logs and restart if necessary."
-          dashboard: "https://grafana/d/streamforge"
+          summary: StreamForge metrics target is down
+          description: Prometheus has been unable to scrape a StreamForge target for one minute.
 
-      # Critical consumer lag
-      - alert: StreamforgeCriticalLag
-        expr: streamforge_consumer_lag > 100000
-        for: 5m
-        labels:
-          severity: critical
-          service: streamforge
-        annotations:
-          summary: "Critical consumer lag on {{ $labels.topic }}/{{ $labels.partition }}"
-          description: "Consumer lag is {{ $value }} messages on partition {{ $labels.partition }}. Immediate action required."
-          runbook: "https://docs/runbooks/streamforge-lag"
-
-      # Very high error rate (>100 errors/sec)
-      - alert: StreamforgeHighErrorRate
-        expr: rate(streamforge_processing_errors_total[5m]) > 100
+      - alert: StreamForgeNotReady
+        expr: streamforge_ready == 0
         for: 2m
         labels:
           severity: critical
           service: streamforge
         annotations:
-          summary: "Critical error rate in Streamforge"
-          description: "Error rate is {{ $value | humanize }} errors/sec ({{ $labels.type }})"
-          dashboard: "https://grafana/d/streamforge/errors"
+          summary: StreamForge pipeline is not ready
+          description: StreamForge cannot currently use all required runtime dependencies.
 
-  - name: streamforge_warnings
-    interval: 30s
-    rules:
-      # Consumer lag increasing
-      - alert: StreamforgeLagIncreasing
-        expr: delta(streamforge_consumer_lag[10m]) > 50000
+      - alert: StreamForgeCriticalLag
+        expr: streamforge:consumer_lag:max > 100000
+        for: 5m
+        labels:
+          severity: critical
+          service: streamforge
+        annotations:
+          summary: StreamForge consumer lag is critical
+          description: Consumer lag for {{ $labels.topic }}/{{ $labels.partition }} is {{ $value }}.
+
+      - alert: StreamForgeHighErrorRate
+        expr: streamforge:processing_error_rate:5m > 10
         for: 5m
         labels:
           severity: warning
           service: streamforge
         annotations:
-          summary: "Consumer lag increasing on {{ $labels.topic }}/{{ $labels.partition }}"
-          description: "Lag increased by {{ $value }} messages in 10 minutes. May need to scale up."
-          runbook: "https://docs/runbooks/streamforge-lag"
+          summary: StreamForge processing error rate is elevated
+          description: Processing errors are above 10 per second for error category {{ $labels.type }}.
 
-      # Elevated error rate (>10 errors/sec)
-      - alert: StreamforgeElevatedErrorRate
-        expr: rate(streamforge_processing_errors_total[5m]) > 10
+      - alert: StreamForgeHighLatency
+        expr: streamforge:processing_latency_seconds:p99_5m > 1
         for: 5m
         labels:
           severity: warning
           service: streamforge
         annotations:
-          summary: "Elevated error rate in Streamforge"
-          description: "Error rate is {{ $value | humanize }} errors/sec ({{ $labels.type }})"
-
-      # High P99 latency
-      - alert: StreamforgeHighLatency
-        expr: |
-          histogram_quantile(0.99,
-            rate(streamforge_processing_duration_seconds_bucket[5m])
-          ) > 1.0
-        for: 5m
-        labels:
-          severity: warning
-          service: streamforge
-        annotations:
-          summary: "High P99 latency on {{ $labels.destination }}"
-          description: "P99 processing latency is {{ $value | humanize }}s (>1s threshold)"
-          dashboard: "https://grafana/d/streamforge/latency"
-
-      # Low filter pass rate (<10%)
-      - alert: StreamforgeLowFilterPassRate
-        expr: |
-          (
-            rate(streamforge_filter_evaluations_total{result="pass"}[5m]) /
-            rate(streamforge_filter_evaluations_total[5m])
-          ) < 0.1
-        for: 10m
-        labels:
-          severity: warning
-          service: streamforge
-        annotations:
-          summary: "Low filter pass rate on {{ $labels.destination }}"
-          description: "Only {{ $value | humanizePercentage }} of messages passing filter. Check filter configuration."
-
-      # Messages not being consumed
-      - alert: StreamforgeNoConsumption
-        expr: rate(streamforge_messages_consumed_total[5m]) == 0
-        for: 5m
-        labels:
-          severity: warning
-          service: streamforge
-        annotations:
-          summary: "Streamforge not consuming messages"
-          description: "No messages have been consumed in the last 5 minutes. Check Kafka connectivity."
-
-      # Messages not being produced
-      - alert: StreamforgeNoProduction
-        expr: rate(streamforge_messages_produced_total[5m]) == 0
-        for: 5m
-        labels:
-          severity: warning
-          service: streamforge
-        annotations:
-          summary: "Streamforge not producing messages"
-          description: "No messages have been produced to {{ $labels.destination }} in 5 minutes. Check filters and target Kafka."
-
-  - name: streamforge_performance
-    interval: 60s
-    rules:
-      # Processing rate dropped significantly
-      - alert: StreamforgeThroughputDrop
-        expr: |
-          (
-            rate(streamforge_messages_consumed_total[5m]) /
-            rate(streamforge_messages_consumed_total[5m] offset 1h)
-          ) < 0.5
-        for: 10m
-        labels:
-          severity: warning
-          service: streamforge
-        annotations:
-          summary: "Streamforge throughput dropped"
-          description: "Message consumption rate dropped by >50% compared to 1 hour ago"
-
-      # High message backlog (messages in flight)
-      - alert: StreamforgeHighBacklog
-        expr: streamforge_messages_in_flight > 10000
-        for: 5m
-        labels:
-          severity: warning
-          service: streamforge
-        annotations:
-          summary: "High message backlog"
-          description: "{{ $value }} messages currently in flight. May indicate slow processing."
-
-      # Transform errors increasing
-      - alert: StreamforgeTransformErrors
-        expr: rate(streamforge_transform_errors_total[5m]) > 1
-        for: 5m
-        labels:
-          severity: warning
-          service: streamforge
-        annotations:
-          summary: "Transform errors on {{ $labels.destination }}"
-          description: "{{ $value | humanize }} transform errors/sec ({{ $labels.transform_type }})"
-
-  - name: streamforge_info
-    interval: 300s
-    rules:
-      # Service restarted
-      - alert: StreamforgeRestarted
-        expr: resets(streamforge_uptime_seconds[5m]) > 0
-        labels:
-          severity: info
-          service: streamforge
-        annotations:
-          summary: "Streamforge service restarted"
-          description: "Streamforge was restarted in the last 5 minutes. Uptime reset detected."
-
-      # Lag resolved
-      - alert: StreamforgeLagResolved
-        expr: |
-          streamforge_consumer_lag < 1000
-          and
-          streamforge_consumer_lag offset 10m > 50000
-        labels:
-          severity: info
-          service: streamforge
-        annotations:
-          summary: "Consumer lag resolved on {{ $labels.topic }}/{{ $labels.partition }}"
-          description: "Lag is now {{ $value }} messages (was >50k 10 minutes ago)"
+          summary: StreamForge p99 processing latency is high
+          description: P99 processing latency for {{ $labels.destination }} is above one second.

@@ -1,0 +1,13 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.grafanaDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "streamforge-operator.fullname" . }}-grafana-dashboard
+  namespace: {{ .Values.monitoring.grafanaDashboard.namespace }}
+  labels:
+    {{- include "streamforge-operator.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  streamforge.json: |-
+{{ .Files.Get "dashboards/streamforge.json" | indent 4 }}
+{{- end }}

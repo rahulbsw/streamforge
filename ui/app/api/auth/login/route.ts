@@ -1,12 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticate, createToken } from '@/lib/auth';
+import { authenticate, AuthConfigurationError, createToken } from '@/lib/auth';
+import { ApiError, readJsonBody } from '@/lib/api';
 import { cookies } from 'next/headers';
+import { tryStartLoginAttempt } from '@/lib/login-rate-limit';
 
 export async function POST(request: NextRequest) {
   try {
-    const { username, password } = await request.json();
+    const { username, password } = await readJsonBody<{
+      username?: unknown;
+      password?: unknown;
+    }>(request, 8 * 1024);
 
-    const user = await authenticate(username, password);
+    if (typeof username !== 'string' || typeof password !== 'string') {
+      throw new ApiError('Username and password are required', 400);
+    }
+
+    const attempt = tryStartLoginAttempt(username);
+    if (!attempt.allowed) {
+      return NextResponse.json(
+        { error: 'Too many login attempts. Try again later.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(attempt.retryAfterSeconds) },
+        },
+      );
+    }
+
+    let user;
+    try {
+      user = await authenticate(username, password);
+    } catch (error) {
+      attempt.finish('neutral');
+      throw error;
+    }
+    attempt.finish(user ? 'success' : 'failed');
 
     if (!user) {
       return NextResponse.json(
@@ -27,9 +54,18 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ user });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    if (error instanceof AuthConfigurationError) {
+      return NextResponse.json(
+        { error: 'Authentication is not configured for this deployment' },
+        { status: 503 },
+      );
+    }
+    if (error instanceof ApiError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
-      { error: error.message || 'Login failed' },
+      { error: error instanceof Error ? error.message || 'Login failed' : 'Login failed' },
       { status: 500 }
     );
   }

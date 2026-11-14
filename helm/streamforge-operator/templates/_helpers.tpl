@@ -6,6 +6,24 @@ Expand the name of the chart.
 {{- end }}
 
 {{/*
+Resolve the Secret containing the UI JWT signing key.
+*/}}
+{{- define "streamforge-operator.uiSecretName" -}}
+{{- if .Values.ui.auth.existingSecret -}}
+{{- .Values.ui.auth.existingSecret -}}
+{{- else -}}
+{{- printf "%s-ui-secret" (include "streamforge-operator.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Use the explicitly configured image tag, otherwise the application version.
+*/}}
+{{- define "streamforge-operator.imageTag" -}}
+{{- default (index . 1) (index . 0) -}}
+{{- end }}
+
+{{/*
 Create a default fully qualified app name.
 */}}
 {{- define "streamforge-operator.fullname" -}}

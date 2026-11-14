@@ -11,7 +11,6 @@ spec:
     brokers: "kafka-secure.kafka.svc.cluster.local:9093"
     topic: "secure-input-topic"
     offset: "latest"
-    groupId: "secure-pipeline-group"
     security:
       protocol: "SASL_SSL"
       ssl:
@@ -52,7 +51,6 @@ spec:
   threads: 4
   appid: "secure-sasl-pipeline"
 
----
 # Example: Create the required secrets
 #
 # kubectl create secret generic kafka-ca-cert \
@@ -60,6 +58,6 @@ spec:
 #   -n streamforge-system
 #
 # kubectl create secret generic kafka-sasl-credentials \
-#   --from-literal=username=myuser \
-#   --from-literal=password=mypassword \
+#   --from-file=username=/secure/path/username \
+#   --from-file=password=/secure/path/password \
 #   -n streamforge-system

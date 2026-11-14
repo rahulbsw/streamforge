@@ -61,6 +61,11 @@ pub struct MirrorMakerConfig {
     #[serde(default)]
     pub security: Option<SecurityConfig>,
 
+    /// Target Kafka security configuration. When omitted, `security` remains
+    /// the backward-compatible source and target setting.
+    #[serde(default)]
+    pub target_security: Option<SecurityConfig>,
+
     /// Commit strategy configuration
     #[serde(default)]
     pub commit_strategy: CommitStrategyConfig,
@@ -213,6 +218,10 @@ pub struct SslConfig {
     /// Password for the private key file
     pub key_password: Option<String>,
 
+    /// Path to a file containing the private-key password.
+    #[serde(default)]
+    pub key_password_file: Option<String>,
+
     /// Endpoint identification algorithm (default: https)
     pub endpoint_identification_algorithm: Option<String>,
 }
@@ -227,6 +236,12 @@ pub struct SaslConfig {
 
     /// Password (for PLAIN and SCRAM mechanisms)
     pub password: Option<String>,
+
+    /// Paths to files containing SASL credentials.
+    #[serde(default)]
+    pub username_file: Option<String>,
+    #[serde(default)]
+    pub password_file: Option<String>,
 
     /// Kerberos service name (for GSSAPI)
     pub kerberos_service_name: Option<String>,
@@ -799,6 +814,7 @@ impl MirrorMakerConfig {
         }
 
         self.performance.validate()?;
+        self.observability.validate()?;
 
         if let Some(wasm) = &self.wasm {
             wasm.validate().map_err(config_error)?;
@@ -959,69 +975,141 @@ impl MirrorMakerConfig {
             .clone()
     }
 
-    /// Apply security configuration to a Kafka ClientConfig
+    /// Apply the backward-compatible source security configuration without
+    /// resolving file-backed credentials.
     pub fn apply_security(&self, client_config: &mut rdkafka::ClientConfig) {
         if let Some(security) = &self.security {
-            // Set security protocol
-            let protocol = match security.protocol {
-                SecurityProtocol::Plaintext => "plaintext",
-                SecurityProtocol::Ssl => "ssl",
-                SecurityProtocol::SaslPlaintext => "sasl_plaintext",
-                SecurityProtocol::SaslSsl => "sasl_ssl",
-            };
-            client_config.set("security.protocol", protocol);
-
-            // Apply SSL configuration
-            if let Some(ssl) = &security.ssl {
-                if let Some(ca_location) = &ssl.ca_location {
-                    client_config.set("ssl.ca.location", ca_location);
-                }
-                if let Some(cert_location) = &ssl.certificate_location {
-                    client_config.set("ssl.certificate.location", cert_location);
-                }
-                if let Some(key_location) = &ssl.key_location {
-                    client_config.set("ssl.key.location", key_location);
-                }
-                if let Some(key_password) = &ssl.key_password {
-                    client_config.set("ssl.key.password", key_password);
-                }
-                if let Some(endpoint_id) = &ssl.endpoint_identification_algorithm {
-                    client_config.set("ssl.endpoint.identification.algorithm", endpoint_id);
-                }
-            }
-
-            // Apply SASL configuration
-            if let Some(sasl) = &security.sasl {
-                let mechanism = match sasl.mechanism {
-                    SaslMechanism::Plain => "PLAIN",
-                    SaslMechanism::ScramSha256 => "SCRAM-SHA-256",
-                    SaslMechanism::ScramSha512 => "SCRAM-SHA-512",
-                    SaslMechanism::Gssapi => "GSSAPI",
-                    SaslMechanism::Oauthbearer => "OAUTHBEARER",
-                };
-                client_config.set("sasl.mechanism", mechanism);
-
-                if let Some(username) = &sasl.username {
-                    client_config.set("sasl.username", username);
-                }
-                if let Some(password) = &sasl.password {
-                    client_config.set("sasl.password", password);
-                }
-                if let Some(service_name) = &sasl.kerberos_service_name {
-                    client_config.set("sasl.kerberos.service.name", service_name);
-                }
-                if let Some(principal) = &sasl.kerberos_principal {
-                    client_config.set("sasl.kerberos.principal", principal);
-                }
-                if let Some(keytab) = &sasl.kerberos_keytab {
-                    client_config.set("sasl.kerberos.keytab", keytab);
-                }
-                if let Some(token) = &sasl.oauthbearer_token {
-                    client_config.set("sasl.oauthbearer.token", token);
-                }
-            }
+            apply_security_config(security, client_config, false)
+                .expect("inline security configuration does not perform I/O");
         }
     }
+
+    /// Apply source security, resolving file-backed credentials when present.
+    pub fn try_apply_source_security(
+        &self,
+        client_config: &mut rdkafka::ClientConfig,
+    ) -> crate::Result<()> {
+        if let Some(security) = &self.security {
+            apply_security_config(security, client_config, true)?;
+        }
+        Ok(())
+    }
+
+    /// Apply target security. Omitting `target_security` preserves the v1
+    /// behavior of sharing the source security configuration.
+    pub fn try_apply_target_security(
+        &self,
+        client_config: &mut rdkafka::ClientConfig,
+    ) -> crate::Result<()> {
+        if let Some(security) = self.target_security.as_ref().or(self.security.as_ref()) {
+            apply_security_config(security, client_config, true)?;
+        }
+        Ok(())
+    }
+}
+
+fn apply_security_config(
+    security: &SecurityConfig,
+    client_config: &mut rdkafka::ClientConfig,
+    resolve_files: bool,
+) -> crate::Result<()> {
+    // Set security protocol
+    let protocol = match security.protocol {
+        SecurityProtocol::Plaintext => "plaintext",
+        SecurityProtocol::Ssl => "ssl",
+        SecurityProtocol::SaslPlaintext => "sasl_plaintext",
+        SecurityProtocol::SaslSsl => "sasl_ssl",
+    };
+    client_config.set("security.protocol", protocol);
+
+    // Apply SSL configuration
+    if let Some(ssl) = &security.ssl {
+        if let Some(ca_location) = &ssl.ca_location {
+            client_config.set("ssl.ca.location", ca_location);
+        }
+        if let Some(cert_location) = &ssl.certificate_location {
+            client_config.set("ssl.certificate.location", cert_location);
+        }
+        if let Some(key_location) = &ssl.key_location {
+            client_config.set("ssl.key.location", key_location);
+        }
+        if let Some(key_password) = &ssl.key_password {
+            client_config.set("ssl.key.password", key_password);
+        } else if resolve_files {
+            if let Some(path) = &ssl.key_password_file {
+                client_config.set(
+                    "ssl.key.password",
+                    read_credential_file(path, "ssl.key_password_file")?,
+                );
+            }
+        }
+        if let Some(endpoint_id) = &ssl.endpoint_identification_algorithm {
+            client_config.set("ssl.endpoint.identification.algorithm", endpoint_id);
+        }
+    }
+
+    // Apply SASL configuration
+    if let Some(sasl) = &security.sasl {
+        let mechanism = match sasl.mechanism {
+            SaslMechanism::Plain => "PLAIN",
+            SaslMechanism::ScramSha256 => "SCRAM-SHA-256",
+            SaslMechanism::ScramSha512 => "SCRAM-SHA-512",
+            SaslMechanism::Gssapi => "GSSAPI",
+            SaslMechanism::Oauthbearer => "OAUTHBEARER",
+        };
+        client_config.set("sasl.mechanism", mechanism);
+
+        if let Some(username) = &sasl.username {
+            client_config.set("sasl.username", username);
+        } else if resolve_files {
+            if let Some(path) = &sasl.username_file {
+                client_config.set(
+                    "sasl.username",
+                    read_credential_file(path, "sasl.username_file")?,
+                );
+            }
+        }
+        if let Some(password) = &sasl.password {
+            client_config.set("sasl.password", password);
+        } else if resolve_files {
+            if let Some(path) = &sasl.password_file {
+                client_config.set(
+                    "sasl.password",
+                    read_credential_file(path, "sasl.password_file")?,
+                );
+            }
+        }
+        if let Some(service_name) = &sasl.kerberos_service_name {
+            client_config.set("sasl.kerberos.service.name", service_name);
+        }
+        if let Some(principal) = &sasl.kerberos_principal {
+            client_config.set("sasl.kerberos.principal", principal);
+        }
+        if let Some(keytab) = &sasl.kerberos_keytab {
+            client_config.set("sasl.kerberos.keytab", keytab);
+        }
+        if let Some(token) = &sasl.oauthbearer_token {
+            client_config.set("sasl.oauthbearer.token", token);
+        }
+    }
+    Ok(())
+}
+
+fn read_credential_file(path: &str, field: &str) -> crate::Result<String> {
+    let value = std::fs::read_to_string(path).map_err(|error| {
+        crate::error::MirrorMakerError::ConfigWithField {
+            message: format!("cannot read credential file: {error}"),
+            field: field.to_string(),
+        }
+    })?;
+    let value = value.trim_end_matches(['\r', '\n']);
+    if value.is_empty() {
+        return Err(crate::error::MirrorMakerError::ConfigWithField {
+            message: "credential file must not be empty".to_string(),
+            field: field.to_string(),
+        });
+    }
+    Ok(value.to_string())
 }
 
 impl PerformanceConfig {
@@ -1238,6 +1326,41 @@ impl Default for ObservabilityConfig {
     }
 }
 
+impl ObservabilityConfig {
+    fn validate(&self) -> crate::Result<()> {
+        if self.metrics_enabled && self.metrics_port == 0 {
+            return Err(config_error(
+                "observability.metrics_port must be greater than zero when metrics are enabled",
+            ));
+        }
+
+        if self.lag_monitoring_enabled && self.lag_monitoring_interval_secs == 0 {
+            return Err(config_error(
+                "observability.lag_monitoring_interval_secs must be greater than zero when lag monitoring is enabled",
+            ));
+        }
+
+        let path = self.metrics_path.as_str();
+        if !path.starts_with('/')
+            || path.len() == 1
+            || path.chars().any(char::is_whitespace)
+            || path.contains(['?', '#', '{', '}'])
+        {
+            return Err(config_error(
+                "observability.metrics_path must be a static absolute HTTP path",
+            ));
+        }
+
+        if matches!(path, "/health" | "/ready") {
+            return Err(config_error(
+                "observability.metrics_path cannot replace /health or /ready",
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 fn default_metrics_enabled() -> bool {
     true
 }
@@ -1265,12 +1388,123 @@ fn default_lag_interval() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn minimal_config_yaml(extra: &str) -> String {
         format!(
             "appid: test\nbootstrap: localhost:9092\ninput: input-topic\n{}",
             extra
         )
+    }
+
+    fn temporary_credential_file(label: &str, contents: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "streamforge-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn file_backed_source_and_target_credentials_are_resolved_separately() {
+        let source_user = temporary_credential_file("source-user", "source-user\n");
+        let source_password = temporary_credential_file("source-password", "source-password\r\n");
+        let target_user = temporary_credential_file("target-user", "target-user\n");
+        let target_password = temporary_credential_file("target-password", "target-password\n");
+        let yaml = minimal_config_yaml(&format!(
+            r#"security:
+  protocol: SASL_PLAINTEXT
+  sasl:
+    mechanism: SCRAM-SHA-512
+    username:
+    password:
+    username_file: {}
+    password_file: {}
+    kerberos_service_name:
+    kerberos_principal:
+    kerberos_keytab:
+    oauthbearer_token:
+target_security:
+  protocol: SASL_PLAINTEXT
+  sasl:
+    mechanism: SCRAM-SHA-512
+    username:
+    password:
+    username_file: {}
+    password_file: {}
+    kerberos_service_name:
+    kerberos_principal:
+    kerberos_keytab:
+    oauthbearer_token:
+"#,
+            source_user.display(),
+            source_password.display(),
+            target_user.display(),
+            target_password.display()
+        ));
+        let config: MirrorMakerConfig = serde_yaml::from_str(&yaml).unwrap();
+        let mut source = rdkafka::ClientConfig::new();
+        let mut target = rdkafka::ClientConfig::new();
+
+        config.try_apply_source_security(&mut source).unwrap();
+        config.try_apply_target_security(&mut target).unwrap();
+
+        assert_eq!(source.get("sasl.username"), Some("source-user"));
+        assert_eq!(source.get("sasl.password"), Some("source-password"));
+        assert_eq!(target.get("sasl.username"), Some("target-user"));
+        assert_eq!(target.get("sasl.password"), Some("target-password"));
+
+        for path in [source_user, source_password, target_user, target_password] {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn credential_file_errors_are_field_specific_and_do_not_expose_values() {
+        let empty = temporary_credential_file("empty-password", "\n");
+        let yaml = minimal_config_yaml(&format!(
+            r#"security:
+  protocol: SASL_PLAINTEXT
+  sasl:
+    mechanism: PLAIN
+    username:
+    password:
+    username_file: /path/that/does/not/exist
+    password_file: {}
+    kerberos_service_name:
+    kerberos_principal:
+    kerberos_keytab:
+    oauthbearer_token:
+"#,
+            empty.display()
+        ));
+        let mut config: MirrorMakerConfig = serde_yaml::from_str(&yaml).unwrap();
+        let error = config
+            .try_apply_source_security(&mut rdkafka::ClientConfig::new())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("sasl.username_file"));
+        assert!(!error.contains("password"));
+
+        config
+            .security
+            .as_mut()
+            .unwrap()
+            .sasl
+            .as_mut()
+            .unwrap()
+            .username_file = None;
+        let error = config
+            .try_apply_source_security(&mut rdkafka::ClientConfig::new())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("sasl.password_file"));
+        std::fs::remove_file(empty).unwrap();
     }
 
     #[test]
@@ -1314,6 +1548,33 @@ mod tests {
             loopback_config.observability.metrics_bind_address,
             IpAddr::V4(Ipv4Addr::LOCALHOST)
         );
+    }
+
+    #[test]
+    fn test_observability_metrics_path_is_validated() {
+        let valid: MirrorMakerConfig = serde_yaml::from_str(&minimal_config_yaml(
+            "observability:\n  metrics_path: /prom\n",
+        ))
+        .unwrap();
+        valid.validate().unwrap();
+
+        for path in ["metrics", "/", "/health", "/ready", "/metrics?format=text"] {
+            let yaml = minimal_config_yaml(&format!("observability:\n  metrics_path: {path:?}\n"));
+            let config: MirrorMakerConfig = serde_yaml::from_str(&yaml).unwrap();
+            assert!(config.validate().is_err(), "{path} must be rejected");
+        }
+    }
+
+    #[test]
+    fn test_observability_runtime_values_are_validated() {
+        for settings in [
+            "metrics_enabled: true\n  metrics_port: 0",
+            "lag_monitoring_enabled: true\n  lag_monitoring_interval_secs: 0",
+        ] {
+            let yaml = minimal_config_yaml(&format!("observability:\n  {settings}\n"));
+            let config: MirrorMakerConfig = serde_yaml::from_str(&yaml).unwrap();
+            assert!(config.validate().is_err(), "{settings} must be rejected");
+        }
     }
 
     #[test]

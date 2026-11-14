@@ -1,230 +1,266 @@
-//! Config validation CLI
-//!
-//! Usage: streamforge-validate <config.yaml>
-//!
-//! Validates a StreamForge configuration file by parsing all filter and
-//! transform expressions without executing them. Reports syntax errors,
-//! invalid paths, and deprecation warnings.
+//! Validate engine configuration or a Kubernetes StreamforgePipeline resource.
 
+use clap::Parser;
+use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
 use streamforge::config::MirrorMakerConfig;
 use streamforge::filter_parser::{parse_filter, parse_key_transform, parse_transform_with_cache};
+use streamforge::kubernetes::config_from_pipeline_value;
 use streamforge::WasmRegistry;
-use structopt::StructOpt;
 
-#[derive(StructOpt, Debug)]
-#[structopt(
+#[derive(Parser, Debug)]
+#[command(
     name = "streamforge-validate",
-    about = "Validate StreamForge configuration files"
+    about = "Validate StreamForge configuration and StreamforgePipeline files"
 )]
 struct Opt {
-    /// Config file to validate
-    #[structopt(parse(from_os_str))]
+    /// File to validate
     config: PathBuf,
 
+    /// Input document type: config or pipeline-crd
+    #[arg(long, default_value = "config", value_parser = ["config", "pipeline-crd"])]
+    input_format: String,
+
+    /// Output format: text or json
+    #[arg(long, default_value = "text", value_parser = ["text", "json"])]
+    output: String,
+
     /// Show detailed validation output
-    #[structopt(short, long)]
+    #[arg(short, long)]
     verbose: bool,
 
-    /// Fail on warnings (exit with non-zero)
-    #[structopt(short = "W", long)]
+    /// Fail on warnings
+    #[arg(short = 'W', long)]
     fail_on_warnings: bool,
 }
 
-fn main() {
-    let opt = Opt::from_args();
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Diagnostic {
+    severity: &'static str,
+    code: &'static str,
+    field: String,
+    message: String,
+}
 
-    // Initialize tracing for error messages
-    let log_level = if opt.verbose { "debug" } else { "warn" };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(log_level.parse().unwrap()),
-        )
-        .init();
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ValidationReport {
+    valid: bool,
+    input_format: String,
+    expressions_validated: usize,
+    wasm_modules_verified: usize,
+    diagnostics: Vec<Diagnostic>,
+}
 
-    // Read config file
-    let config_content = match fs::read_to_string(&opt.config) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("❌ Error: Failed to read config file: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    // Parse YAML
-    let config: MirrorMakerConfig = match serde_yaml::from_str(&config_content) {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            eprintln!("❌ Error: Invalid YAML syntax:");
-            eprintln!("{}", e);
-            std::process::exit(1);
-        }
-    };
-
-    if let Err(e) = config.validate() {
-        eprintln!("❌ Error: Invalid configuration:");
-        eprintln!("{}", e);
-        std::process::exit(1);
-    }
-
-    println!("✅ YAML syntax valid");
-    println!("📋 Validating StreamForge configuration...\n");
-
-    let mut errors = Vec::new();
-    let mut warnings = Vec::new();
-    let mut expr_count = 0;
-
-    if let Some(wasm) = &config.wasm {
-        match WasmRegistry::load(wasm) {
-            Ok(registry) => {
-                let module_count = registry.module_names().count();
-                println!("🧩 WebAssembly modules verified: {module_count}");
-            }
-            Err(error) => errors.push(format!("WebAssembly registry: {error}")),
+impl ValidationReport {
+    fn new(input_format: &str) -> Self {
+        Self {
+            valid: true,
+            input_format: input_format.to_string(),
+            expressions_validated: 0,
+            wasm_modules_verified: 0,
+            diagnostics: Vec::new(),
         }
     }
 
-    // Validate single-destination mode
-    if config.routing.is_none() {
-        if let Some(ref filter_expr) = config
-            .routing
-            .as_ref()
-            .and_then(|r| r.destinations.first().and_then(|d| d.filter.as_ref()))
-        {
-            expr_count += 1;
-            if opt.verbose {
-                println!("  Validating filter: {}", filter_expr);
-            }
-            if let Err(e) = parse_filter(filter_expr) {
-                errors.push(format!("Filter expression: {}", e));
-            }
-        }
-
-        if let Some(ref transform_expr) = config.transform {
-            expr_count += 1;
-            if opt.verbose {
-                println!("  Validating transform: {}", transform_expr);
-            }
-            if let Err(e) = parse_transform_with_cache(transform_expr, None) {
-                errors.push(format!("Transform expression: {}", e));
-            }
-        }
+    fn error(&mut self, code: &'static str, field: impl Into<String>, message: impl Into<String>) {
+        self.valid = false;
+        self.diagnostics.push(Diagnostic {
+            severity: "error",
+            code,
+            field: field.into(),
+            message: message.into(),
+        });
     }
 
-    // Validate multi-destination routing
-    if let Some(ref routing) = config.routing {
-        println!("📍 Routing mode: {}", routing.routing_type);
-        println!("📦 Destinations: {}", routing.destinations.len());
-
-        for (idx, dest) in routing.destinations.iter().enumerate() {
-            let dest_name = format!("Destination #{} ({})", idx + 1, dest.output);
-
-            if opt.verbose {
-                println!("\n  {} {}", if idx == 0 { "┌─" } else { "├─" }, dest_name);
-            }
-
-            // Validate filter
-            if let Some(ref filter_expr) = dest.filter {
-                expr_count += 1;
-                if opt.verbose {
-                    println!("  │  Filter: {}", filter_expr);
-                }
-                if let Err(e) = parse_filter(filter_expr) {
-                    errors.push(format!("{} - Filter: {}", dest_name, e));
-                }
-            }
-
-            // Validate transform
-            if let Some(ref transform_expr) = dest.transform {
-                expr_count += 1;
-                if opt.verbose {
-                    println!("  │  Transform: {}", transform_expr);
-                }
-                if let Err(e) = parse_transform_with_cache(transform_expr, None) {
-                    errors.push(format!("{} - Transform: {}", dest_name, e));
-                }
-            }
-
-            // Validate key transform
-            if let Some(ref key_expr) = dest.key_transform {
-                expr_count += 1;
-                if opt.verbose {
-                    println!("  │  Key transform: {}", key_expr);
-                }
-                if let Err(e) = parse_key_transform(key_expr) {
-                    errors.push(format!("{} - Key transform: {}", dest_name, e));
-                }
-            }
-
-            // Check for deprecated KEY_SUFFIX and KEY_CONTAINS
-            if let Some(ref filter_expr) = dest.filter {
-                if filter_expr.contains("KEY_SUFFIX:") {
-                    warnings.push(format!(
-                        "{} - KEY_SUFFIX is deprecated. Use KEY_MATCHES with regex instead. \
-                        Example: KEY_SUFFIX:-prod → KEY_MATCHES:.*-prod$",
-                        dest_name
-                    ));
-                }
-                if filter_expr.contains("KEY_CONTAINS:") {
-                    warnings.push(format!(
-                        "{} - KEY_CONTAINS is deprecated. Use KEY_MATCHES with regex instead. \
-                        Example: KEY_CONTAINS:test → KEY_MATCHES:.*test.*",
-                        dest_name
-                    ));
-                }
-            }
-        }
-
-        if opt.verbose && !routing.destinations.is_empty() {
-            println!("  └─ End of destinations\n");
-        }
+    fn warning(
+        &mut self,
+        code: &'static str,
+        field: impl Into<String>,
+        message: impl Into<String>,
+    ) {
+        self.diagnostics.push(Diagnostic {
+            severity: "warning",
+            code,
+            field: field.into(),
+            message: message.into(),
+        });
     }
+}
 
-    // Summary
-    println!("\n═══════════════════════════════════════════════════");
-    println!("📊 Validation Summary");
-    println!("═══════════════════════════════════════════════════");
-    println!("   Expressions validated: {}", expr_count);
-    println!("   Errors: {}", errors.len());
-    println!("   Warnings: {}", warnings.len());
-    println!("═══════════════════════════════════════════════════\n");
-
-    // Report errors
-    if !errors.is_empty() {
-        println!("❌ Errors found:\n");
-        for (i, err) in errors.iter().enumerate() {
-            println!("{}. {}", i + 1, err);
-        }
-        println!();
-    }
-
-    // Report warnings
-    if !warnings.is_empty() {
-        println!("⚠️  Warnings:\n");
-        for (i, warn) in warnings.iter().enumerate() {
-            println!("{}. {}", i + 1, warn);
-        }
-        println!();
-    }
-
-    // Exit status
-    let exit_code = if !errors.is_empty() {
-        println!("❌ Validation FAILED - Fix errors before deploying");
-        1
-    } else if !warnings.is_empty() {
-        if opt.fail_on_warnings {
-            println!("⚠️  Validation FAILED - Warnings present and --fail-on-warnings set");
-            1
-        } else {
-            println!("⚠️  Validation PASSED with warnings - Review warnings before deploying");
-            0
+fn parse_config(
+    content: &str,
+    input_format: &str,
+    report: &mut ValidationReport,
+) -> Option<MirrorMakerConfig> {
+    if input_format == "pipeline-crd" {
+        let value: serde_json::Value = match serde_yaml::from_str(content) {
+            Ok(value) => value,
+            Err(error) => {
+                report.error("invalid_yaml", "$", error.to_string());
+                return None;
+            }
+        };
+        match config_from_pipeline_value(value) {
+            Ok(config) => Some(config),
+            Err(error) => {
+                report.error("invalid_pipeline", error.field, error.message);
+                None
+            }
         }
     } else {
-        println!("✅ Validation PASSED - Config is ready for deployment");
-        0
-    };
+        match serde_yaml::from_str(content) {
+            Ok(config) => Some(config),
+            Err(error) => {
+                report.error("invalid_yaml", "$", error.to_string());
+                None
+            }
+        }
+    }
+}
 
-    std::process::exit(exit_code);
+fn validate_expression(
+    expression: &str,
+    field: String,
+    kind: &'static str,
+    report: &mut ValidationReport,
+) {
+    report.expressions_validated += 1;
+    let result = match kind {
+        "filter" => parse_filter(expression).map(|_| ()),
+        "transform" => parse_transform_with_cache(expression, None).map(|_| ()),
+        "key_transform" => parse_key_transform(expression).map(|_| ()),
+        _ => unreachable!("validation expression kind is internal"),
+    };
+    if let Err(error) = result {
+        report.error("invalid_dsl", field, error.to_string());
+    }
+}
+
+fn validate_config(
+    config: &MirrorMakerConfig,
+    load_wasm_artifacts: bool,
+    report: &mut ValidationReport,
+) {
+    if let Err(error) = config.validate() {
+        report.error("invalid_config", "spec", error.to_string());
+    }
+
+    if load_wasm_artifacts {
+        if let Some(wasm) = &config.wasm {
+            match WasmRegistry::load(wasm) {
+                Ok(registry) => {
+                    report.wasm_modules_verified = registry.module_names().count();
+                }
+                Err(error) => {
+                    report.error("invalid_wasm_artifact", "wasm.modules", error.to_string());
+                }
+            }
+        }
+    }
+
+    if let Some(expression) = &config.transform {
+        validate_expression(expression, "transform".to_string(), "transform", report);
+    }
+
+    if let Some(routing) = &config.routing {
+        for (index, destination) in routing.destinations.iter().enumerate() {
+            if let Some(expression) = &destination.filter {
+                validate_expression(
+                    expression,
+                    format!("routing.destinations[{index}].filter"),
+                    "filter",
+                    report,
+                );
+                if expression.contains("KEY_SUFFIX:") {
+                    report.warning(
+                        "deprecated_dsl",
+                        format!("routing.destinations[{index}].filter"),
+                        "KEY_SUFFIX is deprecated; use KEY_MATCHES with a suffix regex",
+                    );
+                }
+                if expression.contains("KEY_CONTAINS:") {
+                    report.warning(
+                        "deprecated_dsl",
+                        format!("routing.destinations[{index}].filter"),
+                        "KEY_CONTAINS is deprecated; use KEY_MATCHES",
+                    );
+                }
+            }
+            if let Some(expression) = &destination.transform {
+                validate_expression(
+                    expression,
+                    format!("routing.destinations[{index}].transform"),
+                    "transform",
+                    report,
+                );
+            }
+            if let Some(expression) = &destination.key_transform {
+                validate_expression(
+                    expression,
+                    format!("routing.destinations[{index}].keyTransform"),
+                    "key_transform",
+                    report,
+                );
+            }
+        }
+    }
+}
+
+fn print_text(report: &ValidationReport, verbose: bool) {
+    if verbose {
+        println!(
+            "Validated {} expression(s), verified {} WebAssembly module(s) from {} input",
+            report.expressions_validated, report.wasm_modules_verified, report.input_format
+        );
+    }
+    for diagnostic in &report.diagnostics {
+        println!(
+            "{} [{}] {}: {}",
+            diagnostic.severity.to_uppercase(),
+            diagnostic.code,
+            diagnostic.field,
+            diagnostic.message
+        );
+    }
+    if report.valid {
+        println!("Validation passed");
+    } else {
+        println!("Validation failed");
+    }
+}
+
+fn main() {
+    let opt = Opt::parse();
+    let mut report = ValidationReport::new(&opt.input_format);
+
+    match fs::read_to_string(&opt.config) {
+        Ok(content) => {
+            if let Some(config) = parse_config(&content, &opt.input_format, &mut report) {
+                validate_config(&config, opt.input_format == "config", &mut report);
+            }
+        }
+        Err(error) => report.error("read_failed", "$", error.to_string()),
+    }
+
+    let has_warnings = report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == "warning");
+    if opt.output == "json" {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).expect("validation report is serializable")
+        );
+    } else {
+        print_text(&report, opt.verbose);
+    }
+
+    std::process::exit(if !report.valid || (opt.fail_on_warnings && has_warnings) {
+        1
+    } else {
+        0
+    });
 }

@@ -186,8 +186,8 @@ mod comprehensive_tests {
         }
     }
 
-    // TODO: Nested boolean logic support
-    // These tests are skipped until nested AND/OR parser support is added
+    // Known compatibility boundary: the legacy parser does not support nested
+    // AND/OR. These ignored tests preserve the intended future behavior.
     #[test]
     #[ignore]
     fn test_nested_and_or() {
@@ -717,7 +717,8 @@ mod comprehensive_tests {
     // TRANSFORM ERROR TESTS
     // ============================================================================
 
-    // TODO: Empty string handling
+    // Known compatibility boundary: empty legacy transforms are not rejected
+    // by this parser entry point.
     #[test]
     #[ignore]
     fn test_transform_error_empty() {

@@ -13,9 +13,9 @@ export async function GET() {
     }
 
     return NextResponse.json({ user });
-  } catch (error: any) {
+  } catch {
     return NextResponse.json(
-      { error: error.message || 'Failed to get user' },
+      { error: 'Failed to get user' },
       { status: 500 }
     );
   }

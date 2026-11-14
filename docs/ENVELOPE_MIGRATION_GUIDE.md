@@ -413,7 +413,6 @@ If you need to rollback:
 
 - See [ADVANCED_DSL_GUIDE.md](ADVANCED_DSL_GUIDE.md) for complete syntax reference
 - See [examples/config.envelope-simple.yaml](../examples/config.envelope-simple.yaml) for quick patterns
-- See [examples/config.envelope-features.yaml](../examples/config.envelope-features.yaml) for comprehensive examples
 - Check logs for parsing errors: `grep "Failed to parse" streamforge.log`
 
 ## Summary Checklist
