@@ -147,7 +147,7 @@ wait_for_broker() {
   local attempts="${STREAMFORGE_QUICKSTART_READY_ATTEMPTS:-30}"
   for ((attempt = 1; attempt <= attempts; attempt++)); do
     if "${RUNTIME}" exec "${BROKER_NAME}" \
-      rpk cluster health --brokers localhost:9092 >/dev/null 2>&1; then
+      rpk cluster health -X admin.hosts=localhost:9644 >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -231,7 +231,7 @@ up() {
   wait_for_broker
   "${RUNTIME}" exec "${BROKER_NAME}" \
     rpk topic create quickstart-input quickstart-output \
-    --brokers localhost:9092 >/dev/null
+    -X brokers=localhost:9092 >/dev/null
 
   local volume="${CONFIG_FILE}:/etc/streamforge/config.yaml:ro"
   if [[ "$(basename "${RUNTIME}")" == "podman" ]]; then
@@ -272,14 +272,14 @@ verify() {
   log "Publishing ${record_id}"
   printf '%s\n' "${payload}" |
     "${RUNTIME}" exec --interactive "${BROKER_NAME}" \
-      rpk topic produce quickstart-input --brokers localhost:9092 >/dev/null
+      rpk topic produce quickstart-input -X brokers=localhost:9092 >/dev/null
 
   local attempt output=""
   local attempts="${STREAMFORGE_QUICKSTART_VERIFY_ATTEMPTS:-10}"
   for ((attempt = 1; attempt <= attempts; attempt++)); do
     output="$("${RUNTIME}" exec "${BROKER_NAME}" \
       timeout 3s rpk topic consume quickstart-output \
-      --brokers localhost:9092 \
+      -X brokers=localhost:9092 \
       --offset -1 \
       --num 1 \
       --format '%v' 2>/dev/null || true)"

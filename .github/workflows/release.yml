@@ -127,7 +127,7 @@ jobs:
   publish-crate:
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     name: Publish crate
-    needs: [validate-release, release-smoke-tests, container-preflight]
+    needs: [validate-release, release-smoke-tests, build-release-binaries, container-preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -270,7 +270,7 @@ jobs:
 
   container-preflight:
     name: Preflight ${{ matrix.label }} image
-    needs: [validate-release, release-smoke-tests, build-release-binaries]
+    needs: [validate-release, release-smoke-tests]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
