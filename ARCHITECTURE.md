@@ -2,7 +2,8 @@
 
 StreamForge is a Rust-native Kafka-ingestion data-plane service for selective
 replication: consume records, evaluate routing rules, optionally transform
-message envelopes, and write to Kafka, Apache Fluss, or Apache Iceberg.
+message envelopes, and write to Kafka or Apache Fluss. Apache Iceberg is the
+next planned sink adapter.
 
 This document describes the current architecture. Product boundaries and future
 typed-envelope work are governed by `PROJECT_SPEC.md`.
@@ -21,8 +22,7 @@ selectable legacy batching or bounded source-partition worker lanes
     v
 MessageEnvelope (JSON value, optional key, headers, timestamp, source metadata)
     |
-    +--> destination filter --> optional transform --> SinkWriter --> Kafka / Fluss / Iceberg
-    +--> destination filter --> optional transform --> SinkWriter --> Kafka / Fluss / Iceberg
+    +--> destination filter --> optional transform --> SinkWriter --> Kafka / Apache Fluss
     |
     +--> metrics, retry, DLQ, and offset-commit handling
 ```
@@ -66,8 +66,9 @@ defaults to Kafka for backward compatibility. The sink configuration carries
 namespaced backend properties, and each factory validates and converts its
 own block. Sink implementations must preserve the `send` acknowledgment and
 `flush` barrier contract so the processing loop can safely coordinate source
-offset commits. Built-in Fluss and Iceberg adapters are delivered separately;
-Iceberg remains append-only while the Rust client lacks row-level writes.
+offset commits. The Fluss adapter uses the native Rust client for append and
+primary-key upsert. The Iceberg adapter is PR3 work and remains append-only
+while the Rust client lacks row-level writes.
 
 ### Consumer and processing loop
 
@@ -195,8 +196,9 @@ destination requires mutation.
 `src/sink_factory.rs` resolves the configured `sink.type` and creates a
 `SinkWriter`. Kafka is the default and is backed by `src/kafka/sink.rs`, which
 wraps a rust-rdkafka `FutureProducer`, resolves output topic templates, applies
-producer/security settings, serializes envelopes, and sends records. Fluss and
-Iceberg use native Rust client adapters in separate modules.
+producer/security settings, serializes envelopes, and sends records. The
+`src/fluss.rs` adapter resolves a pre-provisioned Fluss table and maps JSON rows
+to its schema; it selects append or upsert from primary-key metadata.
 
 Producer delivery is selectable:
 
@@ -376,6 +378,7 @@ src/
 ├── partition_pipeline.rs       bounded source-partition worker lanes
 ├── processor.rs                destination runtime and routing
 ├── sink_factory.rs             sink registry and destination writer construction
+├── fluss.rs                    native Fluss append/upsert adapter
 ├── filter_parser.rs            DSL construction and compiled evaluator
 ├── dsl/                        function-style parser and AST
 ├── filter/                     filters and transforms

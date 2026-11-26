@@ -11,6 +11,7 @@ pub mod envelope;
 pub mod error;
 pub mod filter;
 pub mod filter_parser;
+pub mod fluss;
 pub mod hash;
 pub mod jsonpath;
 pub mod kafka;

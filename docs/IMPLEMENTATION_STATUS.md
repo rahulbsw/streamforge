@@ -19,18 +19,28 @@ outstanding evidence by track.
 
 ## Destination sinks
 
-Implemented in the custom sink core:
+Implemented in the custom sink core and Fluss adapter:
 
 - a `SinkWriter` factory registry selected by `sink.type`;
 - backward-compatible Kafka selection when sink type is omitted;
 - namespaced sink properties projected through `StreamforgePipeline`, the
-  operator CRD, direct engine configuration, and the UI editor.
+  operator CRD, direct engine configuration, and the UI editor;
+- native Apache Fluss append for log tables and primary-key upsert for KV
+  tables, selected from pre-provisioned table metadata;
+- typed passthrough of the Fluss Rust client's settings under `sink.fluss`,
+  schema-based JSON scalar mapping, row/key validation, per-record write
+  acknowledgements, and a writer flush barrier;
+- SASL/PLAIN password loading from an explicitly configured mounted file, with
+  inline password values rejected.
 
-Apache Fluss and Apache Iceberg adapters are planned as the next two stacked
-pull requests under [proposal #59](https://github.com/rahulbsw/streamforge/issues/59).
-Their behavior is not yet part of the implementation status. The proposal
-limits Iceberg to append commits until the Rust client supports row-level
-updates and deletes.
+The Fluss adapter compiles on macOS arm64 with Rust 1.95 and the Xcode 26.0
+SDK. A Fluss cluster was not available for runtime acknowledgement, partition,
+or SASL checks. The locked `ordered-float` dependency requires Rust 1.90, so
+the adapter does not compile with the local Rust 1.89 toolchain. The initial
+contract requires pre-provisioned tables and partitions; unsupported JSON
+mappings fail with a column-specific error. Apache Iceberg remains PR3 work.
+The proposal limits Iceberg to append commits until the Rust client supports
+row-level updates and deletes.
 
 ## Installation and release pipeline
 

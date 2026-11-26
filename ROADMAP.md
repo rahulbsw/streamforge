@@ -33,6 +33,8 @@ this scope as three stacked pull requests:
    sink factory and namespaced sink configuration while keeping Kafka as the
    default.
 2. Add the native Rust Apache Fluss sink with append and primary-key upsert.
+   Implementation is on the stacked PR2 branch and compiles with Rust 1.95;
+   Fluss cluster runtime evidence remains pending.
 3. Add the native Rust Apache Iceberg sink with append commits and bounded
    buffering by event count and time.
 

@@ -79,6 +79,49 @@ The sink registry is an extension point. A sink implementation validates its
 own property block and rejects unsupported options. Kafka keeps its existing
 top-level broker, security, and producer settings.
 
+### Apache Fluss
+
+Fluss uses the official Rust client. Set `sink.type: fluss`; `output` names a
+pre-provisioned table, or `database.table`. The default database is `fluss`.
+StreamForge chooses append for a log table and primary-key upsert for a table
+with a primary key. Rows are JSON objects whose column names and scalar types
+must match the table schema. With `key_source: row`, primary-key columns come
+from the JSON value (the default). With `key_source: kafka_key`, a JSON object
+key supplies the table's primary-key columns; a scalar key supports a single
+primary-key column only. Non-key fields still come from the JSON value.
+
+All native Fluss client settings can be set under `sink.fluss`, including
+`writer_batch_size` and `writer_batch_timeout_ms`. The Fluss writer owns
+batching. StreamForge waits for each write acknowledgement, and sink flush
+drains the Fluss writer before manual source offsets can advance. The sink does
+not create tables or partitions. Partitioned writes require the configured
+row's partition values and the corresponding Fluss partition to exist.
+
+JSON mapping currently supports boolean, signed integer, floating point,
+string/char, bytes, and binary columns. Bytes and binary values use JSON arrays
+of integers from 0 through 255. Decimal, date/time, timestamp, array, map, and
+nested row values are rejected with a column-specific validation error until
+their JSON representation is defined.
+
+For SASL/PLAIN, supply the username in the namespaced settings and point
+`security_sasl_password_file` at a secret file already mounted in the engine
+container. Inline passwords are rejected. The Rust client currently supports
+SASL/PLAIN; protocol and mechanism options are validated by that client.
+
+```yaml
+routing:
+  routing_type: filter
+  destinations:
+    - output: analytics.orders
+      sink:
+        type: fluss
+        fluss:
+          bootstrap_servers: fluss:9123
+          writer_batch_size: 262144
+          writer_batch_timeout_ms: 100
+          key_source: row
+```
+
 ## V2 DSL in YAML
 
 StreamForge docs use V2 DSL only.
