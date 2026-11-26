@@ -37,6 +37,8 @@ routing:
   routing_type: "filter"
   destinations:
     - output: "analytics-orders"
+      sink:
+        type: kafka
       description: "US orders over the analytics threshold"
       filter: "and($region == 'us', $amount >= 100)"
       transform: "construct(order_id=$order_id, customer_id=$customer.id, amount=$amount)"
@@ -44,6 +46,38 @@ routing:
       headers:
         x-pipeline: "orders-analytics"
 ```
+
+## Sink Configuration
+
+Kafka remains the default sink for existing configurations. A destination may
+select another registered sink with `sink.type`; sink-specific properties are
+passed through in their own namespace. `iceberg` and `flush` are reserved for
+the Iceberg backend, while `fluss` is the Fluss backend configuration block.
+Credentials should be supplied through mounted secret files or the supported
+secret references, never inline in a checked-in pipeline file.
+
+```yaml
+routing:
+  routing_type: filter
+  destinations:
+    - output: orders_table
+      sink:
+        type: iceberg
+        iceberg:
+          catalog:
+            type: rest
+            uri: https://catalog.example
+          table: analytics.orders
+          properties:
+            warehouse: s3://warehouse
+        flush:
+          max_buffered_events: 1000
+          interval_ms: 5000
+```
+
+The sink registry is an extension point. A sink implementation validates its
+own property block and rejects unsupported options. Kafka keeps its existing
+top-level broker, security, and producer settings.
 
 ## V2 DSL in YAML
 

@@ -365,10 +365,13 @@ export default function NewPipeline() {
                   <article key={destination.id} className="rounded-xl border border-slate-200 p-5">
                     <div className="flex items-center justify-between"><h3 className="font-bold">Destination {index + 1}</h3>{form.destinations.length > 1 && <button className="sf-button-secondary !p-2 text-red-700" aria-label={`Remove destination ${index + 1}`} onClick={() => setForm({ ...form, destinations: form.destinations.filter((item) => item.id !== destination.id) })}><Trash2 className="h-4 w-4" /></button>}</div>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <label><span className="sf-label">Bootstrap servers</span><input className="sf-input" value={destination.brokers} onChange={(e) => updateDestination(destination.id, (item) => ({ ...item, brokers: e.target.value }))} /></label>
-                      <label><span className="sf-label">Topic</span><input className="sf-input" value={destination.topic} onChange={(e) => updateDestination(destination.id, (item) => ({ ...item, topic: e.target.value }))} /></label>
+                      <label><span className="sf-label">Sink</span><select className="sf-input" value={destination.sinkType} onChange={(e) => updateDestination(destination.id, (item) => ({ ...item, sinkType: e.target.value as typeof item.sinkType }))}><option value="kafka">Kafka</option><option value="fluss">Apache Fluss</option><option value="iceberg">Apache Iceberg</option></select></label>
+                      <label><span className="sf-label">Topic or table</span><input className="sf-input" value={destination.topic} onChange={(e) => updateDestination(destination.id, (item) => ({ ...item, topic: e.target.value }))} /></label>
+                      {destination.sinkType === 'kafka' && <label><span className="sf-label">Bootstrap servers</span><input className="sf-input" value={destination.brokers} onChange={(e) => updateDestination(destination.id, (item) => ({ ...item, brokers: e.target.value }))} />
+                      </label>}
                     </div>
-                    <SecurityFields value={destination.security} onChange={(security) => updateDestination(destination.id, (item) => ({ ...item, security }))} />
+                    <label className="mt-4 block"><span className="sf-label">Sink properties (JSON object)</span><textarea className="sf-input min-h-28 font-mono" value={destination.sinkProperties} onChange={(e) => updateDestination(destination.id, (item) => ({ ...item, sinkProperties: e.target.value }))} placeholder={destination.sinkType === 'iceberg' ? '{\n  "iceberg": { "catalog": { "type": "rest", "uri": "https://catalog.example" } },\n  "flush": { "max_buffered_events": 1000, "interval_ms": 5000 }\n}' : destination.sinkType === 'fluss' ? '{\n  "fluss": { "bootstrap_servers": "fluss:9092", "database": "analytics" }\n}' : '{\n  "producer_properties": { "compression.type": "zstd" }\n}'} /></label>
+                    {destination.sinkType === 'kafka' && <SecurityFields value={destination.security} onChange={(security) => updateDestination(destination.id, (item) => ({ ...item, security }))} />}
                   </article>
                 ))}
               </div>

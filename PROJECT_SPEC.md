@@ -1,8 +1,9 @@
 # StreamForge Product Specification
 
-StreamForge is a Rust-native Kafka selective-replication engine. It consumes
-Kafka records, applies deterministic per-destination filtering and
-transformation, and produces to one or more Kafka destinations.
+StreamForge is a Rust-native selective-replication engine. It consumes Kafka
+records, applies deterministic per-destination filtering and transformation,
+and writes to configured sinks including Kafka, Apache Fluss, and Apache
+Iceberg.
 
 This file is the canonical product-boundary document. Its decisions are locked
 unless the project owner explicitly changes them. Current implementation
@@ -12,9 +13,10 @@ evidence belongs in `docs/IMPLEMENTATION_STATUS.md`; sequenced work belongs in
 ## Product goal
 
 StreamForge should be a focused, lightweight, high-performance, production-safe
-Kafka data-plane service for:
+Kafka-ingestion data-plane service for:
 
-- topic-to-topic and cluster-to-cluster selective replication;
+- topic-to-topic and cluster-to-cluster selective replication, plus writes to
+  Fluss and Iceberg tables;
 - content, key, header, and timestamp filtering;
 - payload and envelope transformation;
 - multi-destination routing and fan-out;
@@ -42,6 +44,11 @@ StreamForge is not:
 
 The project must not replace its Rust, Tokio, rust-rdkafka, and custom DSL core
 with DataFusion, SQL, or a heavyweight generalized runtime.
+
+Native Rust sink clients are the supported integration path. Sink-specific
+configuration is namespaced and passed to that sink's typed configuration
+adapter. Iceberg is append-only until its Rust client supports row-level
+updates and deletes; MoR and CoW are not offered before then.
 
 ## Required data-plane behavior
 

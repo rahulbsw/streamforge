@@ -58,6 +58,17 @@ serializes a CRD through this crate before writing its ConfigMap, and
 before typed engine validation. This prevents the UI dry-run and reconciler
 from maintaining competing mappings.
 
+### Destination sink extension
+
+`SinkWriter` is the destination I/O boundary used by processors. The sink
+factory registry selects an implementation from `sink.type`; an omitted type
+defaults to Kafka for backward compatibility. The sink configuration carries
+namespaced backend properties, and each factory validates and converts its
+own block. Sink implementations must preserve the `send` acknowledgment and
+`flush` barrier contract so the processing loop can safely coordinate source
+offset commits. Built-in Fluss and Iceberg adapters are delivered separately;
+Iceberg remains append-only while the Rust client lacks row-level writes.
+
 ### Consumer and processing loop
 
 `src/main.rs` owns the `StreamConsumer`, subscription, processing-mode

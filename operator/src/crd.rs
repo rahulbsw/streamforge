@@ -92,8 +92,12 @@ pub struct SourceConfig {
 #[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DestinationConfig {
-    pub brokers: String,
+    #[serde(default)]
+    pub brokers: Option<String>,
     pub topic: String,
+    /// Sink backend and backend-specific pass-through properties.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sink: Option<DestinationSinkConfig>,
     pub filter: Option<String>,
     pub transform: Option<String>,
     /// Optional WebAssembly UDF bindings for this destination.
@@ -103,6 +107,24 @@ pub struct DestinationConfig {
     pub partitioner: Option<String>,
     pub partitioner_field: Option<String>,
     pub security: Option<SecurityConfig>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+#[serde(default)]
+pub struct DestinationSinkConfig {
+    #[serde(rename = "type")]
+    pub sink_type: String,
+    #[serde(flatten)]
+    pub properties: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+impl Default for DestinationSinkConfig {
+    fn default() -> Self {
+        Self {
+            sink_type: "kafka".into(),
+            properties: Default::default(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]

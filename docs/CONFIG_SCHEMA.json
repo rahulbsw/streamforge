@@ -39,6 +39,10 @@
       "description": "Destination topic in single-destination mode",
       "minLength": 1
     },
+    "sink": {
+      "$ref": "#/definitions/sink",
+      "description": "Optional single-destination sink; defaults to Kafka"
+    },
     "transform": {
       "type": "string",
       "description": "Native value-transform DSL expression in single-destination mode"
@@ -339,9 +343,10 @@
             "properties": {
               "output": {
                 "type": "string",
-                "description": "Destination Kafka topic",
+                "description": "Destination topic or sink table identifier",
                 "minLength": 1
               },
+              "sink": {"$ref": "#/definitions/sink"},
               "filter": {
                 "type": "string",
                 "description": "DSL filter expression",
@@ -479,6 +484,18 @@
     }
   },
   "definitions": {
+    "sink": {
+      "type": "object",
+      "description": "Sink backend selector and namespaced backend properties",
+      "required": ["type"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1},
+        "fluss": {"type": "object"},
+        "iceberg": {"type": "object"},
+        "flush": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
     "destinationUdfs": {
       "type": "object",
       "description": "Named WebAssembly modules bound to destination stages",

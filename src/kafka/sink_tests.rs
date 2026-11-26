@@ -7,6 +7,7 @@ fn create_test_config() -> MirrorMakerConfig {
         bootstrap: "localhost:9092".to_string(),
         input: "test-input".to_string(),
         output: Some("test-output".to_string()),
+        sink: Default::default(),
         target_broker: None,
         offset: "latest".to_string(),
         threads: 4,

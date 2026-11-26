@@ -104,7 +104,7 @@ fn generated_config_preserves_destinations_and_matches_core_udf_shape() {
 #[test]
 fn rejects_destinations_on_different_brokers() {
     let mut pipeline = pipeline_with_udfs();
-    pipeline.spec.destinations[1].brokers = "other-target:9092".to_string();
+    pipeline.spec.destinations[1].brokers = Some("other-target:9092".to_string());
 
     let error = validate_pipeline_spec(&pipeline).unwrap_err();
     assert!(matches!(

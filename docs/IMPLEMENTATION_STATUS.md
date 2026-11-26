@@ -17,6 +17,21 @@ The unpublished `v1.1` through `v1.4` planning tracks feed the `v1.5.0`
 candidate. See the [roadmap](../ROADMAP.md) for release sequencing and
 outstanding evidence by track.
 
+## Destination sinks
+
+Implemented in the custom sink core:
+
+- a `SinkWriter` factory registry selected by `sink.type`;
+- backward-compatible Kafka selection when sink type is omitted;
+- namespaced sink properties projected through `StreamforgePipeline`, the
+  operator CRD, direct engine configuration, and the UI editor.
+
+Apache Fluss and Apache Iceberg adapters are planned as the next two stacked
+pull requests under [proposal #59](https://github.com/rahulbsw/streamforge/issues/59).
+Their behavior is not yet part of the implementation status. The proposal
+limits Iceberg to append commits until the Rust client supports row-level
+updates and deletes.
+
 ## Installation and release pipeline
 
 Implemented:

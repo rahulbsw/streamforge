@@ -65,8 +65,10 @@ struct Source {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Destination {
-    brokers: String,
+    brokers: Option<String>,
     topic: String,
+    #[serde(default)]
+    sink: Sink,
     filter: Option<String>,
     transform: Option<String>,
     partitioner: Option<String>,
@@ -75,6 +77,24 @@ struct Destination {
     udfs: Option<UdfBindings>,
     #[serde(default)]
     security: Option<SecurityConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+struct Sink {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(flatten)]
+    properties: BTreeMap<String, Value>,
+}
+
+impl Default for Sink {
+    fn default() -> Self {
+        Self {
+            kind: "kafka".to_string(),
+            properties: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -266,17 +286,37 @@ pub fn engine_config_value_from_pipeline_value(
         return Err(invalid("spec.source.topic", "must not be empty"));
     }
 
-    let target_broker = pipeline.spec.destinations[0].brokers.trim();
-    if target_broker.is_empty() {
-        return Err(invalid("spec.destinations[0].brokers", "must not be empty"));
+    let kafka_destinations: Vec<(usize, &Destination)> = pipeline
+        .spec
+        .destinations
+        .iter()
+        .enumerate()
+        .filter(|(_, destination)| destination.sink.kind.eq_ignore_ascii_case("kafka"))
+        .collect();
+    let target_broker = kafka_destinations
+        .first()
+        .map(|(_, destination)| destination.brokers.as_deref().unwrap_or_default().trim());
+    if let Some(target_broker) = target_broker {
+        if target_broker.is_empty() {
+            return Err(invalid("spec.destinations", "Kafka sinks require brokers"));
+        }
     }
     for (index, destination) in pipeline.spec.destinations.iter().enumerate() {
-        if destination.brokers != target_broker {
+        if destination.sink.kind.trim().is_empty() {
+            return Err(invalid(
+                format!("spec.destinations[{index}].sink.type"),
+                "must not be empty",
+            ));
+        }
+        if destination.sink.kind.eq_ignore_ascii_case("kafka")
+            && destination.brokers.as_deref().unwrap_or_default().trim()
+                != target_broker.unwrap_or_default()
+        {
             return Err(invalid(
                 format!("spec.destinations[{index}].brokers"),
                 format!(
-                    "destination {index} uses broker '{}', but all destinations must use '{target_broker}' until per-destination brokers are supported",
-                    destination.brokers
+                    "destination {index} must use the same Kafka broker as the other Kafka destinations ('{}')",
+                    target_broker.unwrap_or_default()
                 ),
             ));
         }
@@ -352,7 +392,7 @@ pub fn engine_config_value_from_pipeline_value(
         .or(pipeline.metadata.name)
         .filter(|name| !name.trim().is_empty())
         .ok_or_else(|| invalid("metadata.name", "is required when spec.appid is omitted"))?;
-    let target_broker = target_broker.to_string();
+    let target_broker = target_broker.map(str::to_string);
     let destinations: Vec<Value> = pipeline
         .spec
         .destinations
@@ -360,6 +400,10 @@ pub fn engine_config_value_from_pipeline_value(
         .map(|destination| {
             let mut rendered = serde_json::Map::new();
             rendered.insert("output".to_string(), json!(destination.topic));
+            let mut sink = serde_json::Map::new();
+            sink.insert("type".to_string(), json!(destination.sink.kind));
+            sink.extend(destination.sink.properties.clone());
+            rendered.insert("sink".to_string(), Value::Object(sink));
             if let Some(filter) = &destination.filter {
                 rendered.insert("filter".to_string(), json!(filter));
             }
@@ -382,7 +426,6 @@ pub fn engine_config_value_from_pipeline_value(
         "appid": appid,
         "bootstrap": pipeline.spec.source.brokers,
         "input": pipeline.spec.source.topic,
-        "target_broker": target_broker,
         "offset": pipeline.spec.source.offset,
         "threads": pipeline.spec.threads,
         "routing": {
@@ -407,6 +450,9 @@ pub fn engine_config_value_from_pipeline_value(
             "compression": Value::Null
         }
     });
+    if let Some(target_broker) = target_broker {
+        config["target_broker"] = json!(target_broker);
+    }
     if let Some(wasm) = rendered_wasm {
         config["wasm"] = wasm;
     }
@@ -422,8 +468,16 @@ pub fn engine_config_value_from_pipeline_value(
 fn render_target_security(
     destinations: &[Destination],
 ) -> Result<Option<Value>, PipelineConversionError> {
-    let expected = destinations[0].security.as_ref();
-    for (index, destination) in destinations.iter().enumerate().skip(1) {
+    let kafka_destinations: Vec<(usize, &Destination)> = destinations
+        .iter()
+        .enumerate()
+        .filter(|(_, destination)| destination.sink.kind.eq_ignore_ascii_case("kafka"))
+        .collect();
+    let Some((_, first)) = kafka_destinations.first() else {
+        return Ok(None);
+    };
+    let expected = first.security.as_ref();
+    for (index, destination) in kafka_destinations.iter().skip(1) {
         if destination.security.as_ref() != expected {
             return Err(invalid(
                 format!("spec.destinations[{index}].security"),
@@ -432,7 +486,13 @@ fn render_target_security(
         }
     }
     expected
-        .map(|security| render_security(security, "spec.destinations[0].security", "destination-0"))
+        .map(|security| {
+            render_security(
+                security,
+                &format!("spec.destinations[{}].security", kafka_destinations[0].0),
+                "destination-0",
+            )
+        })
         .transpose()
 }
 
@@ -1122,4 +1182,5 @@ mod tests {
         let error = engine_config_value_from_pipeline_value(pipeline).unwrap_err();
         assert_eq!(error.field, "spec.destinations[1].security");
     }
+
 }

@@ -14,6 +14,8 @@ export interface SecurityForm {
 
 export interface DestinationForm {
   id: string;
+  sinkType: 'kafka' | 'fluss' | 'iceberg';
+  sinkProperties: string;
   brokers: string;
   topic: string;
   filter: string;
@@ -65,6 +67,8 @@ export const emptySecurity = (): SecurityForm => ({
 
 export const emptyDestination = (id = crypto.randomUUID()): DestinationForm => ({
   id,
+  sinkType: 'kafka',
+  sinkProperties: '',
   brokers: '',
   topic: '',
   filter: '',
@@ -149,8 +153,12 @@ export function toPipelineResource(form: PipelineForm) {
         security: securityResource(form.source.security),
       },
       destinations: form.destinations.map((destination) => ({
-        brokers: destination.brokers.trim(),
+        brokers: destination.sinkType === 'kafka' ? destination.brokers.trim() : undefined,
         topic: destination.topic.trim(),
+        sink: {
+          ...(destination.sinkProperties.trim() ? JSON.parse(destination.sinkProperties) : {}),
+          type: destination.sinkType,
+        },
         filter: destination.filter.trim() || undefined,
         transform: destination.transform.trim() || undefined,
         security: securityResource(destination.security),
@@ -193,6 +201,7 @@ function securityValidationError(security: SecurityForm): string | null {
 }
 
 export function validateStep(form: PipelineForm, step: number): string | null {
+  const kafkaDestinations = form.destinations.filter((destination) => destination.sinkType === 'kafka');
   if (step === 0) {
     if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(form.name) || form.name.length > 63) {
       return 'Name must be a Kubernetes DNS label with at most 63 characters.';
@@ -208,29 +217,41 @@ export function validateStep(form: PipelineForm, step: number): string | null {
   if (
     step === 2 &&
     (form.destinations.length === 0 ||
-      form.destinations.some((destination) => !destination.brokers.trim() || !destination.topic.trim()))
+      form.destinations.some((destination) =>
+        !destination.topic.trim() || (destination.sinkType === 'kafka' && !destination.brokers.trim())))
   ) {
-    return 'Every destination needs brokers and a topic.';
+    return 'Every destination needs a target, and Kafka destinations need brokers.';
   }
   if (
     step === 2 &&
-    form.destinations.some(
-      (destination) => destination.brokers.trim() !== form.destinations[0].brokers.trim(),
+    kafkaDestinations.slice(1).some(
+      (destination) => destination.brokers.trim() !== kafkaDestinations[0].brokers.trim(),
     )
   ) {
-    return 'All destinations must use the same Kafka brokers in v1.x.';
+    return 'All Kafka destinations must use the same brokers in v1.x.';
   }
   if (
     step === 2 &&
-    form.destinations.some(
+    kafkaDestinations.some(
       (destination) =>
-        JSON.stringify(destination.security) !== JSON.stringify(form.destinations[0].security),
+        JSON.stringify(destination.security) !== JSON.stringify(kafkaDestinations[0]?.security),
     )
   ) {
     return 'All destinations must use the same security settings in v1.x.';
   }
   if (step === 2) {
-    const securityError = form.destinations
+    for (const destination of form.destinations) {
+      if (!destination.sinkProperties.trim()) continue;
+      try {
+        const value: unknown = JSON.parse(destination.sinkProperties);
+        if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error();
+      } catch {
+        return 'Sink properties must be a JSON object.';
+      }
+    }
+  }
+  if (step === 2) {
+    const securityError = kafkaDestinations
       .map((destination) => securityValidationError(destination.security))
       .find((message) => message !== null);
     if (securityError) return securityError;
