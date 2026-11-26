@@ -11,7 +11,6 @@ use streamforge::filter_parser::{
     parse_filter, parse_header_transform, parse_key_transform, parse_static_headers,
     parse_timestamp_transform, parse_transform_with_cache,
 };
-use streamforge::kafka::KafkaSink;
 use streamforge::metrics::{Stats, StatsReporter};
 use streamforge::observability::{
     init_tracing_from_env, labels, register_metrics, start_kafka_readiness_monitor,
@@ -483,6 +482,12 @@ async fn main() -> Result<()> {
             let error_count = results.iter().filter(|r| r.is_err()).count();
 
             if error_count == 0 {
+                // Buffered sinks must make their output durable before source
+                // offsets advance. For Kafka this is a no-op after each
+                // acknowledged send; transactional/table sinks use this as
+                // the batch commit barrier.
+                processor.flush().await?;
+
                 // All messages processed successfully - commit with retry
                 const MAX_COMMIT_RETRIES: u32 = 3;
                 let mut retry_count = 0;
@@ -638,6 +643,7 @@ fn create_default_config() -> MirrorMakerConfig {
         bootstrap: "localhost:9092".to_string(),
         input: "input-topic".to_string(),
         output: Some("output-topic".to_string()),
+        sink: Default::default(),
         target_broker: None,
         offset: "latest".to_string(),
         threads: 4,
@@ -803,7 +809,8 @@ async fn build_single_destination_processor(
         .clone()
         .ok_or_else(|| MirrorMakerError::Config("Output topic not specified".to_string()))?;
 
-    let sink = Arc::new(KafkaSink::new(config, output_topic.clone(), None).await?);
+    let sink =
+        streamforge::sink_factory::create_sink(config, &config.sink, &output_topic, None).await?;
 
     // Preserve the native-only construction path exactly when no UDF is bound.
     if config.udfs.is_none() {
@@ -894,8 +901,13 @@ async fn build_multi_destination_processor(
         validate_aggregation_destination(dest)?;
 
         // Create sink
-        let sink =
-            Arc::new(KafkaSink::new(config, dest.output.clone(), dest.partition.clone()).await?);
+        let sink = streamforge::sink_factory::create_sink(
+            config,
+            &dest.sink,
+            &dest.output,
+            dest.partition.as_deref(),
+        )
+        .await?;
 
         // Create filter if specified
         let native_filter: Option<Arc<dyn Filter>> = if let Some(ref filter_expr) = dest.filter {
@@ -1327,6 +1339,7 @@ mod tests {
                 path: None,
                 destinations: vec![streamforge::DestinationConfig {
                     output: "immediate.topic".to_string(),
+                    sink: Default::default(),
                     match_value: None,
                     filter: None,
                     transform: None,
@@ -1355,6 +1368,7 @@ mod tests {
                 destinations: vec![
                     streamforge::DestinationConfig {
                         output: "immediate.topic".to_string(),
+                        sink: Default::default(),
                         match_value: None,
                         filter: None,
                         transform: None,
@@ -1371,6 +1385,7 @@ mod tests {
                     },
                     streamforge::DestinationConfig {
                         output: "aggregate-slow.topic".to_string(),
+                        sink: Default::default(),
                         match_value: None,
                         filter: None,
                         transform: None,
@@ -1403,6 +1418,7 @@ mod tests {
                     },
                     streamforge::DestinationConfig {
                         output: "aggregate-fast.topic".to_string(),
+                        sink: Default::default(),
                         match_value: None,
                         filter: None,
                         transform: None,
@@ -1443,6 +1459,7 @@ mod tests {
         fn test_rejects_template_output_for_aggregation_destination() {
             let destination = streamforge::DestinationConfig {
                 output: "aggregates.{source_topic}".to_string(),
+                sink: Default::default(),
                 match_value: None,
                 filter: None,
                 transform: None,
@@ -1488,6 +1505,7 @@ mod tests {
         fn test_allows_fixed_output_for_aggregation_destination() {
             let destination = streamforge::DestinationConfig {
                 output: "aggregates.fixed".to_string(),
+                sink: Default::default(),
                 match_value: None,
                 filter: None,
                 transform: None,

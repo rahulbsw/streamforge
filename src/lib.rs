@@ -23,6 +23,7 @@ pub mod processor;
 mod processor_policy;
 pub mod processor_with_retry;
 pub mod retry;
+pub mod sink_factory;
 pub mod wasm;
 
 pub use aggregation::{AggregateEmission, AggregationEngine, GroupKey};

@@ -1,8 +1,9 @@
 # StreamForge Product Specification
 
-StreamForge is a Rust-native Kafka selective-replication engine. It consumes
-Kafka records, applies deterministic per-destination filtering and
-transformation, and produces to one or more Kafka destinations.
+StreamForge is a Rust-native selective-replication engine. It consumes Kafka
+records, applies deterministic per-destination filtering and transformation,
+and writes to configured sinks including Kafka, Apache Fluss, and Apache
+Iceberg.
 
 This file is the canonical product-boundary document. Its decisions are locked
 unless the project owner explicitly changes them. Current implementation
@@ -12,9 +13,10 @@ evidence belongs in `docs/IMPLEMENTATION_STATUS.md`; sequenced work belongs in
 ## Product goal
 
 StreamForge should be a focused, lightweight, high-performance, production-safe
-Kafka data-plane service for:
+Kafka-ingestion data-plane service for:
 
-- topic-to-topic and cluster-to-cluster selective replication;
+- topic-to-topic and cluster-to-cluster selective replication, plus writes to
+  Fluss and Iceberg tables;
 - content, key, header, and timestamp filtering;
 - payload and envelope transformation;
 - multi-destination routing and fan-out;
@@ -42,6 +44,11 @@ StreamForge is not:
 
 The project must not replace its Rust, Tokio, rust-rdkafka, and custom DSL core
 with DataFusion, SQL, or a heavyweight generalized runtime.
+
+Native Rust sink clients are the supported integration path. Sink-specific
+configuration is namespaced and passed to that sink's typed configuration
+adapter. Iceberg is append-only until its Rust client supports row-level
+updates and deletes; MoR and CoW are not offered before then.
 
 ## Required data-plane behavior
 
@@ -120,7 +127,8 @@ Locked constraints:
 - UDF failures follow explicit per-destination policy;
 - the native DSL remains supported;
 - no second UDF runtime or broad plugin ecosystem is introduced without a new
-  product decision;
+  product decision; the destination sink factory remains limited to output
+  writers and does not expose processor hooks or ambient host capabilities;
 - no model inference runs in the Kafka data path, including through a UDF.
 
 The ABI and operating contract are defined in `docs/WASM_UDFS.md`.
@@ -135,7 +143,8 @@ Security rules:
 
 - source and target Kafka clients may use distinct TLS/SASL identities;
 - Kubernetes custom resources and ConfigMaps contain Secret references or
-  mounted file paths, never credential values;
+  mounted file paths, never credential values; the pipeline projection rejects
+  common inline credential fields and requires mounted file paths;
 - inline credentials in pipeline CRDs are rejected;
 - logs and diagnostics exclude payloads, headers, keys, credentials, and DSL
   expression contents by default;
@@ -234,4 +243,4 @@ performance gates must be reported as pending when their required environments
 or published artifacts have not been exercised. Source implementation alone is
 not evidence that a release is complete.
 
-**Last updated:** 2026-07-26
+**Last updated:** 2026-11-25

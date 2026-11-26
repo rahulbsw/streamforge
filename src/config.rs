@@ -18,6 +18,11 @@ pub struct MirrorMakerConfig {
     /// Output topic (for single destination)
     pub output: Option<String>,
 
+    /// Sink implementation for single-destination mode. Omitted configurations
+    /// continue to use the built-in Kafka sink.
+    #[serde(default)]
+    pub sink: SinkConfig,
+
     /// Target broker (for cross-cluster mirroring)
     #[serde(default)]
     pub target_broker: Option<String>,
@@ -379,6 +384,11 @@ pub struct DestinationConfig {
     /// Destination topic name
     pub output: String,
 
+    /// Sink implementation and sink-specific properties. When omitted, Kafka
+    /// is used for backward compatibility.
+    #[serde(default)]
+    pub sink: SinkConfig,
+
     /// Match value for content-based routing
     pub match_value: Option<String>,
 
@@ -489,6 +499,36 @@ pub struct DestinationConfig {
     /// Optional stateless WebAssembly UDFs for this destination.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub udfs: Option<DestinationUdfConfig>,
+}
+
+/// Sink selector with an open property map so sink implementations can accept
+/// their own namespaced settings without expanding the core config model.
+///
+/// Example:
+/// ```yaml
+/// sink:
+///   type: iceberg
+///   iceberg:
+///     catalog: rest
+///   flush:
+///     max_buffered_events: 1000
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SinkConfig {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(flatten)]
+    pub properties: HashMap<String, serde_json::Value>,
+}
+
+impl Default for SinkConfig {
+    fn default() -> Self {
+        Self {
+            kind: "kafka".to_string(),
+            properties: HashMap::new(),
+        }
+    }
 }
 
 /// Header transformation configuration
@@ -806,6 +846,9 @@ impl MirrorMakerConfig {
     }
 
     pub fn validate(&self) -> crate::Result<()> {
+        if self.sink.kind.trim().is_empty() {
+            return Err(config_error("sink.type must not be empty"));
+        }
         if self.threads == 0 {
             return Err(config_error("threads must be > 0"));
         }
@@ -874,6 +917,9 @@ impl MirrorMakerConfig {
 
         if let Some(routing) = &self.routing {
             for dest in &routing.destinations {
+                if dest.sink.kind.trim().is_empty() {
+                    return Err(config_error("destination sink.type must not be empty"));
+                }
                 if let Some(udfs) = &dest.udfs {
                     if udfs.is_empty() {
                         return Err(config_error(format!(
