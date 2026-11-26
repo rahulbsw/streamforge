@@ -24,23 +24,35 @@ is added without a separate product decision.
 
 See [`docs/WASM_UDFS.md`](docs/WASM_UDFS.md).
 
-## Release sequence
+## Next release: v1.5.0
 
-| Release | Focus | Working-tree status | Release status |
-| --- | --- | --- | --- |
-| `v1.1` | Installation and deployment simplicity | Implemented | Live artifact smoke gates pending |
-| `v1.2` | Metrics and logging foundation | Implemented | Live Kafka/Prometheus smoke gates pending |
-| `v1.3` | Kubernetes UI onboarding and pipeline operations | Implemented | Browser and kind/minikube gates pending |
-| `v1.4` | Performance productization | Gate/catalog foundation implemented | New dedicated-hardware profiles pending |
+`v1.5.0` is the next release after `v1.0.0`. The earlier `v1.1` through
+`v1.4` numbers were planning milestones. They were never published and their
+implemented work is part of this candidate. The four tracks below retain
+their outstanding evidence and ownership.
 
-Releases are sequential. A later release cannot be tagged to bypass an
-incomplete earlier release gate.
+| Track | Work in v1.5.0 | Outstanding evidence |
+| --- | --- | --- |
+| Deployment | Release packaging, secure Helm defaults, Docker/Podman quickstart | Candidate artifact smoke, published registry and chart verification |
+| Observability | Readiness, metrics, logging, and monitoring assets | Live Kafka recovery, Prometheus rules, alerts, and dashboards |
+| Kubernetes UI | Pipeline onboarding, validation, permissions, and operations views | Browser and Kubernetes integration against authoritative sources |
+| Performance | Workload catalog, evaluator, and baseline record | Dedicated runs with p99, coverage of the workload matrix, and capacity guidance |
+
+See the [v1.5.0 release notes](docs/releases/v1.5.0.md) for migration and
+rollback. See [Implementation Status](docs/IMPLEMENTATION_STATUS.md) for
+evidence and open checks.
 
 ## Gates shared by every release
 
 A release is not complete until all affected implementation, tests, examples,
 documentation, dependencies, and obsolete-code cleanup are complete in the
 same release.
+
+Before tagging, run the artifact preflight from a pull request and review the
+results against the candidate commit. The preflight uses GitHub Actions
+artifacts, local images, and a local chart package. After publication, verify
+the exact registry artifacts and record the results before marking the
+release complete.
 
 Before tagging:
 
@@ -75,7 +87,7 @@ Helm lint/rendering, UDF artifact/digest verification, secret scanning,
 dependency vulnerability review, release builds, and a clean intentional
 worktree.
 
-## v1.1 — Installation and deployment simplicity
+## Installation and deployment simplicity
 
 Outcome: users can verify StreamForge locally or install it on Kubernetes
 without building release artifacts manually.
@@ -98,9 +110,10 @@ Implemented:
 
 Remaining release evidence:
 
-- execute real Docker/Podman and downloaded-binary journeys from clean hosts;
-- install the published OCI chart in kind/minikube and verify cleanup;
-- record time-to-first-record below ten minutes;
+- run the candidate binary, container, and chart smoke checks before tagging;
+- verify the published archives, images, and OCI chart after publication;
+- execute clean-host Docker and Podman quickstarts and record
+  time-to-first-record below ten minutes;
 - prove engine, validator, operator, UI, and chart version alignment.
 
 A source-built arm64 operator and engine smoke test passed on 2026-07-26 in an
@@ -113,7 +126,7 @@ Kafka 3.9 KRaft example and repeatable
 source-built integration evidence, not the still-required published-artifact
 gate.
 
-## v1.2 — Metrics and logging foundation
+## Metrics and logging foundation
 
 Outcome: StreamForge exposes stable, documented telemetry for dashboards,
 alerts, UI consumption, and bounded UDF execution.
@@ -136,7 +149,7 @@ Remaining release evidence:
 - exercise Kafka failure/recovery and UDF failure metrics live;
 - scrape the installed chart and exercise alerts/dashboards.
 
-## v1.3 — Kubernetes UI onboarding and pipeline operations
+## Kubernetes UI onboarding and pipeline operations
 
 Outcome: platform engineers can create, validate, deploy, observe, and
 troubleshoot Kubernetes pipelines without manually writing YAML.
@@ -177,7 +190,7 @@ Compatibility notes:
   and UI; direct engine configuration retains the supported global policy;
 - the UI remains Kubernetes/operator-backed; no standalone control daemon.
 
-## v1.4 — Performance productization
+## Performance evidence and capacity guidance
 
 Outcome: performance claims become reproducible release evidence and capacity
 guidance.
@@ -226,7 +239,9 @@ Locked constraints:
 
 ## Tracking
 
-Milestones: `v1.1`, `v1.2`, `v1.3`, and `v1.4`.
+Use `v1.5.0` for the next release. The previous `v1.1` through `v1.4`
+GitHub milestones were planning trackers. Use the track labels below for
+follow-up evidence and remaining work.
 
 Labels:
 
@@ -240,9 +255,7 @@ Labels:
 
 Every issue must state outcome, evidence, dependencies, acceptance tests,
 documentation changes, cleanup, security impact, and rollback behavior.
-The four milestones and seven labels above were verified in the GitHub
-repository on 2026-07-26. Local bug/feature templates require the issue fields
-listed above.
+Local bug and feature templates require the issue fields listed above.
 
 ## Compatibility defaults
 
@@ -255,4 +268,4 @@ listed above.
 - do not mark a release complete while documentation is stale or superseded
   production code remains without an approved compatibility reason.
 
-**Last updated:** 2026-07-26
+**Last updated:** 2026-11-25

@@ -71,7 +71,7 @@ as other production telemetry.
 
 ## Metrics catalog
 
-Catalog version: `v1` for the v1.2 track. Existing names remain compatible
+Catalog version: `v1`. Existing names remain compatible
 through v1.x unless formally deprecated.
 
 | Metric | Type | Labels | Meaning |

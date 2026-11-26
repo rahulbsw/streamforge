@@ -35,7 +35,25 @@ COPY wit ./wit
 RUN touch src/main.rs && \
     cargo build --release --locked --bin streamforge
 
-# Stage 2: Runtime
+# Release runtime uses the same Wolfi ABI as the builder.
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:003627df3c1e1bba0c4116afcddb314aca9594ee2328c7e876a8081a6c988b2e AS release
+
+RUN apk add --no-cache \
+    openssl \
+    cyrus-sasl \
+    libzstd1 \
+    libcurl4
+
+LABEL org.opencontainers.image.source="https://github.com/rahulbsw/streamforge"
+LABEL org.opencontainers.image.description="High-performance Kafka streaming toolkit"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+COPY --from=builder /build/target/release/streamforge /usr/local/bin/streamforge
+ENV RUST_LOG=info
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/streamforge"]
+
+# Default runtime for existing source builds.
 FROM cgr.dev/chainguard/rust:latest@sha256:9403ae8340434a1c2a18b41fd55850a61c7851e6189905efe9f0813bdc8f083d
 
 LABEL org.opencontainers.image.source="https://github.com/rahulbsw/streamforge"

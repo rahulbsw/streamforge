@@ -204,7 +204,7 @@ docker save streamforge:local -o /private/tmp/streamforge-local.tar
 minikube image load /private/tmp/streamforge-local.tar
 ```
 
-The `1.1.0` release definition publishes the UI for both Linux amd64 and arm64.
+The `1.5.0` release definition targets Linux amd64 and arm64 for the UI.
 For an unreleased local UI change, build and load the image from the repository
 root:
 
@@ -374,8 +374,8 @@ kubectl delete namespace redpanda
 - Helm rendering initially exposed a UI RBAC bug: the UI ClusterRole granted `streaming.streamforge.dev`, while the CRD and UI API use `streamforge.io`.
 - Patched `helm/streamforge-operator/templates/ui-rbac.yaml` to grant `streamforge.io`.
 - `kubectl auth can-i list streamforgepipelines.streamforge.io --as=system:serviceaccount:streamforge-system:streamforge-ui -n streamforge-system` changed from `no` to `yes`.
-- The then-current moving UI tag lacked a Linux arm64 manifest. The `1.1.0`
-  release definition now publishes amd64 and arm64.
+- The moving UI tag used in this dry run lacked a Linux arm64 manifest. The
+  current release definition targets amd64 and arm64.
 - Built `streamforge-ui:local`, exported it to `/private/tmp/streamforge-ui-local.tar`, loaded it into Minikube, and installed the chart with the local UI image override.
 - Operator and UI pods reached `Running`.
 - The historical pre-1.1 development login worked with its then-default demo

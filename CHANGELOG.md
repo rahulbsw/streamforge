@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The working tree contains implementation for the sequenced `v1.1`–`v1.4`
-tracks. These entries are not released until the live gates in
-[`ROADMAP.md`](ROADMAP.md) pass.
+These changes are prepared for [`v1.5.0`](docs/releases/v1.5.0.md), the next
+release after `v1.0.0`. The earlier `v1.1`–`v1.4` numbers were unpublished
+planning milestones. See [the roadmap](ROADMAP.md) for verification and
+publication requirements.
 
 ### Added
 
@@ -37,14 +38,14 @@ tracks. These entries are not released until the live gates in
 
 ### Changed
 
-- Wasmtime moved to security-patched `36.0.13`; a same-session local Criterion
-  A/B found no detected change in the three native no-UDF controls and favored
-  the patched runtime in multiple UDF invocation paths.
+- The WebAssembly runtime uses Wasmtime `36.0.21`. The lockfile also updates
+  `libz-sys` to `1.1.33` and `url` to `2.5.9` to address RustSec findings.
 - UI dependency locks now use patched `js-yaml`, `ip-address`, `nanoid`, and
   `brace-expansion` releases; the root, operator, and UI vulnerability audits
   report zero known vulnerabilities.
-- Release and Helm component versions are exact and synchronized; moving
-  release tags are no longer published.
+- Release and Helm component versions are synchronized at `1.5.0`. The release
+  workflow can smoke-test candidate artifacts from pull requests before
+  publication. Use exact image versions.
 - Production UI installation requires explicit JWT/user secrets; generated
   credentials require explicit development mode.
 - `observability.metrics_path` is honored and Kubernetes pipeline pods use
@@ -105,10 +106,10 @@ tracks. These entries are not released until the live gates in
 - Published-artifact, clean-host Docker/Podman, published-chart kind/minikube,
   live Kafka recovery/Prometheus, PromQL, browser, and multi-architecture
   UI-image smoke evidence is pending.
-- New v1.4 workload measurements and p99 latency evidence are pending.
+- Dedicated workload measurements and p99 latency evidence are pending.
 
-See [`docs/releases/`](docs/releases/README.md) for migration, limitations, and
-rollback notes for each planned minor release.
+See the [v1.5.0 release notes](docs/releases/v1.5.0.md) for migration,
+limitations, and rollback.
 
 ---
 

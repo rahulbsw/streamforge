@@ -1,24 +1,35 @@
 name: Release
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'Dockerfile*'
+      - 'operator/Dockerfile'
+      - 'ui/Dockerfile'
+      - 'ui/package*.json'
+      - 'helm/**'
+      - 'scripts/quickstart.sh'
+      - 'scripts/tests/quickstart_test.sh'
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to publish (for example, v1.1.0)
+        description: Existing release tag to publish (for example, v1.5.0)
         required: true
         type: string
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+  RELEASE_REF: ${{ github.event_name == 'pull_request' && github.sha || format('refs/tags/{0}', inputs.tag || github.event.release.tag_name) }}
 
 jobs:
   validate-release:
@@ -30,21 +41,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Validate tag and package version
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must be a semantic version prefixed with v: ${RELEASE_TAG}" >&2
-            exit 1
-          fi
-
-          version="${RELEASE_TAG#v}"
           root_version="$(cargo metadata --no-deps --format-version 1 |
             jq -r '.packages[] | select(.name == "streamforge") | .version')"
+          tag="${RELEASE_TAG:-v${root_version}}"
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must be a semantic version prefixed with v: ${tag}" >&2
+            exit 1
+          fi
+          version="${tag#v}"
           model_version="$(cargo metadata --manifest-path crates/streamforge-config-model/Cargo.toml \
             --no-deps --format-version 1 |
             jq -r '.packages[] | select(.name == "streamforge-config-model") | .version')"
@@ -67,7 +79,9 @@ jobs:
             fi
           done
 
-          gh release view "${RELEASE_TAG}" >/dev/null
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            gh release view "${RELEASE_TAG}" >/dev/null
+          fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "revision=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
         env:
@@ -80,7 +94,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -110,13 +125,15 @@ jobs:
           fi
 
   publish-crate:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     name: Publish crate
-    needs: [validate-release, release-smoke-tests, container-preflight]
+    needs: [validate-release, release-smoke-tests, build-release-binaries, container-preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Install system dependencies
         run: |
@@ -170,14 +187,15 @@ jobs:
             target: aarch64-unknown-linux-gnu
             asset: streamforge-linux-arm64
             artifact: release-linux-arm64
-          - os: macos-14
+          - os: macos-latest
             target: aarch64-apple-darwin
             asset: streamforge-macos-arm64
             artifact: release-macos-arm64
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -204,23 +222,15 @@ jobs:
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cyrus-sasl openssl@3
-          echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> "${GITHUB_ENV}"
-          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix cyrus-sasl)/lib/pkgconfig" >> "${GITHUB_ENV}"
+          brew install cyrus-sasl openssl@3.5
+          openssl_prefix="$(brew --prefix openssl@3.5)"
+          echo "OPENSSL_DIR=${openssl_prefix}" >> "$GITHUB_ENV"
+          echo "OPENSSL_ROOT_DIR=${openssl_prefix}" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=${openssl_prefix}" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=${openssl_prefix}/lib/pkgconfig:$(brew --prefix cyrus-sasl)/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Build both release binaries
         run: cargo build --release --locked --target "${{ matrix.target }}" --bins
-
-      - name: Smoke test both release binaries
-        shell: bash
-        run: |
-          set -euo pipefail
-          bin_dir="target/${{ matrix.target }}/release"
-          "${bin_dir}/streamforge" --help >/dev/null
-          "${bin_dir}/streamforge-validate" \
-            examples/redpanda/selective-replication.yaml >/dev/null
-          "${bin_dir}/streamforge-validate" \
-            tests/fixtures/wasm/release-smoke.yaml >/dev/null
 
       - name: Package binaries
         shell: bash
@@ -235,6 +245,21 @@ jobs:
           tar -C dist/bin -czf "dist/${{ matrix.asset }}.tar.gz" \
             streamforge streamforge-validate
 
+      - name: Smoke test extracted release archive
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -euo pipefail
+          extracted="$(mktemp -d)"
+          trap 'rm -rf "$extracted"' EXIT
+          tar -xzf "dist/${ASSET}.tar.gz" -C "$extracted"
+          "$extracted/streamforge" --help >/dev/null
+          "$extracted/streamforge" --version | grep -Fx "$VERSION"
+          "$extracted/streamforge-validate" examples/redpanda/selective-replication.yaml >/dev/null
+          "$extracted/streamforge-validate" tests/fixtures/wasm/release-smoke.yaml >/dev/null
+
       - name: Upload packaged binaries
         uses: actions/upload-artifact@v4
         with:
@@ -244,37 +269,50 @@ jobs:
           retention-days: 3
 
   container-preflight:
-    name: Preflight ${{ matrix.component }} image
-    needs: [validate-release, release-smoke-tests, build-release-binaries]
-    runs-on: ubuntu-latest
+    name: Preflight ${{ matrix.label }} image
+    needs: [validate-release, release-smoke-tests]
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - component: engine
-            dockerfile: Dockerfile.release
+            label: engine amd64
+            os: ubuntu-latest
+            dockerfile: Dockerfile
+            target: release
+          - component: engine
+            label: engine arm64
+            os: ubuntu-24.04-arm
+            dockerfile: Dockerfile
+            target: release
           - component: operator
+            label: operator
+            os: ubuntu-latest
             dockerfile: operator/Dockerfile
           - component: ui
+            label: ui
+            os: ubuntu-latest
             dockerfile: ui/Dockerfile
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Download engine binary
-        if: matrix.component == 'engine'
-        uses: actions/download-artifact@v4
-        with:
-          name: release-linux-amd64
-          path: release-input/amd64
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Build image without publishing
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          TARGET: ${{ matrix.target }}
         run: |
-          docker build \
-            --file "${{ matrix.dockerfile }}" \
-            --tag "streamforge-${{ matrix.component }}:preflight" \
-            .
+          set -euo pipefail
+          args=(--file "$DOCKERFILE" --tag "streamforge-$COMPONENT:preflight")
+          if [[ -n "$TARGET" ]]; then
+            args+=(--target "$TARGET")
+          fi
+          docker build "${args[@]}" .
 
       - name: Smoke test image entrypoint
         shell: bash
@@ -290,14 +328,76 @@ jobs:
               ;;
           esac
 
+      - name: Verify a replicated record with the engine image
+        if: matrix.component == 'engine'
+        shell: bash
+        env:
+          STREAMFORGE_IMAGE: streamforge-engine:preflight
+          STREAMFORGE_BROKER_IMAGE: docker.redpanda.com/redpandadata/redpanda:v25.1.2
+          STREAMFORGE_QUICKSTART_VERIFY_ATTEMPTS: 30
+        run: |
+          set -euo pipefail
+          for runtime in docker podman; do
+            if [[ "$runtime" == podman ]]; then
+              sudo apt-get update
+              sudo apt-get install -y podman
+              docker save "$STREAMFORGE_IMAGE" "$STREAMFORGE_BROKER_IMAGE" | podman load
+            fi
+            (
+              export STREAMFORGE_CONTAINER_RUNTIME="$runtime"
+              export STREAMFORGE_QUICKSTART_PREFIX="streamforge-preflight-$runtime"
+              trap 'scripts/quickstart.sh down' EXIT
+              started=$SECONDS
+              scripts/quickstart.sh up
+              scripts/quickstart.sh verify
+              elapsed=$((SECONDS - started))
+              echo "$runtime first replicated record in ${elapsed}s"
+              test "$elapsed" -lt 600
+            )
+          done
+
+      - name: Create local Kubernetes smoke cluster
+        if: matrix.component == 'operator'
+        uses: helm/kind-action@v1.12.0
+
+      - name: Install Helm
+        if: matrix.component == 'operator'
+        uses: azure/setup-helm@v4
+
+      - name: Install the packaged chart with the local operator image
+        if: matrix.component == 'operator'
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          helm package helm/streamforge-operator --destination release-chart
+          chart="release-chart/streamforge-operator-${VERSION}.tgz"
+          cluster="$(kind get clusters | head -n 1)"
+          kind load docker-image streamforge-operator:preflight --name "$cluster"
+          helm install streamforge "$chart" \
+            --namespace streamforge-preflight \
+            --create-namespace \
+            --set operator.image.repository=streamforge-operator \
+            --set operator.image.tag=preflight \
+            --wait --timeout 5m
+          helm uninstall streamforge --namespace streamforge-preflight
+          kubectl delete namespace streamforge-preflight --wait=true
+
   publish-binary-assets:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     name: Publish checksummed binaries and SBOMs
     needs: [validate-release, build-release-binaries, container-preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Download release binaries
         uses: actions/download-artifact@v4
@@ -341,25 +441,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   publish-engine-image:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: write
     name: Publish engine image
     needs: [validate-release, build-release-binaries, container-preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Download amd64 binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: release-linux-amd64
-          path: release-input/amd64
-
-      - name: Download arm64 binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: release-linux-arm64
-          path: release-input/arm64
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -378,7 +471,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.release
+          file: Dockerfile
+          target: release
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ghcr.io/${{ github.repository }}:${{ needs.validate-release.outputs.version }}
@@ -392,6 +486,10 @@ jobs:
           cache-to: type=gha,mode=max
 
   publish-component-images:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: write
     name: Publish ${{ matrix.component }} image
     needs: [validate-release, release-smoke-tests, build-release-binaries, container-preflight]
     runs-on: ubuntu-latest
@@ -410,7 +508,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -443,6 +542,12 @@ jobs:
           cache-to: type=gha,mode=max
 
   publish-helm-chart:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
     name: Publish OCI Helm chart
     needs:
       - validate-release
@@ -452,7 +557,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -531,6 +637,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   release-complete:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: read
     name: Verify mandatory release jobs
     needs:
       - validate-release
@@ -543,7 +653,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
 
       - name: Log in for private-package smoke tests
         uses: docker/login-action@v3

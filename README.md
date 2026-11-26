@@ -3,7 +3,7 @@
 > Selective replication for Kafka. Filter, transform, redact, and route records
 > between topics and clusters without deploying Kafka Connect.
 
-[![Version](https://img.shields.io/badge/version-1.1.0-36d1c4.svg)](CHANGELOG.md)
+[![Release candidate](https://img.shields.io/badge/candidate-1.5.0-36d1c4.svg)](docs/releases/v1.5.0.md)
 [![CI](https://github.com/rahulbsw/streamforge/workflows/CI/badge.svg)](https://github.com/rahulbsw/streamforge/actions)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-38a3ff.svg)](https://rahulbsw.github.io/streamforge/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-d5dde4.svg)](LICENSE)
@@ -30,7 +30,12 @@ Kafka source ──► filter ──► transform ──┬──► analytics t
 
 ## Run the local demo
 
-Prerequisites: Docker or Podman with Compose support.
+Prerequisites: Docker or Podman. The script defaults to the candidate image
+tag. Before publication, build the image locally and set
+`STREAMFORGE_IMAGE` to that local tag. For example, run
+`docker build -t streamforge:local .` and
+`export STREAMFORGE_IMAGE=streamforge:local` before the quickstart. See the
+[release notes](docs/releases/v1.5.0.md) for artifact status.
 
 ```bash
 scripts/quickstart.sh up
@@ -54,7 +59,7 @@ destination output, and removes its resources. See the
 | Configure TLS and SASL | [Security configuration](docs/SECURITY_CONFIGURATION.md) |
 | Operate and troubleshoot a pipeline | [Operations](docs/OPERATIONS.md) |
 | Follow the focused release tracks | [Roadmap](ROADMAP.md) |
-| Review draft release changes and rollback | [Release notes](docs/releases/README.md) |
+| Review release changes and rollback | [v1.5.0 release notes](docs/releases/v1.5.0.md) |
 | Browse the complete public documentation | [StreamForge documentation](https://rahulbsw.github.io/streamforge/) |
 
 ## Deployment modes

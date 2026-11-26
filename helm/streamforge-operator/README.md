@@ -19,8 +19,10 @@ does not install them.
 
 ## Install the published OCI chart
 
+Use the registry command after the release artifacts are published.
+
 ```bash
-export STREAMFORGE_VERSION=1.1.0
+export STREAMFORGE_VERSION=1.5.0
 
 helm upgrade --install streamforge \
   oci://ghcr.io/rahulbsw/charts/streamforge-operator \
