@@ -1,12 +1,15 @@
-# Release Notes
+---
+title: Release Notes
+nav_exclude: true
+---
 
-These notes are drafts until their release gates pass and the corresponding tag
-is published.
+# Release notes
 
-- [`v1.1`](v1.1.md) — installation and deployment simplicity
-- [`v1.2`](v1.2.md) — metrics and logging foundation
-- [`v1.3`](v1.3.md) — Kubernetes UI onboarding and operations
-- [`v1.4`](v1.4.md) — performance productization
+- [v1.5.0 release notes](v1.5.0.md) cover the next release candidate. The
+  v1.1 through v1.4 planning milestones were unpublished.
+- [Published GitHub releases](https://github.com/rahulbsw/streamforge/releases)
+  list available versions and artifacts.
 
-The authoritative implementation/evidence boundary is
-[`IMPLEMENTATION_STATUS.md`](https://github.com/rahulbsw/streamforge/blob/main/docs/IMPLEMENTATION_STATUS.md).
+The [roadmap](https://github.com/rahulbsw/streamforge/blob/main/ROADMAP.md) defines the release gates.
+[Implementation status](https://github.com/rahulbsw/streamforge/blob/main/docs/IMPLEMENTATION_STATUS.md)
+records verification and open items.

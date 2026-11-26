@@ -68,7 +68,7 @@ shared converter:
 ```bash
 docker build \
   --file operator/Dockerfile \
-  --tag streamforge-operator:1.1.0 \
+  --tag streamforge-operator:1.5.0 \
   .
 ```
 

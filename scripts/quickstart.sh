@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DEFAULT_VERSION="1.1.0"
+readonly DEFAULT_VERSION="1.5.0"
 readonly DEFAULT_BROKER_IMAGE="docker.redpanda.com/redpandadata/redpanda:v25.1.2"
 
 usage() {
@@ -15,7 +15,7 @@ Commands:
 
 Environment:
   STREAMFORGE_CONTAINER_RUNTIME  Container CLI path or name (docker/podman).
-  STREAMFORGE_VERSION            Versioned image tag (default: 1.1.0).
+  STREAMFORGE_VERSION            Versioned image tag (default: 1.5.0).
   STREAMFORGE_IMAGE              Complete engine image override.
   STREAMFORGE_BROKER_IMAGE       Complete Redpanda image override.
   STREAMFORGE_QUICKSTART_PREFIX  Resource name prefix.

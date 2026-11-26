@@ -237,9 +237,9 @@ All current features are in active use. Future deprecations will follow a 3-rele
 - No: Type annotations, generics
 - Why: JSON path-based, runtime typing
 
-### ❌ Custom Functions
-- No: User-defined functions (UDF)
-- Why: Planned for v1.1+ via WASM plugins
+### Custom Functions
+- The v1.5.0 candidate includes bounded WebAssembly user-defined functions.
+  See [WebAssembly UDFs](WASM_UDFS.md) for supported capabilities.
 
 ---
 

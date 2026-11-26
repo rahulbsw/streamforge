@@ -6,8 +6,9 @@ parent: Deployment
 
 # Run StreamForge on Kubernetes
 
-StreamForge 1.1.0 ships a versioned OCI Helm chart, operator image, engine
-image, and optional UI image. Pin one exact version across all components.
+The v1.5.0 candidate packages an OCI Helm chart, operator image, engine image,
+and optional UI image. Pin one exact version across all components. The
+registry commands require [published artifacts](releases/v1.5.0.md).
 
 ## Prerequisites
 
@@ -23,7 +24,7 @@ does not install them.
 ## Install the published chart
 
 ```bash
-export STREAMFORGE_VERSION=1.1.0
+export STREAMFORGE_VERSION=1.5.0
 
 helm upgrade --install streamforge \
   oci://ghcr.io/rahulbsw/charts/streamforge-operator \
@@ -267,13 +268,13 @@ Render and diff the next exact chart version before upgrading:
 ```bash
 helm template streamforge \
   oci://ghcr.io/rahulbsw/charts/streamforge-operator \
-  --version 1.1.0 \
+  --version 1.5.0 \
   --namespace streamforge-system > rendered-streamforge-next.yaml
 
 kubectl diff --server-side -f rendered-streamforge-next.yaml
 helm upgrade streamforge \
   oci://ghcr.io/rahulbsw/charts/streamforge-operator \
-  --version 1.1.0 \
+  --version 1.5.0 \
   --namespace streamforge-system \
   --wait
 ```

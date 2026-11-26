@@ -1,25 +1,21 @@
 # Implementation Status
 
-Verified source status as of 2026-07-26. This document records current
-capabilities and remaining release evidence. It does not convert source
-implementation, unit tests, or historical measurements into a release claim.
+This document records verified source capabilities and the remaining evidence
+for [v1.5.0](releases/v1.5.0.md). Dates and versions in verification entries
+identify what was tested.
 
 ## Focus tracks
 
 | Track | Implemented in source | Outstanding release evidence |
 | --- | --- | --- |
-| `v1.1` deployment | Release packaging, synchronized exact-version images/chart, secure Helm defaults, Docker/Podman quickstart, corrected Kafka example, Podman-Minikube smoke harness | Published artifacts, clean-host quickstarts, multi-architecture smoke |
-| `v1.2` observability | Readiness, stable metric/log fields, catalog, monitoring assets, probes | `promtool`, live Kafka recovery, Prometheus/dashboard/alert signal path |
-| `v1.3` Kubernetes UI | Guided multi-destination flow, safe validation/dry-run, operations APIs/views, authorization, idempotent operator status, `Ready`, resource ownership | Playwright, authoritative UI integration |
-| `v1.4` performance | Workload/policy catalog, normalized baseline record, fail-closed release evaluator | Profile-capable runner, p99 capture, dedicated workload/mode matrix, capacity guidance |
+| Deployment | Release packaging, synchronized exact-version images/chart, secure Helm defaults, Docker/Podman quickstart, corrected Kafka example, Podman-Minikube smoke harness | Published artifacts, clean-host quickstarts, multi-architecture smoke |
+| Observability | Readiness, stable metric/log fields, catalog, monitoring assets, probes | `promtool`, live Kafka recovery, Prometheus/dashboard/alert signal path |
+| Kubernetes UI | Guided multi-destination flow, safe validation/dry-run, operations APIs/views, authorization, idempotent operator status, `Ready`, resource ownership | Playwright, authoritative UI integration |
+| Performance | Workload/policy catalog, normalized baseline record, fail-closed release evaluator | Profile-capable runner, p99 capture, dedicated workload/mode matrix, capacity guidance |
 
-The releases are sequential and remain untagged while their live gates are
-outstanding.
-
-GitHub milestones `v1.1` through `v1.4` and the seven roadmap labels were read
-back from the repository on 2026-07-26. Local issue and pull-request templates
-require outcome, evidence, dependencies, acceptance tests, documentation,
-cleanup, security impact, and rollback behavior.
+The unpublished `v1.1` through `v1.4` planning tracks feed the `v1.5.0`
+candidate. See the [roadmap](../ROADMAP.md) for release sequencing and
+outstanding evidence by track.
 
 ## Installation and release pipeline
 
@@ -36,7 +32,8 @@ Implemented:
 - `scripts/quickstart.sh up|verify|down` with Docker/Podman selection, topic
   creation, real record verification, and cleanup limited to networks whose
   current ID and per-run ownership label match the stored ownership record;
-- release preflight that validates component versions and container builds;
+- pull request release preflight for synchronized versions, binary archives,
+  containers, and a local chart package;
 - side-effect-free `streamforge --help` and `--version`;
 - a bounded Docker build context that excludes nested build/dependency state.
 
@@ -206,7 +203,7 @@ Implemented:
 - operator ConfigMap/PVC read-only artifact delivery and rollout digests;
 - Rust guest SDK/examples, checked-in fixtures, correctness/security/
   concurrency tests, and Criterion coverage;
-- patched Wasmtime `36.0.20`.
+- patched Wasmtime `36.0.21`.
 
 Known boundaries:
 
@@ -248,6 +245,11 @@ capacity guidance.
 
 ## Current verification
 
+The v1.5.0 prep branch passed local version alignment, Helm packaging and
+rendering, and mocked Docker and Podman quickstart lifecycle checks. Its
+release workflow was checked with `actionlint`. The live record, archive,
+and kind rollout checks run in the release preflight.
+
 On 2026-11-25, `cargo audit --json` reported zero vulnerabilities and six
 warnings after updating libz-sys to 1.1.33, url to 2.5.9, and Wasmtime to
 36.0.21. The RustSec database was at `b9b8a3c`. These updates address
@@ -287,6 +289,6 @@ Pending verification:
   the SDK's `arm64e.x1` architecture metadata;
 - live Kafka failure/recovery, Prometheus, UI, and browser release gates;
 - published multi-architecture artifacts;
-- dedicated v1.4 workload matrix, p99 evidence, and capacity guidance.
+- dedicated workload matrix, p99 evidence, and capacity guidance.
 
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-25

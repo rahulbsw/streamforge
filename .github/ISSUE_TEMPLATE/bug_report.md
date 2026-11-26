@@ -37,7 +37,7 @@ the current state. Redact credentials, payloads, and personal data.
 
 ## Environment
 
-- **StreamForge Version**: [e.g., 1.1.0]
+- **StreamForge Version**: [e.g., 1.5.0]
 - **OS**: [e.g., Ubuntu 22.04]
 - **Rust Version**: [e.g., 1.75.0]
 - **Kafka Version**: [e.g., 3.6.0]

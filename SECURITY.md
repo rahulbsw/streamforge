@@ -150,11 +150,11 @@ Our official Docker images:
 - Don't include unnecessary tools
 - Are regularly scanned for vulnerabilities
 
-Pull and inspect the exact release image:
+After the release image is published, pull and inspect its exact version:
 
 ```bash
-docker pull ghcr.io/rahulbsw/streamforge:1.1.0
-docker inspect ghcr.io/rahulbsw/streamforge:1.1.0
+docker pull ghcr.io/rahulbsw/streamforge:1.5.0
+docker inspect ghcr.io/rahulbsw/streamforge:1.5.0
 ```
 
 ## Security Contacts

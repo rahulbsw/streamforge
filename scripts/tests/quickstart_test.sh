@@ -184,7 +184,7 @@ for runtime in docker podman; do
   [[ -f "${quickstart_state}/streamforge.yaml" ]] ||
     fail "${runtime}: generated config is missing"
   assert_contains "${quickstart_state}/streamforge.yaml" "bootstrap: redpanda:9092"
-  assert_contains "${runtime_log}" "ghcr.io/rahulbsw/streamforge:1.1.0"
+  assert_contains "${runtime_log}" "ghcr.io/rahulbsw/streamforge:1.5.0"
   assert_contains "${runtime_log}" "rpk topic create quickstart-input quickstart-output"
   if [[ "${runtime}" == "podman" ]]; then
     assert_contains "${runtime_log}" ":ro\\,Z"

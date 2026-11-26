@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: streamforge:1.1.0
+    image: streamforge:1.5.0
     container_name: streamforge
     environment:
       - CONFIG_FILE=/app/config/config.json
@@ -43,7 +43,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.static
-    image: streamforge:1.1.0-static
+    image: streamforge:1.5.0-static
     container_name: streamforge-static
     environment:
       - CONFIG_FILE=/app/config/config.json
