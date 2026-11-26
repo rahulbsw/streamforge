@@ -371,6 +371,7 @@ export default function NewPipeline() {
                       </label>}
                     </div>
                     <label className="mt-4 block"><span className="sf-label">Sink properties (JSON object)</span><textarea className="sf-input min-h-28 font-mono" value={destination.sinkProperties} onChange={(e) => updateDestination(destination.id, (item) => ({ ...item, sinkProperties: e.target.value }))} placeholder={destination.sinkType === 'iceberg' ? '{\n  "iceberg": { "catalog": { "type": "rest", "uri": "https://catalog.example" } },\n  "flush": { "max_buffered_events": 1000, "interval_ms": 5000 }\n}' : destination.sinkType === 'fluss' ? '{\n  "fluss": { "bootstrap_servers": "fluss:9092", "database": "analytics" }\n}' : '{\n  "producer_properties": { "compression.type": "zstd" }\n}'} /></label>
+                    <p className="mt-2 text-xs text-slate-500">Use mounted file paths for credentials. Do not put passwords, tokens, or keys in this JSON.</p>
                     {destination.sinkType === 'kafka' && <SecurityFields value={destination.security} onChange={(security) => updateDestination(destination.id, (item) => ({ ...item, security }))} />}
                   </article>
                 ))}

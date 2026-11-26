@@ -1,8 +1,8 @@
 # Architecture
 
-StreamForge is a Rust-native Kafka data-plane service for selective replication:
-consume records, evaluate routing rules, optionally transform message envelopes,
-and produce to one or more destinations.
+StreamForge is a Rust-native Kafka-ingestion data-plane service for selective
+replication: consume records, evaluate routing rules, optionally transform
+message envelopes, and write to Kafka, Apache Fluss, or Apache Iceberg.
 
 This document describes the current architecture. Product boundaries and future
 typed-envelope work are governed by `PROJECT_SPEC.md`.
@@ -21,8 +21,8 @@ selectable legacy batching or bounded source-partition worker lanes
     v
 MessageEnvelope (JSON value, optional key, headers, timestamp, source metadata)
     |
-    +--> destination filter --> optional transform --> KafkaSink --> Target Kafka
-    +--> destination filter --> optional transform --> KafkaSink --> Target Kafka
+    +--> destination filter --> optional transform --> SinkWriter --> Kafka / Fluss / Iceberg
+    +--> destination filter --> optional transform --> SinkWriter --> Kafka / Fluss / Iceberg
     |
     +--> metrics, retry, DLQ, and offset-commit handling
 ```
@@ -184,7 +184,7 @@ Each destination can have:
 - an optional value transform;
 - key, header, and timestamp transforms;
 - optional cache or aggregation behavior;
-- an independent Kafka sink.
+- an independent configured sink implementation.
 
 An absent value transform remains `None`; no identity transform or transform
 metric is executed. Multi-destination routing shares the incoming value until a
@@ -192,9 +192,11 @@ destination requires mutation.
 
 ### Producer and partitioning
 
-`src/kafka/sink.rs` wraps a rust-rdkafka `FutureProducer`, resolves output topic
-templates, applies producer/security settings, serializes envelopes, and sends
-records.
+`src/sink_factory.rs` resolves the configured `sink.type` and creates a
+`SinkWriter`. Kafka is the default and is backed by `src/kafka/sink.rs`, which
+wraps a rust-rdkafka `FutureProducer`, resolves output topic templates, applies
+producer/security settings, serializes envelopes, and sends records. Fluss and
+Iceberg use native Rust client adapters in separate modules.
 
 Producer delivery is selectable:
 
@@ -223,8 +225,10 @@ An explicit JSON `null` key is still a present key and follows keyed hashing.
 ### Reliability
 
 The runtime supports manual and automatic commit modes, retry policies, and a
-dead-letter queue. Commit and failure semantics are defined in
-`docs/DELIVERY_GUARANTEES.md`.
+dead-letter queue. In manual mode it awaits successful processing and calls
+`MessageProcessor::flush()` before advancing source offsets. Buffered sinks use
+that call as a durability/commit barrier. Commit and failure semantics are
+defined in `docs/DELIVERY_GUARANTEES.md`.
 
 Exactly-once Kafka transactions are not implemented.
 
@@ -266,11 +270,12 @@ Kafka service-level result.
 
 The operator remains the only pipeline-control component. It watches
 `StreamforgePipeline` v1alpha1 resources and reconciles ConfigMaps, Deployments,
-Secret mounts, and status. Multi-destination CRDs project into the engine's
-shared-target-broker routing configuration. The canonical converter emits
-separate source and target security blocks containing only mounted credential
-file paths. Inline pipeline credentials and divergent per-destination target
-security are rejected before workload creation.
+Secret mounts, and status. Kafka destinations share the target broker and
+security settings. The canonical converter emits separate source and Kafka
+target security blocks containing only mounted credential file paths. It
+rejects common inline credential fields in sink properties; custom sinks must
+use mounted file paths for credentials. Inline Kafka credentials and divergent
+Kafka target security are rejected before workload creation.
 
 Generated ConfigMaps and Deployments carry controller owner references to the
 pipeline. The controller also watches owned Deployment changes so workload
@@ -370,6 +375,7 @@ src/
 ├── envelope.rs                 current JSON message envelope
 ├── partition_pipeline.rs       bounded source-partition worker lanes
 ├── processor.rs                destination runtime and routing
+├── sink_factory.rs             sink registry and destination writer construction
 ├── filter_parser.rs            DSL construction and compiled evaluator
 ├── dsl/                        function-style parser and AST
 ├── filter/                     filters and transforms
@@ -416,4 +422,4 @@ and are not inferred from unit or microbenchmark success.
 - `docs/PERFORMANCE.md` — tuning and benchmark method
 - `docs/DELIVERY_GUARANTEES.md` — commit and failure semantics
 
-**Last updated:** 2026-07-26
+**Last updated:** 2026-11-25

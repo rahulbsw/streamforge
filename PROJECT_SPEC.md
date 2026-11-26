@@ -127,7 +127,8 @@ Locked constraints:
 - UDF failures follow explicit per-destination policy;
 - the native DSL remains supported;
 - no second UDF runtime or broad plugin ecosystem is introduced without a new
-  product decision;
+  product decision; the destination sink factory remains limited to output
+  writers and does not expose processor hooks or ambient host capabilities;
 - no model inference runs in the Kafka data path, including through a UDF.
 
 The ABI and operating contract are defined in `docs/WASM_UDFS.md`.
@@ -142,7 +143,8 @@ Security rules:
 
 - source and target Kafka clients may use distinct TLS/SASL identities;
 - Kubernetes custom resources and ConfigMaps contain Secret references or
-  mounted file paths, never credential values;
+  mounted file paths, never credential values; the pipeline projection rejects
+  common inline credential fields and requires mounted file paths;
 - inline credentials in pipeline CRDs are rejected;
 - logs and diagnostics exclude payloads, headers, keys, credentials, and DSL
   expression contents by default;
@@ -241,4 +243,4 @@ performance gates must be reported as pending when their required environments
 or published artifacts have not been exercised. Source implementation alone is
 not evidence that a release is complete.
 
-**Last updated:** 2026-07-26
+**Last updated:** 2026-11-25

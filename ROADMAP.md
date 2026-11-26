@@ -29,8 +29,9 @@ See [`docs/WASM_UDFS.md`](docs/WASM_UDFS.md).
 Proposal: [#59](https://github.com/rahulbsw/streamforge/issues/59). Deliver
 this scope as three stacked pull requests:
 
-1. Add the custom sink factory and namespaced sink configuration while keeping
-   Kafka as the default.
+1. [PR #60](https://github.com/rahulbsw/streamforge/pull/60) adds the custom
+   sink factory and namespaced sink configuration while keeping Kafka as the
+   default.
 2. Add the native Rust Apache Fluss sink with append and primary-key upsert.
 3. Add the native Rust Apache Iceberg sink with append commits and bounded
    buffering by event count and time.
@@ -202,8 +203,9 @@ Compatibility notes:
 
 - `StreamforgePipeline` remains `streamforge.io/v1alpha1`;
 - retry, DLQ, and UDF fields are additive;
-- destinations in one pipeline currently share one target broker set;
-- destinations in one pipeline also share one target security configuration;
+- Kafka destinations in one pipeline currently share one target broker set;
+- Kafka destinations in one pipeline also share one target security
+  configuration;
 - the unsupported per-destination compression field was removed from the CRD
   and UI; direct engine configuration retains the supported global policy;
 - the UI remains Kubernetes/operator-backed; no standalone control daemon.

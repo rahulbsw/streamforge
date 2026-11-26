@@ -308,6 +308,10 @@ pub fn engine_config_value_from_pipeline_value(
                 "must not be empty",
             ));
         }
+        validate_sink_secrets(
+            &Value::Object(destination.sink.properties.clone().into_iter().collect()),
+            &format!("spec.destinations[{index}].sink"),
+        )?;
         if destination.sink.kind.eq_ignore_ascii_case("kafka")
             && destination.brokers.as_deref().unwrap_or_default().trim()
                 != target_broker.unwrap_or_default()
@@ -668,6 +672,47 @@ fn render_security(
         rendered.insert("sasl".to_string(), Value::Object(value));
     }
     Ok(Value::Object(rendered))
+}
+
+fn validate_sink_secrets(value: &Value, field: &str) -> Result<(), PipelineConversionError> {
+    match value {
+        Value::Object(properties) => {
+            for (key, property) in properties {
+                let normalized = key
+                    .chars()
+                    .filter(|character| character.is_ascii_alphanumeric())
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>();
+                let sensitive = [
+                    "password",
+                    "token",
+                    "credential",
+                    "secret",
+                    "privatekey",
+                    "accesskey",
+                ]
+                .iter()
+                .any(|marker| normalized.contains(marker));
+                let file_reference = ["file", "path", "location"]
+                    .iter()
+                    .any(|suffix| normalized.ends_with(suffix));
+                if sensitive && !file_reference && !property.is_null() {
+                    return Err(invalid(
+                        format!("{field}.{key}"),
+                        "inline sink credentials are not allowed; supply a mounted file path",
+                    ));
+                }
+                validate_sink_secrets(property, &format!("{field}.{key}"))?;
+            }
+        }
+        Value::Array(properties) => {
+            for (index, property) in properties.iter().enumerate() {
+                validate_sink_secrets(property, &format!("{field}[{index}]"))?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn insert_optional_file(
@@ -1182,5 +1227,4 @@ mod tests {
         let error = engine_config_value_from_pipeline_value(pipeline).unwrap_err();
         assert_eq!(error.field, "spec.destinations[1].security");
     }
-
 }
