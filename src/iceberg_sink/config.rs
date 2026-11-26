@@ -225,8 +225,8 @@ fn url_contains_inline_credentials(value: &str) -> bool {
 }
 
 fn parse_table_ident(output: &str) -> Result<TableIdent> {
-    let parts: Vec<_> = output.split('.').filter(|part| !part.is_empty()).collect();
-    if parts.len() < 2 {
+    let parts: Vec<_> = output.split('.').collect();
+    if parts.len() < 2 || parts.iter().any(|part| part.trim().is_empty()) {
         return Err(MirrorMakerError::Config(
             "Iceberg output must be a fully qualified namespace.table identifier".into(),
         ));

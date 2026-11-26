@@ -2,8 +2,7 @@
 
 StreamForge is a Rust-native Kafka-ingestion data-plane service for selective
 replication: consume records, evaluate routing rules, optionally transform
-message envelopes, and write to Kafka or Apache Fluss. Apache Iceberg is the
-next planned sink adapter.
+message envelopes, and write to Kafka, Apache Fluss, or Apache Iceberg.
 
 This document describes the current architecture. Product boundaries and future
 typed-envelope work are governed by `PROJECT_SPEC.md`.
@@ -22,7 +21,7 @@ selectable legacy batching or bounded source-partition worker lanes
     v
 MessageEnvelope (JSON value, optional key, headers, timestamp, source metadata)
     |
-    +--> destination filter --> optional transform --> SinkWriter --> Kafka / Apache Fluss
+    +--> destination filter --> optional transform --> SinkWriter --> Kafka / Fluss / Iceberg
     |
     +--> metrics, retry, DLQ, and offset-commit handling
 ```
@@ -388,6 +387,7 @@ src/
 ├── processor.rs                destination runtime and routing
 ├── sink_factory.rs             sink registry and destination writer construction
 ├── fluss.rs                    native Fluss append/upsert adapter
+├── iceberg_sink.rs             native Iceberg append adapter
 ├── filter_parser.rs            DSL construction and compiled evaluator
 ├── dsl/                        function-style parser and AST
 ├── filter/                     filters and transforms
