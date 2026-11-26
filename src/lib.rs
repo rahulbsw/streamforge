@@ -13,6 +13,7 @@ pub mod filter;
 pub mod filter_parser;
 pub mod fluss;
 pub mod hash;
+pub mod iceberg_sink;
 pub mod jsonpath;
 pub mod kafka;
 pub mod kubernetes;

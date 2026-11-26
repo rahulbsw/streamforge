@@ -2,8 +2,7 @@
 
 StreamForge is a Rust-native Kafka-ingestion data-plane service for selective
 replication: consume records, evaluate routing rules, optionally transform
-message envelopes, and write to Kafka or Apache Fluss. Apache Iceberg is the
-next planned sink adapter.
+message envelopes, and write to Kafka, Apache Fluss, or Apache Iceberg.
 
 This document describes the current architecture. Product boundaries and future
 typed-envelope work are governed by `PROJECT_SPEC.md`.
@@ -22,7 +21,7 @@ selectable legacy batching or bounded source-partition worker lanes
     v
 MessageEnvelope (JSON value, optional key, headers, timestamp, source metadata)
     |
-    +--> destination filter --> optional transform --> SinkWriter --> Kafka / Apache Fluss
+    +--> destination filter --> optional transform --> SinkWriter --> Kafka / Fluss / Iceberg
     |
     +--> metrics, retry, DLQ, and offset-commit handling
 ```
@@ -199,6 +198,15 @@ wraps a rust-rdkafka `FutureProducer`, resolves output topic templates, applies
 producer/security settings, serializes envelopes, and sends records. The
 `src/fluss.rs` adapter resolves a pre-provisioned Fluss table and maps JSON rows
 to its schema; it selects append or upsert from primary-key metadata.
+
+The Iceberg factory loads an existing REST catalog table and appends JSON
+object values as Parquet data files. It buffers records per destination writer
+by event count or elapsed time, applies Iceberg partition transforms for
+top-level primitive source fields, and commits one snapshot per batch. Each
+send acknowledgment and the explicit `flush()` barrier wait for snapshot
+commit. This keeps manual source-offset advancement behind durable destination
+commits. The adapter does not create tables or perform row-level updates or
+deletes; MoR and CoW are therefore unavailable.
 
 Producer delivery is selectable:
 
@@ -379,6 +387,7 @@ src/
 ├── processor.rs                destination runtime and routing
 ├── sink_factory.rs             sink registry and destination writer construction
 ├── fluss.rs                    native Fluss append/upsert adapter
+├── iceberg_sink.rs             native Iceberg append adapter
 ├── filter_parser.rs            DSL construction and compiled evaluator
 ├── dsl/                        function-style parser and AST
 ├── filter/                     filters and transforms

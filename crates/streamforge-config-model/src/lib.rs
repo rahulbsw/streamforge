@@ -690,13 +690,19 @@ fn validate_sink_secrets(value: &Value, field: &str) -> Result<(), PipelineConve
                     "secret",
                     "privatekey",
                     "accesskey",
+                    "apikey",
+                    "authorization",
+                    "signature",
                 ]
                 .iter()
                 .any(|marker| normalized.contains(marker));
                 let file_reference = ["file", "path", "location"]
                     .iter()
                     .any(|suffix| normalized.ends_with(suffix));
-                if sensitive && !file_reference && !property.is_null() {
+                let inline_url_credentials = property
+                    .as_str()
+                    .is_some_and(url_contains_inline_credentials);
+                if (sensitive && !file_reference || inline_url_credentials) && !property.is_null() {
                     return Err(invalid(
                         format!("{field}.{key}"),
                         "inline sink credentials are not allowed; supply a mounted file path",
@@ -713,6 +719,46 @@ fn validate_sink_secrets(value: &Value, field: &str) -> Result<(), PipelineConve
         _ => {}
     }
     Ok(())
+}
+
+fn url_contains_inline_credentials(value: &str) -> bool {
+    let Some((scheme, remainder)) = value.split_once("://") else {
+        return false;
+    };
+    if scheme.is_empty() {
+        return false;
+    }
+    let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.contains('@') {
+        return true;
+    }
+    let query = remainder
+        .split_once('?')
+        .map(|(_, query)| query.split('#').next().unwrap_or_default())
+        .unwrap_or_default();
+    query.split('&').any(|parameter| {
+        let key = parameter
+            .split_once('=')
+            .map(|(key, _)| key)
+            .unwrap_or(parameter)
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect::<String>();
+        [
+            "password",
+            "token",
+            "credential",
+            "secret",
+            "accesskey",
+            "privatekey",
+            "apikey",
+            "authorization",
+            "signature",
+        ]
+        .iter()
+        .any(|marker| key.contains(marker))
+    })
 }
 
 fn insert_optional_file(

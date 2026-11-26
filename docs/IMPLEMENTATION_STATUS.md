@@ -35,12 +35,20 @@ Implemented in the custom sink core and Fluss adapter:
 
 The Fluss adapter compiles on macOS arm64 with Rust 1.95 and the Xcode 26.0
 SDK. A Fluss cluster was not available for runtime acknowledgement, partition,
-or SASL checks. The locked `ordered-float` dependency requires Rust 1.90, so
-the adapter does not compile with the local Rust 1.89 toolchain. The initial
-contract requires pre-provisioned tables and partitions; unsupported JSON
-mappings fail with a column-specific error. Apache Iceberg remains PR3 work.
-The proposal limits Iceberg to append commits until the Rust client supports
-row-level updates and deletes.
+or SASL checks. The initial contract requires pre-provisioned tables and
+partitions; unsupported JSON mappings fail with a column-specific error.
+
+The Iceberg adapter uses the Apache Iceberg Rust client for REST catalog
+loading, Parquet append files, snapshot commits, event-count/time batching, and
+the manual-offset flush barrier. It supports pre-created tables and standard
+partition transforms whose source columns are top-level primitive fields, and
+rejects inline credential properties. Table creation, schema evolution,
+nested partition sources, row-level updates/deletes, and MoR/CoW remain
+unsupported. `cargo +1.95 check --all-targets` passes locally. REST catalog,
+object storage, and Fluss runtime integration evidence remain pending; do not
+treat these features as release verified until those checks pass. The Fluss
+adapter also requires Rust 1.90 or newer, and Iceberg raises the project MSRV
+to 1.95.
 
 ## Installation and release pipeline
 

@@ -54,7 +54,10 @@ select another registered sink with `sink.type`; sink-specific properties are
 passed through in their own namespace. `iceberg` and `flush` are reserved for
 the Iceberg backend, while `fluss` is the Fluss backend configuration block.
 Credentials should be supplied through mounted secret files or the supported
-secret references, never inline in a checked-in pipeline file.
+Kafka security references, never inline in a checked-in pipeline file. The
+pipeline API does not yet provide generic Kubernetes Secret references for
+Iceberg catalog or FileIO properties; those values must come from a supported
+provider or a file already mounted by the deployment.
 
 ```yaml
 routing:
@@ -74,6 +77,11 @@ routing:
           max_buffered_events: 1000
           interval_ms: 5000
 ```
+
+`iceberg.catalog` configures the catalog, `iceberg.table` may override the
+destination's `output`, and `iceberg.properties` passes through native Iceberg
+and FileIO settings. `flush.interval_ms` and `flush.max_buffered_events` bound
+append commits by time and event count.
 
 The sink registry is an extension point. A sink implementation validates its
 own property block and rejects unsupported options. Kafka keeps its existing
