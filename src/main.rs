@@ -64,6 +64,10 @@ async fn main() -> Result<()> {
         MirrorMakerError::Config(format!("Failed to initialize logging: {error}"))
     })?;
 
+    streamforge::sink_factory::register_sink_factory(Arc::new(
+        streamforge::fluss::FlussSinkFactory,
+    ))?;
+
     info!(version = env!("CARGO_PKG_VERSION"), "starting StreamForge");
 
     // Load configuration (from file or environment)

@@ -30,6 +30,7 @@ ignored = ["md-5"]
 [dependencies]
 # Kafka client
 rdkafka = { version = "0.36", features = ["cmake-build", "ssl", "gssapi", "zstd"] }
+fluss-rs = "1.0.0"
 
 # Async runtime
 tokio = { version = "1.41", features = ["full"] }
