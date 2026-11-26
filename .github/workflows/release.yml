@@ -333,6 +333,7 @@ jobs:
         shell: bash
         env:
           STREAMFORGE_IMAGE: streamforge-engine:preflight
+          STREAMFORGE_BROKER_IMAGE: docker.redpanda.com/redpandadata/redpanda:v25.1.2
           STREAMFORGE_QUICKSTART_VERIFY_ATTEMPTS: 30
         run: |
           set -euo pipefail
@@ -340,7 +341,7 @@ jobs:
             if [[ "$runtime" == podman ]]; then
               sudo apt-get update
               sudo apt-get install -y podman
-              docker save "$STREAMFORGE_IMAGE" | podman load
+              docker save "$STREAMFORGE_IMAGE" "$STREAMFORGE_BROKER_IMAGE" | podman load
             fi
             (
               export STREAMFORGE_CONTAINER_RUNTIME="$runtime"
