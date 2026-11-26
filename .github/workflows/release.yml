@@ -269,18 +269,30 @@ jobs:
           retention-days: 3
 
   container-preflight:
-    name: Preflight ${{ matrix.component }} image
+    name: Preflight ${{ matrix.label }} image
     needs: [validate-release, release-smoke-tests, build-release-binaries]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - component: engine
-            dockerfile: Dockerfile.release
+            label: engine amd64
+            os: ubuntu-latest
+            dockerfile: Dockerfile
+            target: release
+          - component: engine
+            label: engine arm64
+            os: ubuntu-24.04-arm
+            dockerfile: Dockerfile
+            target: release
           - component: operator
+            label: operator
+            os: ubuntu-latest
             dockerfile: operator/Dockerfile
           - component: ui
+            label: ui
+            os: ubuntu-latest
             dockerfile: ui/Dockerfile
     steps:
       - uses: actions/checkout@v4
@@ -288,19 +300,19 @@ jobs:
           ref: ${{ env.RELEASE_REF }}
           persist-credentials: false
 
-      - name: Download engine binary
-        if: matrix.component == 'engine'
-        uses: actions/download-artifact@v4
-        with:
-          name: release-linux-amd64
-          path: release-input/amd64
-
       - name: Build image without publishing
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          TARGET: ${{ matrix.target }}
         run: |
-          docker build \
-            --file "${{ matrix.dockerfile }}" \
-            --tag "streamforge-${{ matrix.component }}:preflight" \
-            .
+          set -euo pipefail
+          args=(--file "$DOCKERFILE" --tag "streamforge-$COMPONENT:preflight")
+          if [[ -n "$TARGET" ]]; then
+            args+=(--target "$TARGET")
+          fi
+          docker build "${args[@]}" .
 
       - name: Smoke test image entrypoint
         shell: bash
@@ -441,18 +453,6 @@ jobs:
           ref: ${{ env.RELEASE_REF }}
           persist-credentials: false
 
-      - name: Download amd64 binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: release-linux-amd64
-          path: release-input/amd64
-
-      - name: Download arm64 binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: release-linux-arm64
-          path: release-input/arm64
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -470,7 +470,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.release
+          file: Dockerfile
+          target: release
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ghcr.io/${{ github.repository }}:${{ needs.validate-release.outputs.version }}
