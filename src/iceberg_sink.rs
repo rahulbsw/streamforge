@@ -3,6 +3,9 @@
 //! The first implementation writes append-only batches to existing Iceberg
 //! tables. Row-level updates and deletes are not supported.
 
+mod config;
+use config::parse_config;
+
 use crate::config::{MirrorMakerConfig, SinkConfig};
 use crate::envelope::MessageEnvelope;
 use crate::error::MirrorMakerError;
@@ -30,7 +33,7 @@ use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::partitioning::fanout_writer::FanoutWriter;
 use iceberg::writer::partitioning::unpartitioned_writer::UnpartitionedWriter;
 use iceberg::writer::partitioning::PartitioningWriter;
-use iceberg::{Catalog, CatalogBuilder, TableIdent};
+use iceberg::{Catalog, CatalogBuilder};
 use iceberg_catalog_rest::RestCatalogBuilder;
 use iceberg_storage_opendal::OpenDalResolvingStorageFactory;
 use serde_json::Value;
@@ -40,9 +43,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
-
-const DEFAULT_BATCH_SIZE: usize = 1000;
-const DEFAULT_BATCH_INTERVAL_MS: u64 = 1000;
 
 pub struct IcebergSinkFactory;
 
@@ -59,8 +59,8 @@ impl SinkFactory for IcebergSinkFactory {
         output: &str,
         _partition: Option<&str>,
     ) -> Result<Arc<dyn SinkWriter>> {
-        let (catalog_name, props, batch_size, batch_interval) = parse_config(sink)?;
-        let table_ident = parse_table_ident(output)?;
+        let (catalog_name, props, table_ident, batch_size, batch_interval) =
+            parse_config(sink, output)?;
         let catalog = Arc::new(
             RestCatalogBuilder::default()
                 .with_storage_factory(Arc::new(OpenDalResolvingStorageFactory::new()))
@@ -350,182 +350,6 @@ fn partition_groups(table: &Table, batch: &RecordBatch) -> Result<HashMap<Struct
         groups.entry(data).or_insert_with(Vec::new).push(row as u32);
     }
     Ok(groups)
-}
-
-fn parse_table_ident(output: &str) -> Result<TableIdent> {
-    let parts: Vec<_> = output.split('.').filter(|part| !part.is_empty()).collect();
-    if parts.len() < 2 {
-        return Err(MirrorMakerError::Config(
-            "Iceberg output must be a fully qualified namespace.table identifier".into(),
-        ));
-    }
-    TableIdent::from_strs(parts).map_err(iceberg_error)
-}
-
-fn parse_config(sink: &SinkConfig) -> Result<(String, HashMap<String, String>, usize, u64)> {
-    let iceberg = sink
-        .properties
-        .get("iceberg")
-        .and_then(Value::as_object)
-        .ok_or_else(|| {
-            MirrorMakerError::Config(
-                "sink.iceberg must be an object of Iceberg catalog properties".into(),
-            )
-        })?;
-    reject_inline_secrets(iceberg)?;
-    let mut props = HashMap::new();
-    for (key, value) in iceberg {
-        if key == "catalog" {
-            continue;
-        }
-        let value = match value {
-            Value::String(value) => value.clone(),
-            _ => {
-                return Err(MirrorMakerError::Config(format!(
-                    "Iceberg property '{key}' must be a string"
-                )))
-            }
-        };
-        if url_contains_inline_credentials(&value) {
-            return Err(MirrorMakerError::Config(
-                "inline credentials in Iceberg property URLs are rejected".into(),
-            ));
-        }
-        props.insert(key.clone(), value);
-    }
-    let catalog_name = match iceberg.get("catalog") {
-        Some(Value::String(value)) if !value.is_empty() => value.clone(),
-        Some(_) => {
-            return Err(MirrorMakerError::Config(
-                "sink.iceberg.catalog must be a non-empty string".into(),
-            ))
-        }
-        None => "rest".into(),
-    };
-    if !props.contains_key("uri") && !props.contains_key("rest.uri") {
-        return Err(MirrorMakerError::Config(
-            "sink.iceberg requires the REST catalog 'uri' property".into(),
-        ));
-    }
-    let flush = match sink.properties.get("flush") {
-        Some(Value::Object(flush)) => Some(flush),
-        Some(_) => {
-            return Err(MirrorMakerError::Config(
-                "sink.flush must be an object".into(),
-            ))
-        }
-        None => None,
-    };
-    if let Some(flush) = flush {
-        if let Some(key) = flush
-            .keys()
-            .find(|key| !["max_buffered_events", "max_wait_ms"].contains(&key.as_str()))
-        {
-            return Err(MirrorMakerError::Config(format!(
-                "unknown Iceberg flush option '{key}'"
-            )));
-        }
-    }
-    let batch_size = usize::try_from(parse_positive_flush_value(
-        flush,
-        "max_buffered_events",
-        DEFAULT_BATCH_SIZE as u64,
-    )?)
-    .map_err(|_| {
-        MirrorMakerError::Config("flush.max_buffered_events exceeds this platform's limit".into())
-    })?;
-    let batch_interval =
-        parse_positive_flush_value(flush, "max_wait_ms", DEFAULT_BATCH_INTERVAL_MS)?;
-    if batch_size == 0 || batch_interval == 0 {
-        return Err(MirrorMakerError::Config(
-            "flush.max_buffered_events and flush.max_wait_ms must be greater than zero".into(),
-        ));
-    }
-    Ok((catalog_name, props, batch_size, batch_interval))
-}
-
-fn parse_positive_flush_value(
-    flush: Option<&serde_json::Map<String, Value>>,
-    key: &str,
-    default: u64,
-) -> Result<u64> {
-    match flush.and_then(|flush| flush.get(key)) {
-        None => Ok(default),
-        Some(Value::Number(number)) => {
-            number.as_u64().filter(|value| *value > 0).ok_or_else(|| {
-                MirrorMakerError::Config(format!("flush.{key} must be a positive integer"))
-            })
-        }
-        Some(_) => Err(MirrorMakerError::Config(format!(
-            "flush.{key} must be a positive integer"
-        ))),
-    }
-}
-
-fn reject_inline_secrets(properties: &serde_json::Map<String, Value>) -> Result<()> {
-    const SECRET_MARKERS: &[&str] = &[
-        "password",
-        "secret",
-        "token",
-        "credential",
-        "access-key",
-        "private-key",
-        "api-key",
-        "authorization",
-        "signature",
-    ];
-    if let Some(key) = properties.keys().find(|key| {
-        let key = key.to_ascii_lowercase().replace('_', "-");
-        !["-file", ".file"]
-            .iter()
-            .any(|suffix| key.ends_with(suffix))
-            && SECRET_MARKERS.iter().any(|marker| key.contains(marker))
-    }) {
-        return Err(MirrorMakerError::Config(format!(
-            "inline Iceberg credential property '{key}' is rejected; use a supported mounted credential file or environment-based provider"
-        )));
-    }
-    Ok(())
-}
-
-fn url_contains_inline_credentials(value: &str) -> bool {
-    let Some((scheme, remainder)) = value.split_once("://") else {
-        return false;
-    };
-    if scheme.is_empty() {
-        return false;
-    }
-    let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
-    if authority.contains('@') {
-        return true;
-    }
-    let query = remainder
-        .split_once('?')
-        .map(|(_, query)| query.split('#').next().unwrap_or_default())
-        .unwrap_or_default();
-    query.split('&').any(|parameter| {
-        let key = parameter
-            .split_once('=')
-            .map(|(key, _)| key)
-            .unwrap_or(parameter)
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .collect::<String>();
-        [
-            "password",
-            "token",
-            "credential",
-            "secret",
-            "accesskey",
-            "privatekey",
-            "apikey",
-            "authorization",
-            "signature",
-        ]
-        .iter()
-        .any(|marker| key.contains(marker))
-    })
 }
 
 fn iceberg_error(error: impl std::fmt::Display) -> MirrorMakerError {

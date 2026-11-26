@@ -34,26 +34,29 @@ output: analytics.events
 sink:
   type: iceberg
   iceberg:
-    catalog: rest
-    uri: https://catalog.example/api
-    warehouse: analytics
-    # Other non-secret Iceberg catalog and FileIO properties pass through.
+    catalog:
+      type: rest
+      uri: https://catalog.example/api
+    table: analytics.events
+    properties:
+      warehouse: analytics
+      # Other non-secret Iceberg and FileIO properties pass through.
   flush:
     max_buffered_events: 1000
-    max_wait_ms: 1000
+    interval_ms: 1000
 ```
 
-Iceberg write properties belong under `sink.iceberg` and are passed to the
-native Iceberg REST catalog and FileIO implementation. The `catalog` selector
-defaults to `rest`; `uri` is required. `flush.max_buffered_events` and
-`flush.max_wait_ms` default to 1000 and must be positive. A send is acknowledged
-after its containing snapshot commits. Inline credentials are rejected because
-operator configuration is stored in a ConfigMap; use supported mounted
-credential files or environment based providers. The pipeline API does not
-currently expose generic Kubernetes Secret references for Iceberg properties,
-so any file path must already be mounted by the deployment. Credential
-properties are never logged. MoR and CoW are not exposed while the sink only
-supports appends.
+Iceberg `catalog` options and native client properties are passed through to
+the REST catalog and FileIO implementation. Set `catalog.type` to `rest` and
+provide `catalog.uri`. Native properties belong under `iceberg.properties`.
+`flush.max_buffered_events` and `flush.interval_ms` default to 1000 and must be
+positive. A send is acknowledged after its containing snapshot commits. Inline
+credentials are rejected because operator configuration is stored in a
+ConfigMap; use supported mounted credential files or environment based
+providers. The pipeline API does not currently expose generic Kubernetes
+Secret references for Iceberg properties, so any file path must already be
+mounted by the deployment. Credential properties are never logged. MoR and CoW
+are not exposed while the sink only supports appends.
 
 Partitioned tables use Iceberg's native partition transforms. Partition source
 columns must be top-level primitive fields. The adapter does not create tables,
