@@ -4,7 +4,6 @@ version = "1.1.0"
 edition = "2021"
 authors = ["Rahul Jain <rahul.oracle.db@gmail.com>"]
 description = "High-performance Kafka streaming toolkit with advanced filtering and transformation"
-homepage = "https://github.com/rahulbsw/streamforge"
 repository = "https://github.com/rahulbsw/streamforge"
 license = "Apache-2.0"
 keywords = ["kafka", "streaming", "mirror", "data-pipeline", "etl"]
