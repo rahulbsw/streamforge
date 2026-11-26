@@ -24,7 +24,7 @@ Implemented in the custom sink core and Fluss adapter:
 - a `SinkWriter` factory registry selected by `sink.type`;
 - backward-compatible Kafka selection when sink type is omitted;
 - namespaced sink properties projected through `StreamforgePipeline`, the
-  operator CRD, direct engine configuration, and the UI editor.
+  operator CRD, direct engine configuration, and the UI editor;
 - native Apache Fluss append for log tables and primary-key upsert for KV
   tables, selected from pre-provisioned table metadata;
 - typed passthrough of the Fluss Rust client's settings under `sink.fluss`,
