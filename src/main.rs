@@ -72,6 +72,9 @@ async fn main() -> Result<()> {
 
     // Load configuration (from file or environment)
     let config = load_config()?;
+    streamforge::sink_factory::register_sink_factory(Arc::new(
+        streamforge::iceberg_sink::IcebergSinkFactory,
+    ))?;
     info!(pipeline = %config.appid, "configuration loaded");
 
     let readiness = ReadinessState::new();

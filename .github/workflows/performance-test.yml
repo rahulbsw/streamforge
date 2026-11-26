@@ -51,8 +51,10 @@ jobs:
             libzstd-dev \
             pkg-config
 
-      - name: Install Rust 1.89.0
-        uses: dtolnay/rust-toolchain@1.89.0
+      # Iceberg Rust 0.11 sets MSRV 1.95; benchmark numbers across this
+      # toolchain boundary are not directly comparable to the historical 1.89 runs.
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache Cargo build data
         uses: Swatinem/rust-cache@v2
@@ -131,8 +133,8 @@ jobs:
             libzstd-dev \
             pkg-config
 
-      - name: Install Rust 1.89.0
-        uses: dtolnay/rust-toolchain@1.89.0
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache Cargo build data
         uses: Swatinem/rust-cache@v2

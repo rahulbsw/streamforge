@@ -200,6 +200,15 @@ producer/security settings, serializes envelopes, and sends records. The
 `src/fluss.rs` adapter resolves a pre-provisioned Fluss table and maps JSON rows
 to its schema; it selects append or upsert from primary-key metadata.
 
+The Iceberg factory loads an existing REST catalog table and appends JSON
+object values as Parquet data files. It buffers records per destination writer
+by event count or elapsed time, applies Iceberg partition transforms for
+top-level primitive source fields, and commits one snapshot per batch. Each
+send acknowledgment and the explicit `flush()` barrier wait for snapshot
+commit. This keeps manual source-offset advancement behind durable destination
+commits. The adapter does not create tables or perform row-level updates or
+deletes; MoR and CoW are therefore unavailable.
+
 Producer delivery is selectable:
 
 - `acknowledged` is the compatibility default and waits for every record's
