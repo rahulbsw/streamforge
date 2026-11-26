@@ -482,6 +482,12 @@ async fn main() -> Result<()> {
             let error_count = results.iter().filter(|r| r.is_err()).count();
 
             if error_count == 0 {
+                // Buffered sinks must make their output durable before source
+                // offsets advance. For Kafka this is a no-op after each
+                // acknowledged send; transactional/table sinks use this as
+                // the batch commit barrier.
+                processor.flush().await?;
+
                 // All messages processed successfully - commit with retry
                 const MAX_COMMIT_RETRIES: u32 = 3;
                 let mut retry_count = 0;
