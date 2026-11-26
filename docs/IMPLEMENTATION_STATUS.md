@@ -248,6 +248,12 @@ capacity guidance.
 
 ## Current verification
 
+On 2026-11-25, `cargo audit --json` reported zero vulnerabilities and six
+warnings after updating libz-sys to 1.1.33, url to 2.5.9, and Wasmtime to
+36.0.21. The RustSec database was at `b9b8a3c`. These updates address
+RUSTSEC-2026-0544, RUSTSEC-2026-0592, RUSTSEC-2026-0566, RUSTSEC-2026-0569,
+and RUSTSEC-2026-0571.
+
 Passed on 2026-07-26:
 
 - `cargo fmt --check`;
